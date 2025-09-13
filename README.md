@@ -1,6 +1,6 @@
 # SIH28 - Timetable Optimization Platform
 
-A comprehensive timetable optimization platform with AI-powered scheduling, role-based dashboards, and responsive design built for Smart India Hackathon 2028.
+A comprehensive timetable optimization platform with AI-powered scheduling, role-based dashboards, and responsive design.
 
 ## 🚀 Project Overview
 
