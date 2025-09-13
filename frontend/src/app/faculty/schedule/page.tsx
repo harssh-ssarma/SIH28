@@ -19,10 +19,10 @@ export default function FacultySchedule() {
             <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">View your weekly teaching schedule</p>
           </div>
           <div className="flex gap-2">
-            <button className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+            <button className="btn-primary">
               Export PDF
             </button>
-            <button className="px-4 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg transition-colors">
+            <button className="btn-secondary">
               Print
             </button>
           </div>

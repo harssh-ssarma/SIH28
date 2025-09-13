@@ -243,7 +243,7 @@ export default function StaffDashboard() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <p className="text-xs sm:text-sm font-medium text-green-800 dark:text-green-200">Faculty Request</p>
-                    <p className="text-xs text-green-700 dark:text-green-300">Dr. Smith requests schedule change for next week</p>
+                    <p className="text-xs text-green-700 dark:text-green-300">Dr. Rajesh Kumar requests schedule change for next week</p>
                   </div>
                   <span className="text-xs text-green-600 flex-shrink-0">4h ago</span>
                 </div>
@@ -285,12 +285,12 @@ export default function StaffDashboard() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
             {[
-              { name: 'Dr. Smith', dept: 'CS', load: 95, hours: 19, status: 'overloaded', courses: 4 },
-              { name: 'Prof. Johnson', dept: 'EE', load: 85, hours: 17, status: 'optimal', courses: 3 },
-              { name: 'Dr. Brown', dept: 'ME', load: 60, hours: 12, status: 'underloaded', courses: 2 },
-              { name: 'Prof. Davis', dept: 'CS', load: 80, hours: 16, status: 'optimal', courses: 3 },
-              { name: 'Dr. Wilson', dept: 'EE', load: 100, hours: 20, status: 'overloaded', courses: 5 },
-              { name: 'Prof. Miller', dept: 'ME', load: 75, hours: 15, status: 'optimal', courses: 3 }
+              { name: 'Dr. Rajesh Kumar', dept: 'CS', load: 95, hours: 19, status: 'overloaded', courses: 4 },
+              { name: 'Prof. Meera Sharma', dept: 'EE', load: 85, hours: 17, status: 'optimal', courses: 3 },
+              { name: 'Dr. Vikram Gupta', dept: 'ME', load: 60, hours: 12, status: 'underloaded', courses: 2 },
+              { name: 'Prof. Suresh Reddy', dept: 'CS', load: 80, hours: 16, status: 'optimal', courses: 3 },
+              { name: 'Dr. Anita Verma', dept: 'EE', load: 100, hours: 20, status: 'overloaded', courses: 5 },
+              { name: 'Prof. Kavita Joshi', dept: 'ME', load: 75, hours: 15, status: 'optimal', courses: 3 }
             ].map((faculty, index) => (
               <div key={index} className={`p-3 rounded-lg border-l-4 ${
                 faculty.status === 'overloaded' ? 'bg-red-50 dark:bg-red-900/20 border-red-500' :
@@ -410,28 +410,28 @@ export default function StaffDashboard() {
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-              <button className="p-3 bg-neutral-50 dark:bg-neutral-800 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors text-left">
+              <button className="btn-secondary p-3 text-left">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-sm">👥</span>
                   <span className="text-xs sm:text-sm font-medium">Faculty Load</span>
                 </div>
                 <p className="text-xs text-neutral-600 dark:text-neutral-400">Workload distribution</p>
               </button>
-              <button className="p-3 bg-neutral-50 dark:bg-neutral-800 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors text-left">
+              <button className="btn-secondary p-3 text-left">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-sm">🏫</span>
                   <span className="text-xs sm:text-sm font-medium">Room Usage</span>
                 </div>
                 <p className="text-xs text-neutral-600 dark:text-neutral-400">Utilization stats</p>
               </button>
-              <button className="p-3 bg-neutral-50 dark:bg-neutral-800 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors text-left">
+              <button className="btn-secondary p-3 text-left">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-sm">⏰</span>
                   <span className="text-xs sm:text-sm font-medium">Free Slots</span>
                 </div>
                 <p className="text-xs text-neutral-600 dark:text-neutral-400">Available periods</p>
               </button>
-              <button className="p-3 bg-neutral-50 dark:bg-neutral-800 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors text-left">
+              <button className="btn-secondary p-3 text-left">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-sm">⚠️</span>
                   <span className="text-xs sm:text-sm font-medium">Conflicts</span>

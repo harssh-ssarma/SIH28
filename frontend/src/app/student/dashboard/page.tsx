@@ -12,7 +12,7 @@ export default function StudentDashboard() {
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
               <div className="flex-1">
                 <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold text-neutral-900 dark:text-neutral-100">
-                  Welcome back, Alex Johnson
+                  Welcome back, Arjun Singh
                 </h2>
                 <p className="text-sm sm:text-base text-neutral-600 dark:text-neutral-400 mt-1">
                   Computer Science Engineering • Semester 5 • Roll: CSE21001
@@ -50,7 +50,7 @@ export default function StudentDashboard() {
               { icon: '🔍', label: 'Clash Check', sublabel: 'Courses' },
               { icon: '📤', label: 'Export', sublabel: 'Calendar' }
             ].map((action, index) => (
-              <button key={index} className="flex flex-col items-center justify-center p-3 sm:p-4 bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 rounded-lg transition-colors h-16 sm:h-20">
+              <button key={index} className="btn-secondary flex-col h-16 sm:h-20">
                 <span className="text-lg sm:text-xl mb-1">{action.icon}</span>
                 <span className="text-xs font-medium text-neutral-900 dark:text-neutral-100 text-center leading-tight">{action.label}</span>
                 <span className="text-xs text-neutral-500 dark:text-neutral-400 text-center hidden sm:block">{action.sublabel}</span>
@@ -86,9 +86,9 @@ export default function StudentDashboard() {
               </div>
               <div className="space-y-2 sm:space-y-3">
                 {[
-                  { time: '09:00 - 10:30', subject: 'Data Structures', code: 'CS301', faculty: 'Dr. Smith', room: 'Lab 1', status: 'upcoming', type: 'Lab' },
-                  { time: '11:00 - 12:30', subject: 'Database Systems', code: 'CS302', faculty: 'Prof. Johnson', room: 'Room 205', status: 'current', type: 'Lecture' },
-                  { time: '14:00 - 15:30', subject: 'Software Engineering', code: 'CS303', faculty: 'Dr. Brown', room: 'Room 301', status: 'upcoming', type: 'Tutorial' },
+                  { time: '09:00 - 10:30', subject: 'Data Structures', code: 'CS301', faculty: 'Dr. Rajesh Kumar', room: 'Lab 1', status: 'upcoming', type: 'Lab' },
+                  { time: '11:00 - 12:30', subject: 'Database Systems', code: 'CS302', faculty: 'Prof. Meera Sharma', room: 'Room 205', status: 'current', type: 'Lecture' },
+                  { time: '14:00 - 15:30', subject: 'Software Engineering', code: 'CS303', faculty: 'Dr. Vikram Gupta', room: 'Room 301', status: 'upcoming', type: 'Tutorial' },
                 ].map((class_, index) => (
                   <div key={index} className={`p-3 sm:p-4 rounded-lg border-l-4 ${
                     class_.status === 'current' 
@@ -148,12 +148,12 @@ export default function StudentDashboard() {
                   </thead>
                   <tbody>
                     {[
-                      { name: 'Data Structures', code: 'CS301', credits: 4, faculty: 'Dr. Smith', type: 'Core' },
-                      { name: 'Database Systems', code: 'CS302', credits: 4, faculty: 'Prof. Johnson', type: 'Core' },
-                      { name: 'Software Engineering', code: 'CS303', credits: 4, faculty: 'Dr. Brown', type: 'Core' },
-                      { name: 'Machine Learning', code: 'CS401', credits: 4, faculty: 'Dr. Wilson', type: 'Elective' },
-                      { name: 'Web Development', code: 'CS402', credits: 4, faculty: 'Prof. Davis', type: 'Elective' },
-                      { name: 'Technical Writing', code: 'EN301', credits: 4, faculty: 'Dr. Miller', type: 'General' }
+                      { name: 'Data Structures', code: 'CS301', credits: 4, faculty: 'Dr. Rajesh Kumar', type: 'Core' },
+                      { name: 'Database Systems', code: 'CS302', credits: 4, faculty: 'Prof. Meera Sharma', type: 'Core' },
+                      { name: 'Software Engineering', code: 'CS303', credits: 4, faculty: 'Dr. Vikram Gupta', type: 'Core' },
+                      { name: 'Machine Learning', code: 'CS401', credits: 4, faculty: 'Dr. Anita Verma', type: 'Elective' },
+                      { name: 'Web Development', code: 'CS402', credits: 4, faculty: 'Prof. Suresh Reddy', type: 'Elective' },
+                      { name: 'Technical Writing', code: 'EN301', credits: 4, faculty: 'Dr. Kavita Joshi', type: 'General' }
                     ].map((course, index) => (
                       <tr key={index} className="border-b border-neutral-100 dark:border-neutral-800">
                         <td className="py-2 px-1 sm:px-2 text-neutral-900 dark:text-neutral-100">{course.name}</td>

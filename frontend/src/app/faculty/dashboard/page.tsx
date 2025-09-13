@@ -11,7 +11,7 @@ export default function FacultyDashboard() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <h2 className="text-lg sm:text-xl font-semibold text-neutral-900 dark:text-neutral-100">
-                Welcome back, Dr. Smith
+                Welcome back, Dr. Rajesh Kumar
               </h2>
               <p className="text-sm sm:text-base text-neutral-600 dark:text-neutral-400 mt-1">
                 Computer Science Department • Today's overview

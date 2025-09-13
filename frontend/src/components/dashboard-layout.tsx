@@ -69,7 +69,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
             {sidebarCollapsed ? (
               <button
                 onClick={() => setSidebarCollapsed(false)}
-                className="w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 mx-auto flex items-center justify-center"
+                className="min-w-[2.5rem] w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 mx-auto flex items-center justify-center"
                 title="Open menu"
               >
                 <span className="text-lg">☰</span>
@@ -77,7 +77,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
             ) : (
               <>
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">
+                  <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">
                     S
                   </div>
                   <span className="text-xl font-bold text-neutral-900 dark:text-neutral-100">SIH28</span>
@@ -124,10 +124,14 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
               </div>
               <div className={`flex-1 min-w-0 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>
                 <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
-                  {role.charAt(0).toUpperCase() + role.slice(1)} User
+                  {role === 'admin' ? 'Harsh Sharma' : 
+                   role === 'staff' ? 'Priya Patel' :
+                   role === 'faculty' ? 'Dr. Rajesh Kumar' : 'Arjun Singh'}
                 </p>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
-                  user@example.com
+                  {role === 'admin' ? 'harsh.sharma@sih28.edu' : 
+                   role === 'staff' ? 'priya.patel@sih28.edu' :
+                   role === 'faculty' ? 'rajesh.kumar@sih28.edu' : 'arjun.singh@sih28.edu'}
                 </p>
               </div>
             </div>

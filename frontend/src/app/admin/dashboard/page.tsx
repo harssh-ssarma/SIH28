@@ -218,9 +218,9 @@ export default function AdminDashboard() {
             </div>
             <div className="space-y-2">
               {[
-                { action: 'Timetable Approved', user: 'staff@sih28.com', time: '2 min ago', type: 'success' },
-                { action: 'User Role Changed', user: 'admin@sih28.com', time: '15 min ago', type: 'warning' },
-                { action: 'Course Updated', user: 'faculty@sih28.com', time: '1h ago', type: 'info' },
+                { action: 'Timetable Approved', user: 'priya.patel@sih28.edu', time: '2 min ago', type: 'success' },
+                { action: 'User Role Changed', user: 'harsh.sharma@sih28.edu', time: '15 min ago', type: 'warning' },
+                { action: 'Course Updated', user: 'rajesh.kumar@sih28.edu', time: '1h ago', type: 'info' },
                 { action: 'Login Failed', user: 'unknown', time: '2h ago', type: 'error' }
               ].map((log, index) => (
                 <div key={index} className="flex items-center gap-2 p-2 bg-neutral-50 dark:bg-neutral-800 rounded text-sm">
@@ -304,23 +304,23 @@ export default function AdminDashboard() {
               <span className="text-lg mb-1">👤</span>
               <span>Add User</span>
             </button>
-            <button className="flex flex-col items-center justify-center p-3 h-16 text-xs font-medium text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg transition-colors">
+            <button className="btn-secondary flex flex-col items-center justify-center h-16">
               <span className="text-lg mb-1">🔐</span>
               <span>Roles</span>
             </button>
-            <button className="flex flex-col items-center justify-center p-3 h-16 text-xs font-medium text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg transition-colors">
+            <button className="btn-secondary flex flex-col items-center justify-center h-16">
               <span className="text-lg mb-1">📊</span>
               <span>Audit</span>
             </button>
-            <button className="flex flex-col items-center justify-center p-3 h-16 text-xs font-medium text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg transition-colors">
+            <button className="btn-secondary flex flex-col items-center justify-center h-16">
               <span className="text-lg mb-1">⚙️</span>
               <span>Config</span>
             </button>
-            <button className="flex flex-col items-center justify-center p-3 h-16 text-xs font-medium text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg transition-colors">
+            <button className="btn-secondary flex flex-col items-center justify-center h-16">
               <span className="text-lg mb-1">💾</span>
               <span>Backup</span>
             </button>
-            <button className="flex flex-col items-center justify-center p-3 h-16 text-xs font-medium text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg transition-colors">
+            <button className="btn-secondary flex flex-col items-center justify-center h-16">
               <span className="text-lg mb-1">📈</span>
               <span>Reports</span>
             </button>
