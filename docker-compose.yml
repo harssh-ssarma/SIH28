@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: sih28
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  django:
+    build: ./backend/django
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - DB_HOST=postgres
+      - DB_NAME=sih28
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - FASTAPI_AI_SERVICE_URL=http://fastapi:8001
+    depends_on:
+      - postgres
+    volumes:
+      - ./backend/django:/app
+
+  fastapi:
+    build: ./backend/fastapi
+    ports:
+      - "8001:8001"
+    environment:
+      - DEBUG=True
+    volumes:
+      - ./backend/fastapi:/app
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:

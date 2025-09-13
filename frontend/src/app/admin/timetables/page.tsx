@@ -1,0 +1,212 @@
+import DashboardLayout from '@/components/dashboard-layout'
+
+export default function TimetablesPage() {
+  const timetables = [
+    { id: 1, name: "CS Semester 5 - Fall 2023", department: "Computer Science", semester: 5, status: "Active", lastGenerated: "2023-10-15" },
+    { id: 2, name: "Math Semester 3 - Fall 2023", department: "Mathematics", semester: 3, status: "Draft", lastGenerated: "2023-10-14" },
+    { id: 3, name: "Physics Semester 2 - Fall 2023", department: "Physics", semester: 2, status: "Pending Approval", lastGenerated: "2023-10-13" },
+    { id: 4, name: "CS Semester 3 - Fall 2023", department: "Computer Science", semester: 3, status: "Active", lastGenerated: "2023-10-12" },
+  ]
+
+  return (
+    <DashboardLayout role="admin">
+      <div className="space-y-4 sm:space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-neutral-900 dark:text-neutral-100">Timetable Management</h1>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button className="btn-secondary w-full sm:w-auto">
+              <span className="mr-2">⚡</span>
+              AI Generate
+            </button>
+            <button className="btn-primary w-full sm:w-auto">
+              <span className="mr-2">📅</span>
+              Create Manual
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title text-base sm:text-lg">Quick Generate</h3>
+            </div>
+            <div className="space-y-4">
+              <select className="input-primary w-full">
+                <option>Select Department</option>
+                <option>Computer Science</option>
+                <option>Mathematics</option>
+                <option>Physics</option>
+              </select>
+              <select className="input-primary w-full">
+                <option>Select Semester</option>
+                <option>Semester 1</option>
+                <option>Semester 2</option>
+                <option>Semester 3</option>
+                <option>Semester 4</option>
+                <option>Semester 5</option>
+                <option>Semester 6</option>
+              </select>
+              <button className="btn-primary w-full">
+                <span className="mr-2">⚡</span>
+                Generate with AI
+              </button>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title text-base sm:text-lg">Generation Stats</h3>
+            </div>
+            <div className="space-y-3">
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">Total Timetables</span>
+                <span className="font-medium text-neutral-900 dark:text-neutral-100">24</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">Active</span>
+                <span className="font-medium text-neutral-900 dark:text-neutral-100">18</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">Pending Approval</span>
+                <span className="font-medium text-neutral-900 dark:text-neutral-100">4</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">Drafts</span>
+                <span className="font-medium text-neutral-900 dark:text-neutral-100">2</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title text-base sm:text-lg">AI Performance</h3>
+            </div>
+            <div className="space-y-3">
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">Success Rate</span>
+                <span className="font-medium text-neutral-900 dark:text-neutral-100">94.2%</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">Avg. Generation Time</span>
+                <span className="font-medium text-neutral-900 dark:text-neutral-100">2.3 min</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">Conflicts Resolved</span>
+                <span className="font-medium text-neutral-900 dark:text-neutral-100">156</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">Optimization Score</span>
+                <span className="font-medium text-neutral-900 dark:text-neutral-100">8.7/10</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <h3 className="card-title">All Timetables</h3>
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-4">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral-400">🔍</span>
+                <input 
+                  placeholder="Search timetables..." 
+                  className="input-primary pl-10 w-full" 
+                />
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-2">
+                <select className="input-primary w-full sm:w-36">
+                  <option>All Departments</option>
+                  <option>Computer Science</option>
+                  <option>Mathematics</option>
+                  <option>Physics</option>
+                </select>
+                <select className="input-primary w-full sm:w-28">
+                  <option>All Status</option>
+                  <option>Active</option>
+                  <option>Draft</option>
+                  <option>Pending</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          
+          {/* Mobile Card View */}
+          <div className="block sm:hidden space-y-3">
+            {timetables.map((timetable) => (
+              <div key={timetable.id} className="p-4 bg-neutral-50 dark:bg-neutral-800 rounded-lg">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-medium text-neutral-900 dark:text-neutral-100 text-sm mb-1">{timetable.name}</h4>
+                    <p className="text-xs text-neutral-600 dark:text-neutral-400">
+                      {timetable.department} • Semester {timetable.semester}
+                    </p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                      Generated: {timetable.lastGenerated}
+                    </p>
+                  </div>
+                  <span className={`badge text-xs ml-2 ${
+                    timetable.status === 'Active' ? 'badge-success' :
+                    timetable.status === 'Draft' ? 'badge-warning' : 'badge-neutral'
+                  }`}>
+                    {timetable.status}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <button className="btn-ghost text-xs px-2 py-1 flex-1">📅 View</button>
+                  <button className="btn-ghost text-xs px-2 py-1 flex-1">📥 Export</button>
+                  <button className="btn-ghost text-xs px-2 py-1 flex-1">Edit</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {/* Desktop Table View */}
+          <div className="hidden sm:block overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-neutral-200 dark:border-neutral-700">
+                  <th className="text-left p-3 sm:p-4 text-xs sm:text-sm font-medium text-neutral-500 dark:text-neutral-400">Name</th>
+                  <th className="text-left p-3 sm:p-4 text-xs sm:text-sm font-medium text-neutral-500 dark:text-neutral-400 hidden md:table-cell">Department</th>
+                  <th className="text-left p-3 sm:p-4 text-xs sm:text-sm font-medium text-neutral-500 dark:text-neutral-400 hidden lg:table-cell">Semester</th>
+                  <th className="text-left p-3 sm:p-4 text-xs sm:text-sm font-medium text-neutral-500 dark:text-neutral-400">Status</th>
+                  <th className="text-left p-3 sm:p-4 text-xs sm:text-sm font-medium text-neutral-500 dark:text-neutral-400 hidden xl:table-cell">Last Generated</th>
+                  <th className="text-left p-3 sm:p-4 text-xs sm:text-sm font-medium text-neutral-500 dark:text-neutral-400">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {timetables.map((timetable) => (
+                  <tr key={timetable.id} className="border-b border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800">
+                    <td className="p-3 sm:p-4">
+                      <div className="font-medium text-neutral-900 dark:text-neutral-100 text-sm">{timetable.name}</div>
+                      <div className="text-xs text-neutral-500 dark:text-neutral-400 md:hidden">
+                        {timetable.department} • Sem {timetable.semester}
+                      </div>
+                    </td>
+                    <td className="p-3 sm:p-4 text-neutral-600 dark:text-neutral-400 text-sm hidden md:table-cell">{timetable.department}</td>
+                    <td className="p-3 sm:p-4 text-neutral-600 dark:text-neutral-400 text-sm hidden lg:table-cell">Semester {timetable.semester}</td>
+                    <td className="p-3 sm:p-4">
+                      <span className={`badge text-xs ${
+                        timetable.status === 'Active' ? 'badge-success' :
+                        timetable.status === 'Draft' ? 'badge-warning' : 'badge-neutral'
+                      }`}>
+                        {timetable.status}
+                      </span>
+                    </td>
+                    <td className="p-3 sm:p-4 text-neutral-600 dark:text-neutral-400 text-sm hidden xl:table-cell">{timetable.lastGenerated}</td>
+                    <td className="p-3 sm:p-4">
+                      <div className="flex gap-1">
+                        <button className="btn-ghost text-xs px-2 py-1">📅</button>
+                        <button className="btn-ghost text-xs px-2 py-1">📥</button>
+                        <button className="btn-ghost text-xs px-2 py-1">Edit</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </DashboardLayout>
+  )
+}
