@@ -404,4 +404,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Backend Developer**: Django, FastAPI, PostgreSQL
 - **AI/ML Engineer**: OR-Tools, Optimization Algorithms
 - **UI/UX Designer**: Responsive Design, User Experience
-git 

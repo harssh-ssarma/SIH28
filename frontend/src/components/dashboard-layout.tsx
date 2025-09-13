@@ -69,7 +69,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
             {sidebarCollapsed ? (
               <button
                 onClick={() => setSidebarCollapsed(false)}
-                className="w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 focus:outline-none focus:ring-0 mx-auto flex items-center justify-center"
+                className="w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 mx-auto flex items-center justify-center"
                 title="Open menu"
               >
                 <span className="text-lg">☰</span>
@@ -85,15 +85,15 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
                 <div className="flex gap-2">
                   <button
                     onClick={() => setSidebarCollapsed(true)}
-                    className="hidden lg:block w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 focus:outline-none focus:ring-0 flex items-center justify-center"
+                    className="hidden lg:block w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 flex items-center justify-center"
                   >
-                    <span className="text-lg">←</span>
+                    <span className="text-lg leading-none">←</span>
                   </button>
                   <button
                     onClick={() => setSidebarOpen(false)}
-                    className="lg:hidden w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 focus:outline-none focus:ring-0 flex items-center justify-center"
+                    className="lg:hidden w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 flex items-center justify-center"
                   >
-                    <span className="text-lg">←</span>
+                    <span className="text-lg leading-none">←</span>
                   </button>
                 </div>
               </>
@@ -101,12 +101,12 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-2 overflow-y-auto overflow-x-hidden" style={{overscrollBehavior: 'contain'}}>
+          <nav className="flex-1 p-4 space-y-2 overflow-y-auto overflow-x-hidden scrollbar-hide" style={{overscrollBehavior: 'contain'}}>
             {items.map((item) => (
               <a
                 key={item.name}
                 href={item.href}
-                className={`flex items-center text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-neutral-100 rounded-md transition-colors duration-200 focus:outline-none focus:ring-0 ${sidebarCollapsed ? 'lg:justify-center lg:w-10 lg:h-10 lg:p-0' : 'px-3 py-2'}`}
+                className={`flex items-center text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-neutral-100 rounded-md transition-colors duration-200 ${sidebarCollapsed ? 'lg:justify-center lg:w-10 lg:h-10 lg:p-0' : 'px-3 py-2'}`}
                 title={sidebarCollapsed ? item.name : ''}
                 onClick={() => setSidebarOpen(false)}
               >
@@ -146,7 +146,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
                   setSidebarOpen(true)
                   setSidebarCollapsed(false)
                 }}
-                className={`w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 focus:outline-none focus:ring-0 lg:hidden flex items-center justify-center`}
+                className={`w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 lg:hidden flex items-center justify-center`}
                 title="Open menu"
               >
                 <span className="text-lg">☰</span>
@@ -158,28 +158,28 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
             </div>
             
             <div className="flex items-center gap-2">
-              <button className="w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 focus:outline-none focus:ring-0 flex items-center justify-center">
+              <button className="w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 flex items-center justify-center">
                 🔔
               </button>
-              <button className="w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 focus:outline-none focus:ring-0 flex items-center justify-center">
+              <button className="w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 flex items-center justify-center">
                 🌙
               </button>
               <div className="relative">
                 <button 
                   onClick={() => setShowSettings(!showSettings)}
-                  className="w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 focus:outline-none focus:ring-0 flex items-center justify-center"
+                  className="w-10 h-10 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 active:scale-95 transition-all duration-100 flex items-center justify-center"
                 >
                   ⚙️
                 </button>
                 {showSettings && (
                   <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg z-50">
                     <div className="py-1">
-                      <button className="w-full px-4 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 transition-all duration-100 focus:outline-none focus:ring-0 flex items-center gap-2">
+                      <button className="w-full px-4 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 transition-all duration-100 flex items-center gap-2">
                         👤 My Profile
                       </button>
                       <button 
                         onClick={() => { setShowSignOutDialog(true); setShowSettings(false); }}
-                        className="w-full px-4 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 transition-all duration-100 focus:outline-none focus:ring-0 flex items-center gap-2 text-red-600"
+                        className="w-full px-4 py-2 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 active:bg-neutral-200 dark:active:bg-neutral-600 transition-all duration-100 flex items-center gap-2 text-red-600"
                       >
                         🚪 Sign Out
                       </button>
@@ -192,7 +192,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
         </header>
 
         {/* Content */}
-        <main className="p-4 lg:p-6 bg-neutral-50 dark:bg-neutral-900 rounded-xl h-[calc(100vh-60px)] overflow-y-auto" style={{overscrollBehavior: 'contain'}}>
+        <main className="p-4 lg:p-6 bg-neutral-50 dark:bg-neutral-900 rounded-xl m-2 h-[calc(100vh-76px)] overflow-y-auto scrollbar-hide" style={{overscrollBehavior: 'contain'}}>
           {children}
         </main>
       </div>
@@ -210,13 +210,13 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
             <div className="flex gap-2 justify-end">
               <button 
                 onClick={() => setShowSignOutDialog(false)}
-                className="px-4 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 active:bg-neutral-100 dark:active:bg-neutral-600 active:scale-98 border border-neutral-300 dark:border-neutral-600 rounded-lg transition-all duration-100 focus:outline-none focus:ring-0"
+                className="px-4 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-300 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 active:bg-neutral-100 dark:active:bg-neutral-600 active:scale-98 rounded-lg transition-all duration-100"
               >
                 Cancel
               </button>
               <button 
                 onClick={() => window.location.href = '/login'}
-                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 active:bg-red-800 active:scale-98 rounded-lg transition-all duration-100 focus:outline-none focus:ring-0"
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 active:bg-red-800 active:scale-98 rounded-lg transition-all duration-100"
               >
                 Sign Out
               </button>
