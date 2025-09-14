@@ -1,65 +1,153 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
 import DashboardLayout from '@/components/dashboard-layout'
+import InContentNav from '@/components/ui/InContentNav'
 
-interface Timetable {
-  id: number
-  name: string
+interface TimetableItem {
+  id: string
+  year: number
+  batch: string
   department: string
   semester: string
-  status: 'draft' | 'pending' | 'approved' | 'rejected'
-  created_at: string
+  status: 'approved' | 'pending' | 'draft' | 'rejected'
+  lastUpdated: string
+  conflicts: number
   score?: number
 }
 
-const statusColors = {
-  draft: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
-  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
-  approved: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
-  rejected: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+interface FacultyAvailability {
+  id: string
+  name: string
+  available: boolean
 }
 
-export default function TimetableManagementPage() {
-  const [timetables, setTimetables] = useState<Timetable[]>([])
+export default function AdminTimetablesPage() {
+  const [activeYear, setActiveYear] = useState('all')
+  const [timetables, setTimetables] = useState<TimetableItem[]>([])
+  const [facultyAvailability, setFacultyAvailability] = useState<FacultyAvailability[]>([])
   const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState<string>('all')
 
   useEffect(() => {
-    fetchTimetables()
+    loadTimetables()
+    loadFacultyAvailability()
   }, [])
 
-  const fetchTimetables = async () => {
+  const loadTimetables = async () => {
     try {
       const response = await fetch('http://localhost:8000/api/v1/timetables/')
-      const data = await response.json()
-      setTimetables(data.timetables || [])
+      if (response.ok) {
+        const data = await response.json()
+        const timetableItems: TimetableItem[] = data.map((t: any) => ({
+          id: t.id.toString(),
+          year: parseInt(t.semester) <= 2 ? 1 : parseInt(t.semester) <= 4 ? 2 : parseInt(t.semester) <= 6 ? 3 : 4,
+          batch: t.name.split(' - ')[1] || 'A',
+          department: t.department,
+          semester: t.semester,
+          status: t.status as 'approved' | 'pending' | 'draft' | 'rejected',
+          lastUpdated: new Date(t.updated_at).toLocaleDateString(),
+          conflicts: t.conflicts?.length || 0,
+          score: t.score
+        }))
+        setTimetables(timetableItems)
+      } else {
+        setTimetables([])
+      }
     } catch (error) {
-      console.error('Failed to fetch timetables:', error)
+      console.error('Failed to load timetables from PostgreSQL:', error)
+      setTimetables([])
     } finally {
       setLoading(false)
     }
   }
 
-  const filteredTimetables = timetables.filter(t => 
-    statusFilter === 'all' || t.status === statusFilter
-  )
+  const loadFacultyAvailability = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/auth/faculty/')
+      if (response.ok) {
+        const data = await response.json()
+        const facultyList: FacultyAvailability[] = data.map((f: any) => ({
+          id: f.id.toString(),
+          name: f.name,
+          available: true // Default to available
+        }))
+        setFacultyAvailability(facultyList)
+      } else {
+        setFacultyAvailability([])
+      }
+    } catch (error) {
+      console.error('Failed to load faculty from PostgreSQL:', error)
+      setFacultyAvailability([])
+    }
+  }
 
-  const groupedTimetables = filteredTimetables.reduce((acc, timetable) => {
-    const dept = timetable.department
-    if (!acc[dept]) acc[dept] = {}
-    const key = `Semester ${timetable.semester}`
-    if (!acc[dept][key]) acc[dept][key] = []
-    acc[dept][key].push(timetable)
-    return acc
-  }, {} as Record<string, Record<string, Timetable[]>>)
+  const toggleFacultyAvailability = async (facultyId: string) => {
+    setFacultyAvailability(prev => 
+      prev.map(faculty => 
+        faculty.id === facultyId 
+          ? { ...faculty, available: !faculty.available }
+          : faculty
+      )
+    )
+  }
+
+  const getFilteredTimetables = () => {
+    if (activeYear === 'all') return timetables
+    return timetables.filter(t => t.year === parseInt(activeYear))
+  }
+
+  const getGroupedTimetables = () => {
+    const filtered = getFilteredTimetables()
+    const grouped: { [key: number]: TimetableItem[] } = {}
+    
+    filtered.forEach(timetable => {
+      if (!grouped[timetable.year]) {
+        grouped[timetable.year] = []
+      }
+      grouped[timetable.year].push(timetable)
+    })
+    
+    return grouped
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'approved': return 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20'
+      case 'pending': return 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20'
+      case 'draft': return 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20'
+      case 'rejected': return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20'
+      default: return 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20'
+    }
+  }
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'approved': return '✅'
+      case 'pending': return '⏳'
+      case 'draft': return '📝'
+      case 'rejected': return '❌'
+      default: return '📄'
+    }
+  }
+
+  const navItems = [
+    { id: 'all', label: 'All Years', count: timetables.length },
+    { id: '1', label: '1st Year', count: timetables.filter(t => t.year === 1).length },
+    { id: '2', label: '2nd Year', count: timetables.filter(t => t.year === 2).length },
+    { id: '3', label: '3rd Year', count: timetables.filter(t => t.year === 3).length },
+    { id: '4', label: '4th Year', count: timetables.filter(t => t.year === 4).length },
+  ]
+
+  const groupedTimetables = getGroupedTimetables()
 
   if (loading) {
     return (
       <DashboardLayout role="admin">
-        <div className="flex items-center justify-center h-64">
-          <div className="loading-spinner w-8 h-8"></div>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
+            <p className="text-gray-600 dark:text-gray-400">Loading timetables...</p>
+          </div>
         </div>
       </DashboardLayout>
     )
@@ -70,132 +158,179 @@ export default function TimetableManagementPage() {
       <div className="space-y-4 sm:space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-gray-800 dark:text-gray-200">
-            Timetable Management
-          </h1>
-          <Link 
-            href="/admin/timetables/create"
-            className="btn-primary w-full sm:w-auto text-center"
-          >
-            <span className="mr-2">➕</span>
-            Create New Timetable
-          </Link>
+          <div>
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200">
+              Timetable Management
+            </h1>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Manage all timetables across years and batches
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+            <a href="/admin/timetables/create" className="btn-primary w-full sm:w-auto">
+              <span className="mr-2">🧠</span>
+              Generate New Timetable
+            </a>
+          </div>
         </div>
 
-        {/* Status Filters */}
+        {/* Faculty Availability */}
         <div className="card">
           <div className="card-header">
-            <h3 className="card-title">Filter by Status</h3>
+            <h3 className="card-title">Faculty Availability Management</h3>
+            <p className="card-description">Toggle faculty availability for timetable generation</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { key: 'all', label: 'All' },
-              { key: 'approved', label: 'Approved' },
-              { key: 'pending', label: 'Pending Review' },
-              { key: 'draft', label: 'Draft' },
-              { key: 'rejected', label: 'Rejected' }
-            ].map(filter => (
-              <button
-                key={filter.key}
-                onClick={() => setStatusFilter(filter.key)}
-                className={`px-3 py-2 text-sm rounded-lg border transition-colors ${
-                  statusFilter === filter.key
-                    ? 'nav-link-active'
-                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 dark:bg-[#2d2d30] dark:border-[#3c4043] dark:text-gray-300 dark:hover:bg-[#3c4043]'
-                }`}
-              >
-                {filter.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Timetables List */}
-        {Object.keys(groupedTimetables).length === 0 ? (
-          <div className="card">
-            <div className="text-center py-8 sm:py-12">
-              <p className="text-gray-500 dark:text-gray-400 mb-4">No timetables found</p>
-              <Link 
-                href="/admin/timetables/create"
-                className="btn-primary inline-flex items-center"
-              >
-                <span className="mr-2">➕</span>
-                Create Your First Timetable
-              </Link>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4 sm:space-y-6">
-            {Object.entries(groupedTimetables).map(([department, semesters]) => (
-              <div key={department} className="card">
-                <div className="card-header">
-                  <h3 className="card-title capitalize">{department} Department</h3>
-                </div>
-                <div className="space-y-4">
-                  {Object.entries(semesters).map(([semester, timetableList]) => (
-                    <div key={semester}>
-                      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 px-1">
-                        {semester}
-                      </h4>
-                      <div className="space-y-2">
-                        {timetableList.map(timetable => (
-                          <div 
-                            key={timetable.id}
-                            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 border border-gray-200 dark:border-[#3c4043] rounded-lg hover:bg-gray-50 dark:hover:bg-[#3c4043] transition-colors"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-                                <h5 className="font-medium text-gray-900 dark:text-gray-100 truncate">
-                                  {timetable.name}
-                                </h5>
-                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium capitalize ${statusColors[timetable.status]}`}>
-                                  {timetable.status}
-                                </span>
-                              </div>
-                              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                <span>Created: {new Date(timetable.created_at).toLocaleDateString()}</span>
-                                {timetable.score && (
-                                  <span>Score: {timetable.score.toFixed(1)}</span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                              {timetable.status === 'pending' ? (
-                                <Link
-                                  href={`/admin/timetables/${timetable.id}/review`}
-                                  className="btn-secondary text-center text-sm px-3 py-2"
-                                >
-                                  Review Options
-                                </Link>
-                              ) : timetable.status === 'approved' ? (
-                                <Link
-                                  href={`/admin/timetables/${timetable.id}/view`}
-                                  className="btn-secondary text-center text-sm px-3 py-2"
-                                >
-                                  View Timetable
-                                </Link>
-                              ) : (
-                                <Link
-                                  href={`/admin/timetables/${timetable.id}/edit`}
-                                  className="btn-secondary text-center text-sm px-3 py-2"
-                                >
-                                  Edit
-                                </Link>
-                              )}
-                              <button className="btn-danger text-sm px-3 py-2">
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+            {facultyAvailability.map((faculty) => (
+              <div key={faculty.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate mr-3">
+                  {faculty.name}
+                </span>
+                <button
+                  onClick={() => toggleFacultyAvailability(faculty.id)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    faculty.available ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      faculty.available ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
               </div>
             ))}
           </div>
-        )}
+        </div>
+
+        {/* Navigation Tabs */}
+        <InContentNav 
+          items={navItems}
+          activeItem={activeYear}
+          onItemClick={setActiveYear}
+        />
+
+        {/* Timetables Hierarchical View */}
+        <div className="space-y-4 sm:space-y-6">
+          {Object.keys(groupedTimetables).length === 0 ? (
+            <div className="card">
+              <div className="text-center py-12">
+                <div className="text-4xl sm:text-6xl mb-4">📅</div>
+                <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-2">
+                  No Timetables Found
+                </h3>
+                <p className="text-gray-600 dark:text-gray-400 mb-6">
+                  {activeYear === 'all' 
+                    ? 'No timetables have been created yet.' 
+                    : `No timetables found for ${activeYear === '1' ? '1st' : activeYear === '2' ? '2nd' : activeYear === '3' ? '3rd' : '4th'} year.`
+                  }
+                </p>
+                <a href="/admin/timetables/create" className="btn-primary">
+                  Create First Timetable
+                </a>
+              </div>
+            </div>
+          ) : (
+            Object.entries(groupedTimetables)
+              .sort(([a], [b]) => parseInt(a) - parseInt(b))
+              .map(([year, yearTimetables]) => (
+                <div key={year} className="card">
+                  <div className="card-header">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <h3 className="card-title">
+                        {year === '1' ? '1st' : year === '2' ? '2nd' : year === '3' ? '3rd' : '4th'} Year Timetables
+                      </h3>
+                      <span className="badge badge-info">
+                        {yearTimetables.length} {yearTimetables.length === 1 ? 'batch' : 'batches'}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                    {yearTimetables
+                      .sort((a, b) => a.batch.localeCompare(b.batch))
+                      .map((timetable) => (
+                        <a
+                          key={timetable.id}
+                          href={`/admin/timetables/${timetable.id}/review`}
+                          className="block p-4 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 border border-transparent hover:border-gray-200 dark:hover:border-gray-600"
+                        >
+                          <div className="flex items-start justify-between mb-3">
+                            <div>
+                              <h4 className="font-medium text-gray-800 dark:text-gray-200">
+                                {timetable.department} - Section {timetable.batch}
+                              </h4>
+                              <p className="text-sm text-gray-600 dark:text-gray-400">
+                                Semester {timetable.semester}
+                              </p>
+                            </div>
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(timetable.status)}`}>
+                              {getStatusIcon(timetable.status)} {timetable.status.charAt(0).toUpperCase() + timetable.status.slice(1)}
+                            </span>
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-gray-600 dark:text-gray-400">Last Updated:</span>
+                              <span className="text-gray-800 dark:text-gray-200">{timetable.lastUpdated}</span>
+                            </div>
+                            
+                            {timetable.score && (
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-gray-600 dark:text-gray-400">Score:</span>
+                                <span className="font-medium text-green-600 dark:text-green-400">{timetable.score}/10</span>
+                              </div>
+                            )}
+                            
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-gray-600 dark:text-gray-400">Conflicts:</span>
+                              <span className={`font-medium ${timetable.conflicts > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                                {timetable.conflicts}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                            <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+                              👁️ View Details →
+                            </span>
+                          </div>
+                        </a>
+                      ))}
+                  </div>
+                </div>
+              ))
+          )}
+        </div>
+
+        {/* Quick Stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          <div className="card text-center">
+            <div className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">
+              {timetables.filter(t => t.status === 'approved').length}
+            </div>
+            <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">Approved</div>
+          </div>
+          <div className="card text-center">
+            <div className="text-2xl sm:text-3xl font-bold text-yellow-600 dark:text-yellow-400">
+              {timetables.filter(t => t.status === 'pending').length}
+            </div>
+            <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">Pending</div>
+          </div>
+          <div className="card text-center">
+            <div className="text-2xl sm:text-3xl font-bold text-gray-600 dark:text-gray-400">
+              {timetables.filter(t => t.status === 'draft').length}
+            </div>
+            <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">Draft</div>
+          </div>
+          <div className="card text-center">
+            <div className="text-2xl sm:text-3xl font-bold text-red-600 dark:text-red-400">
+              {timetables.filter(t => t.status === 'rejected').length}
+            </div>
+            <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">Rejected</div>
+          </div>
+        </div>
       </div>
     </DashboardLayout>
   )

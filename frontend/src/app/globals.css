@@ -161,7 +161,11 @@
   
   /* Loading States */
   .loading-spinner {
-    @apply animate-spin rounded-full border-2 border-gray-200 dark:border-[#3c4043] border-t-blue-600;
+    @apply animate-spin rounded-full border-2 border-gray-200 dark:border-gray-600 border-t-blue-600 dark:border-t-blue-400;
+  }
+  
+  .loading-spinner-dark {
+    @apply animate-spin rounded-full border-2 border-gray-600 border-t-white;
   }
   
   .loading-skeleton {
@@ -220,6 +224,21 @@
   
   .text-responsive-lg {
     @apply text-base sm:text-lg lg:text-xl;
+  }
+  
+  /* Line clamp utilities */
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
   
   /* Mobile-first responsive utilities */

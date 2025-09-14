@@ -39,7 +39,7 @@ export default function TimetableForm() {
   const [formData, setFormData] = useState({
     department: '',
     semester: '',
-    academicYear: '',
+    academicYear: '2024-25',
     maxClassesPerDay: 6
   })
 
@@ -51,31 +51,77 @@ export default function TimetableForm() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
+  // Smart autofill when department and semester change
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        setFormData({ department: 'cs', semester: '1', academicYear: '2023-24', maxClassesPerDay: 6 })
-        
-        const [classroomsRes, batchesRes, subjectsRes, facultyRes] = await Promise.all([
-          fetch('http://localhost:8000/api/v1/classrooms/'),
-          fetch('http://localhost:8000/api/v1/auth/batches/'),
-          fetch('http://localhost:8000/api/v1/courses/'),
-          fetch('http://localhost:8000/api/v1/auth/faculty/')
-        ])
-        
-        if (classroomsRes.ok) setClassrooms(await classroomsRes.json())
-        if (batchesRes.ok) setBatches(await batchesRes.json())
-        if (subjectsRes.ok) setSubjects(await subjectsRes.json())
-        if (facultyRes.ok) setFaculty(await facultyRes.json())
-        
-      } catch (error) {
-        console.error('Failed to load data:', error)
-      } finally {
-        setIsLoading(false)
-      }
+    if (formData.department && formData.semester) {
+      loadFilteredData()
     }
-    loadData()
+  }, [formData.department, formData.semester])
+
+  useEffect(() => {
+    loadAllData()
   }, [])
+
+  const loadFilteredData = async () => {
+    try {
+      const [batchesRes, subjectsRes, facultyRes] = await Promise.all([
+        fetch(`http://localhost:8000/api/v1/auth/batches/?department=${formData.department}&semester=${formData.semester}`),
+        fetch(`http://localhost:8000/api/v1/courses/?department=${formData.department}&semester=${formData.semester}`),
+        fetch(`http://localhost:8000/api/v1/auth/faculty/?department=${formData.department}`)
+      ])
+      
+      if (batchesRes.ok) {
+        const batchData = await batchesRes.json()
+        setBatches(batchData.map((b: any) => ({
+          id: b.id?.toString() || b.name,
+          name: b.name || '',
+          strength: b.strength || 0
+        })))
+      }
+      
+      if (subjectsRes.ok) {
+        const subjectData = await subjectsRes.json()
+        setSubjects(subjectData.map((s: any) => ({
+          id: s.id?.toString() || s.code,
+          name: s.name || '',
+          code: s.code || '',
+          classesPerWeek: s.classesPerWeek || s.classes_per_week || 0
+        })))
+      }
+      
+      if (facultyRes.ok) {
+        const facultyData = await facultyRes.json()
+        setFaculty(facultyData.map((f: any) => ({
+          id: f.id?.toString() || f.name,
+          name: f.name || ''
+        })))
+      }
+    } catch (error) {
+      console.error('Failed to load filtered data:', error)
+    }
+  }
+
+  const loadAllData = async () => {
+    try {
+      const classroomsRes = await fetch('http://localhost:8000/api/v1/classrooms/')
+      
+      if (classroomsRes.ok) {
+        const classroomData = await classroomsRes.json()
+        setClassrooms(classroomData.map((c: any) => ({
+          id: c.id?.toString() || c.roomNumber,
+          roomNumber: c.roomNumber || '',
+          capacity: c.capacity || 0,
+          type: c.type || 'lecture'
+        })))
+      }
+      
+    } catch (error) {
+      console.error('Failed to load data:', error)
+      setClassrooms([])
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   // Classroom functions
   const addClassroom = () => {
@@ -187,19 +233,32 @@ export default function TimetableForm() {
   const handleGenerate = async () => {
     setIsGenerating(true)
     
+    // Get enrollment data for NEP integration
+    let enrollmentData = []
+    try {
+      const enrollmentRes = await fetch(`http://localhost:8000/api/v1/students/enrollments/summary/?semester=${formData.semester}&academic_year=${formData.academicYear}`)
+      if (enrollmentRes.ok) {
+        enrollmentData = await enrollmentRes.json()
+      }
+    } catch (error) {
+      console.warn('Could not fetch enrollment data:', error)
+    }
+    
     const payload = {
       department: formData.department,
       semester: formData.semester,
       academicYear: formData.academicYear,
       maxClassesPerDay: formData.maxClassesPerDay,
-      classrooms,
-      batches,
-      subjects,
-      faculty,
-      fixedSlots
+      classrooms: classrooms.filter(c => c.roomNumber && c.capacity > 0),
+      batches: batches.filter(b => b.name && b.strength > 0),
+      subjects: subjects.filter(s => s.name && s.code && s.classesPerWeek > 0),
+      faculty: faculty.filter(f => f.name),
+      fixedSlots: fixedSlots.filter(s => s.subject && s.faculty && s.day && s.timeSlot),
+      enrollments: enrollmentData
     }
     
     try {
+      // Call Django API which will coordinate with FastAPI
       const response = await fetch('http://localhost:8000/api/v1/timetables/generate/', {
         method: 'POST',
         headers: {
@@ -210,19 +269,15 @@ export default function TimetableForm() {
       
       const result = await response.json()
       
-      if (result.success) {
-        alert(`Generated ${result.options.length} timetable options successfully!`)
-        // Redirect to the specific timetable review page
-        if (result.options && result.options.length > 0) {
-          window.location.href = `/admin/timetables/${result.options[0].id}/review`
-        } else {
-          window.location.href = '/admin/timetables'
-        }
+      if (result.success && result.timetable_id) {
+        alert(`Generated ${result.options_count || 3} timetable options successfully!`)
+        // Redirect to the review page with the generated timetable ID
+        window.location.href = `/admin/timetables/${result.timetable_id}/review`
       } else {
-        alert(`Generation failed: ${result.error}`)
+        alert(`Generation failed: ${result.error || 'Unknown error occurred'}`)
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred'
+      const errorMessage = error instanceof Error ? error.message : 'Network error occurred'
       alert(`Error: ${errorMessage}`)
     } finally {
       setIsGenerating(false)
@@ -249,18 +304,18 @@ export default function TimetableForm() {
         </h1>
         <button 
           onClick={handleGenerate}
-          disabled={isGenerating || !formData.department || !formData.semester}
+          disabled={isGenerating || !formData.department || !formData.semester || classrooms.length === 0 || subjects.length === 0 || faculty.length === 0}
           className="btn-primary w-full sm:w-auto disabled:opacity-50"
         >
           {isGenerating ? (
             <>
               <div className="loading-spinner w-4 h-4 mr-2"></div>
-              Generating...
+              Generating Options...
             </>
           ) : (
             <>
-              <span className="mr-2">⚡</span>
-              Generate with AI
+              <span className="mr-2">🧠</span>
+              Generate Master Timetable
             </>
           )}
         </button>

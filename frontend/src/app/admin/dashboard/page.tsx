@@ -12,7 +12,7 @@ export default function AdminDashboard() {
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Users</p>
-                <p className="text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200 truncate">1,234</p>
+                <p className="text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200 truncate">-</p>
               </div>
               <div className="w-12 h-12 lg:w-14 lg:h-14 bg-[#1a73e8] rounded-xl flex items-center justify-center flex-shrink-0">
                 <span className="text-xl lg:text-2xl text-white">👥</span>
@@ -28,7 +28,7 @@ export default function AdminDashboard() {
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Active Courses</p>
-                <p className="text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200 truncate">56</p>
+                <p className="text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200 truncate">-</p>
               </div>
               <div className="w-12 h-12 lg:w-14 lg:h-14 bg-[#34a853] rounded-xl flex items-center justify-center flex-shrink-0">
                 <span className="text-xl lg:text-2xl text-white">📚</span>
@@ -44,7 +44,7 @@ export default function AdminDashboard() {
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Pending Approvals</p>
-                <p className="text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200 truncate">12</p>
+                <p className="text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200 truncate">-</p>
               </div>
               <div className="w-12 h-12 lg:w-14 lg:h-14 bg-[#fbbc05] rounded-xl flex items-center justify-center flex-shrink-0">
                 <span className="text-xl lg:text-2xl text-white">⏳</span>
@@ -68,6 +68,40 @@ export default function AdminDashboard() {
             <div className="mt-4 flex items-center text-sm">
               <span className="text-[#34a853] font-medium">All services online</span>
             </div>
+          </div>
+        </div>
+
+        {/* Faculty Availability Management */}
+        <div className="card">
+          <div className="card-header">
+            <h3 className="card-title">Faculty Availability - Today</h3>
+            <p className="card-description">Mark faculty as available/unavailable for quick substitutions</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+            {/* Faculty data loaded from PostgreSQL */}
+            {[].map((faculty: any) => (
+              <div key={faculty.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <div className="flex-1 min-w-0 mr-3">
+                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{faculty.name}</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{faculty.department}</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer" 
+                    defaultChecked={faculty.isAvailable}
+                    onChange={(e) => {
+                      // TODO: API call to update faculty availability
+                      console.log(`Faculty ${faculty.id} availability:`, e.target.checked)
+                    }}
+                  />
+                  <div className="w-9 h-5 bg-gray-200 dark:bg-gray-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                  <span className="ml-2 text-xs font-medium text-gray-600 dark:text-gray-400">
+                    {faculty.isAvailable ? 'Available' : 'Unavailable'}
+                  </span>
+                </label>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -191,28 +225,28 @@ export default function AdminDashboard() {
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Admin</p>
                   <p className="text-xs text-gray-600 dark:text-gray-400">All Access</p>
                 </div>
-                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">3</span>
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">-</span>
               </div>
               <div className="interactive-element flex items-center justify-between p-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Staff</p>
                   <p className="text-xs text-gray-600 dark:text-gray-400">Approvals, Reports</p>
                 </div>
-                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">8</span>
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">-</span>
               </div>
               <div className="interactive-element flex items-center justify-between p-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Faculty</p>
                   <p className="text-xs text-gray-600 dark:text-gray-400">Schedule View</p>
                 </div>
-                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">45</span>
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">-</span>
               </div>
               <div className="interactive-element flex items-center justify-between p-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-200">HOD</p>
                   <p className="text-xs text-gray-600 dark:text-gray-400">Dept. Management</p>
                 </div>
-                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">5</span>
+                <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">-</span>
               </div>
             </div>
           </div>

@@ -1,12 +1,94 @@
+'use client'
+
+import { useState, useEffect } from 'react'
 import DashboardLayout from '@/components/dashboard-layout'
 
+interface User {
+  id: number
+  name: string
+  email: string
+  role: string
+  department: string
+  status: string
+}
+
 export default function UsersPage() {
-  const users = [
-    { id: 1, name: "Dr. John Smith", email: "john.smith@university.edu", role: "Faculty", department: "Computer Science", status: "Active" },
-    { id: 2, name: "Sarah Johnson", email: "sarah.johnson@university.edu", role: "Staff", department: "Administration", status: "Active" },
-    { id: 3, name: "Mike Wilson", email: "mike.wilson@university.edu", role: "Faculty", department: "Mathematics", status: "Active" },
-    { id: 4, name: "Emily Davis", email: "emily.davis@university.edu", role: "Student", department: "Computer Science", status: "Active" },
-  ]
+  const [users, setUsers] = useState<User[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedRole, setSelectedRole] = useState('')
+  const [selectedDepartment, setSelectedDepartment] = useState('')
+
+  useEffect(() => {
+    loadUsers()
+  }, [])
+
+  const loadUsers = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/users/')
+      
+      if (response.ok) {
+        const userData = await response.json()
+        const formattedUsers = userData.map((user: any) => ({
+          id: user.id,
+          name: user.name || `${user.first_name} ${user.last_name}`.trim() || 'Unnamed User',
+          email: user.email || '',
+          role: user.role || 'Unknown',
+          department: user.department || '',
+          status: 'Active'
+        }))
+        setUsers(formattedUsers)
+      } else {
+        setError('Failed to load users')
+      }
+    } catch (error) {
+      setError('Failed to load users')
+      console.error('Error loading users:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const filteredUsers = users.filter(user => {
+    const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         user.email.toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesRole = !selectedRole || user.role.toLowerCase() === selectedRole.toLowerCase()
+    const matchesDepartment = !selectedDepartment || user.department === selectedDepartment
+    return matchesSearch && matchesRole && matchesDepartment
+  })
+
+  const departments = [...new Set(users.map(u => u.department))].filter(Boolean)
+  const roles = [...new Set(users.map(u => u.role))].filter(Boolean)
+
+  if (isLoading) {
+    return (
+      <DashboardLayout role="admin">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
+            <p className="text-gray-600 dark:text-gray-400">Loading users...</p>
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  if (error) {
+    return (
+      <DashboardLayout role="admin">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="text-4xl mb-4">⚠️</div>
+            <p className="text-red-600 dark:text-red-400">{error}</p>
+            <button onClick={loadUsers} className="btn-primary mt-4">
+              Try Again
+            </button>
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
 
   return (
     <DashboardLayout role="admin">
@@ -27,22 +109,31 @@ export default function UsersPage() {
                 <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">🔍</span>
                 <input 
                   placeholder="Search users..." 
-                  className="input-primary pl-10" 
+                  className="input-primary pl-10"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
               <div className="flex flex-col sm:flex-row gap-3 sm:gap-2">
-                <select className="input-primary w-full sm:w-32">
-                  <option>All Roles</option>
-                  <option>Admin</option>
-                  <option>Staff</option>
-                  <option>Faculty</option>
-                  <option>Student</option>
+                <select 
+                  className="input-primary w-full sm:w-32"
+                  value={selectedRole}
+                  onChange={(e) => setSelectedRole(e.target.value)}
+                >
+                  <option value="">All Roles</option>
+                  {roles.map(role => (
+                    <option key={role} value={role}>{role}</option>
+                  ))}
                 </select>
-                <select className="input-primary w-full sm:w-36">
-                  <option>All Departments</option>
-                  <option>Computer Science</option>
-                  <option>Mathematics</option>
-                  <option>Physics</option>
+                <select 
+                  className="input-primary w-full sm:w-36"
+                  value={selectedDepartment}
+                  onChange={(e) => setSelectedDepartment(e.target.value)}
+                >
+                  <option value="">All Departments</option>
+                  {departments.map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -50,7 +141,7 @@ export default function UsersPage() {
           
           {/* Mobile Card View */}
           <div className="block sm:hidden space-y-3">
-            {users.map((user) => (
+            {filteredUsers.map((user) => (
               <div key={user.id} className="interactive-element p-4 border border-gray-200 dark:border-[#3c4043]">
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1 min-w-0">
@@ -87,7 +178,7 @@ export default function UsersPage() {
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
+                {filteredUsers.map((user) => (
                   <tr key={user.id} className="table-row">
                     <td className="table-cell">
                       <div className="font-medium text-gray-800 dark:text-gray-200">{user.name}</div>
