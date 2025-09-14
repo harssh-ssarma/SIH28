@@ -97,7 +97,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
       )}
 
       {/* Content Header */}
-      <header className="fixed top-0 left-0 right-0 bg-white dark:bg-[#2a2a2a] px-3 sm:px-4 lg:px-6 py-2 sm:py-2.5 md:py-3 z-50">
+      <header className="fixed top-0 left-0 right-0 bg-white dark:bg-[#2a2a2a] px-2 sm:px-2 lg:px-3 py-2 sm:py-2 md:py-3 z-50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-4">
             <button
@@ -108,7 +108,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
                   setSidebarOpen(!sidebarOpen)
                 }
               }}
-              className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg hover:bg-[#f5f5f5] dark:hover:bg-[#3c4043] transition-colors duration-300 flex items-center justify-center text-gray-600 dark:text-gray-300 ${sidebarCollapsed ? 'md:ml-[-10px]' : ''}`}
+              className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg hover:bg-[#f5f5f5] dark:hover:bg-[#3c4043] transition-colors duration-300 flex items-center justify-center text-gray-600 dark:text-gray-300"
               title="Toggle menu"
             >
               <span className="text-sm sm:text-lg">☰</span>
@@ -166,18 +166,20 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
         <div className="flex flex-col h-full">
 
           {/* Navigation */}
-          <nav className="flex-1 p-2 sm:p-3 space-y-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
+          <nav className="flex-1 p-3 sm:p-3 space-y-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
             {items.map((item) => {
               const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
               return (
                 <a
                   key={item.name}
                   href={item.href}
-                  className={`${isActive ? 'nav-link-active' : 'nav-link'} ${sidebarCollapsed ? 'md:justify-center md:w-10' : 'px-2 sm:px-3'} py-1.5 sm:py-2 text-xs sm:text-sm`}
+                  className={`${isActive ? 'nav-link-active' : 'nav-link'} ${sidebarCollapsed ? 'md:justify-start md:w-10' : ''} pl-1 sm:pl-2 h-10 text-xs sm:text-sm`}
                   title={sidebarCollapsed ? item.name : ''}
                   onClick={() => setSidebarOpen(false)}
                 >
-                  <span className={`text-sm sm:text-lg ${sidebarCollapsed ? '' : 'mr-2 sm:mr-3'}`}>{item.icon}</span>
+                  <div className="w-10 h-10flex items-center justify-center flex-shrink-0">
+                    <span className="text-lg">{item.icon}</span>
+                  </div>
                   <span className={`${sidebarCollapsed ? 'md:hidden md:opacity-0' : 'md:opacity-100'} truncate transition-all duration-300 ease-in-out ${sidebarCollapsed ? '' : 'md:translate-x-0'} ${sidebarCollapsed ? 'md:-translate-x-2' : ''}`}>{item.name}</span>
                 </a>
               )
@@ -186,8 +188,8 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
 
           {/* User info */}
           <div className="p-2 sm:p-3">
-            <div className={`flex items-center gap-2 sm:gap-3 ${sidebarCollapsed ? 'md:justify-center' : ''}`}>
-              <div className="w-6 h-6 sm:w-8 sm:h-8 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center">
+            <div className={`flex items-center gap-2 sm:gap-3 ${sidebarCollapsed ? 'md:justify-center md:w-10' : ''}`}>
+              <div className="w-10 h-10 sm:w-10 sm:h-10 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center">
                 <span className="text-xs sm:text-sm">👤</span>
               </div>
               <div className={`flex-1 min-w-0 ${sidebarCollapsed ? 'md:hidden' : ''}`}>
