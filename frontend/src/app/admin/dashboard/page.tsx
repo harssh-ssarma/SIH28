@@ -78,8 +78,12 @@ export default function AdminDashboard() {
             <p className="card-description">Mark faculty as available/unavailable for quick substitutions</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
-            {/* Faculty data loaded from PostgreSQL */}
-            {[].map((faculty: any) => (
+            {/* Static faculty data */}
+            {[
+              { id: 1, name: 'Dr. Rajesh Kumar', department: 'Computer Science', isAvailable: true },
+              { id: 2, name: 'Dr. Priya Sharma', department: 'Computer Science', isAvailable: true },
+              { id: 3, name: 'Prof. Amit Singh', department: 'Mathematics', isAvailable: false }
+            ].map((faculty: any) => (
               <div key={faculty.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
                 <div className="flex-1 min-w-0 mr-3">
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{faculty.name}</p>
@@ -91,7 +95,7 @@ export default function AdminDashboard() {
                     className="sr-only peer" 
                     defaultChecked={faculty.isAvailable}
                     onChange={(e) => {
-                      // TODO: API call to update faculty availability
+                      // Simple console log for demo purposes
                       console.log(`Faculty ${faculty.id} availability:`, e.target.checked)
                     }}
                   />

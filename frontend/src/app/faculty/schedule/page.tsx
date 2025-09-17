@@ -1,25 +1,8 @@
 "use client"
 
 import DashboardLayout from '@/components/dashboard-layout'
-import TimetableGrid from '@/components/shared/TimetableGrid'
 
 export default function FacultySchedule() {
-  const schedule = [
-    { day: 'monday', time: '9:00-10:00', subject: 'Mathematics 101', faculty: 'Dr. Rajesh Kumar', classroom: 'Room 201', batch: 'CS-A' },
-    { day: 'tuesday', time: '9:00-10:00', subject: 'Physics 201', faculty: 'Dr. Rajesh Kumar', classroom: 'Lab 1', batch: 'CS-B' },
-    { day: 'wednesday', time: '9:00-10:00', subject: 'Mathematics 101', faculty: 'Dr. Rajesh Kumar', classroom: 'Room 201', batch: 'CS-A' },
-    { day: 'thursday', time: '9:00-10:00', subject: 'Physics 201', faculty: 'Dr. Rajesh Kumar', classroom: 'Lab 1', batch: 'CS-B' },
-    { day: 'tuesday', time: '10:00-11:00', subject: 'Mathematics 101', faculty: 'Dr. Rajesh Kumar', classroom: 'Room 201', batch: 'CS-C' },
-    { day: 'thursday', time: '10:00-11:00', subject: 'Mathematics 101', faculty: 'Dr. Rajesh Kumar', classroom: 'Room 201', batch: 'CS-C' },
-    { day: 'friday', time: '10:00-11:00', subject: 'Physics 201', faculty: 'Dr. Rajesh Kumar', classroom: 'Lab 1', batch: 'CS-A' },
-    { day: 'monday', time: '11:00-12:00', subject: 'Physics 201', faculty: 'Dr. Rajesh Kumar', classroom: 'Lab 1', batch: 'CS-C' },
-    { day: 'wednesday', time: '11:00-12:00', subject: 'Physics 201', faculty: 'Dr. Rajesh Kumar', classroom: 'Lab 1', batch: 'CS-C' },
-    { day: 'friday', time: '11:00-12:00', subject: 'Mathematics 101', faculty: 'Dr. Rajesh Kumar', classroom: 'Room 201', batch: 'CS-B' },
-    { day: 'monday', time: '14:00-15:00', subject: 'Lab Session', faculty: 'Dr. Rajesh Kumar', classroom: 'Lab 2', batch: 'CS-A' },
-    { day: 'tuesday', time: '14:00-15:00', subject: 'Lab Session', faculty: 'Dr. Rajesh Kumar', classroom: 'Lab 2', batch: 'CS-B' },
-    { day: 'thursday', time: '14:00-15:00', subject: 'Lab Session', faculty: 'Dr. Rajesh Kumar', classroom: 'Lab 2', batch: 'CS-C' },
-  ]
-
   return (
     <DashboardLayout role="faculty">
       <div className="space-responsive">
@@ -75,7 +58,9 @@ export default function FacultySchedule() {
             <h3 className="card-title">Weekly Teaching Schedule</h3>
             <p className="card-description">Current semester assignments</p>
           </div>
-          <TimetableGrid schedule={schedule} />
+          <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+            <p>Schedule grid view has been removed</p>
+          </div>
         </div>
 
         {/* Today's Classes */}

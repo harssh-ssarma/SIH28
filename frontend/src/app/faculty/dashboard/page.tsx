@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import DashboardLayout from '@/components/dashboard-layout'
-import AttendanceModal from '@/components/modals/AttendanceModal'
 import TimetableGrid from '@/components/shared/TimetableGrid'
 
 interface ClassSession {
@@ -38,11 +37,28 @@ export default function FacultyDashboard() {
 
   const loadTodaysClasses = async () => {
     try {
-      // Mock faculty ID - replace with actual logged-in faculty ID
-      const facultyId = 1
-      const response = await fetch(`http://localhost:8000/api/v1/attendance/faculty/${facultyId}/today/`)
-      const data = await response.json()
-      setTodaysClasses(Array.isArray(data) ? data : [])
+      // Static mock data instead of API call
+      const mockClasses: ClassSession[] = [
+        { 
+          id: 1, 
+          course_id: 101,
+          course_name: 'Data Structures', 
+          time_slot: '9:00-10:00', 
+          classroom: 'Room 101', 
+          batch: 'CS-A', 
+          students_count: 30
+        },
+        { 
+          id: 2, 
+          course_id: 102,
+          course_name: 'Algorithms', 
+          time_slot: '11:00-12:00', 
+          classroom: 'Room 102', 
+          batch: 'CS-B', 
+          students_count: 25
+        }
+      ]
+      setTodaysClasses(mockClasses)
     } catch (error) {
       console.error('Failed to load today\'s classes:', error)
       setTodaysClasses([])
@@ -175,15 +191,6 @@ export default function FacultyDashboard() {
         </div>
       </div>
 
-      {/* Attendance Modal */}
-      {selectedClass && (
-        <AttendanceModal
-          isOpen={showAttendanceModal}
-          onClose={closeAttendanceModal}
-          classData={selectedClass}
-          facultyId={1} // Replace with actual faculty ID
-        />
-      )}
     </DashboardLayout>
   )
 }

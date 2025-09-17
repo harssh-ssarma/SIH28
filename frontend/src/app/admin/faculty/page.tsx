@@ -22,24 +22,42 @@ export default function FacultyManagePage() {
   const [selectedDepartment, setSelectedDepartment] = useState('')
 
   useEffect(() => {
-    loadFaculty()
-  }, [])
-
-  const loadFaculty = async () => {
-    try {
-      const response = await fetch('http://localhost:8000/api/v1/faculty/')
-      if (response.ok) {
-        const data = await response.json()
-        setFaculty(data)
-      } else {
-        setError('Failed to load faculty data')
+    // Set static mock faculty instead of API call
+    const mockFaculty = [
+      { 
+        id: 1, 
+        faculty_id: 'FAC001', 
+        faculty_name: 'Dr. Rajesh Kumar', 
+        designation: 'Professor', 
+        department: 'Computer Science', 
+        course_taught: 'Data Structures', 
+        elective_assigned: 'Machine Learning', 
+        max_workload_per_week: 20 
+      },
+      { 
+        id: 2, 
+        faculty_id: 'FAC002', 
+        faculty_name: 'Dr. Priya Sharma', 
+        designation: 'Associate Professor', 
+        department: 'Computer Science', 
+        course_taught: 'Database Systems', 
+        elective_assigned: 'Web Development', 
+        max_workload_per_week: 18 
+      },
+      { 
+        id: 3, 
+        faculty_id: 'FAC003', 
+        faculty_name: 'Prof. Amit Singh', 
+        designation: 'Assistant Professor', 
+        department: 'Mathematics', 
+        course_taught: 'Calculus', 
+        elective_assigned: 'Statistics', 
+        max_workload_per_week: 16 
       }
-    } catch (error) {
-      setError('Network error loading faculty')
-    } finally {
-      setIsLoading(false)
-    }
-  }
+    ]
+    setFaculty(mockFaculty)
+    setIsLoading(false)
+  }, [])
 
   const filteredFaculty = faculty.filter(member => {
     const matchesSearch = member.faculty_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -70,7 +88,7 @@ export default function FacultyManagePage() {
           <div className="text-center">
             <div className="text-4xl mb-4">⚠️</div>
             <p className="text-red-600 dark:text-red-400">{error}</p>
-            <button onClick={loadFaculty} className="btn-primary mt-4">
+            <button onClick={() => window.location.reload()} className="btn-primary mt-4">
               Try Again
             </button>
           </div>

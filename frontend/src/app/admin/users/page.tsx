@@ -21,34 +21,16 @@ export default function UsersPage() {
   const [selectedDepartment, setSelectedDepartment] = useState('')
 
   useEffect(() => {
-    loadUsers()
+    // Set static mock users instead of API call
+    const mockUsers = [
+      { id: 1, name: 'Admin User', email: 'admin@sih28.com', role: 'admin', department: 'Administration', status: 'Active' },
+      { id: 2, name: 'Staff Member', email: 'staff@sih28.com', role: 'staff', department: 'Management', status: 'Active' },
+      { id: 3, name: 'Faculty User', email: 'faculty@sih28.com', role: 'faculty', department: 'Computer Science', status: 'Active' },
+      { id: 4, name: 'Student User', email: 'student@sih28.com', role: 'student', department: 'Computer Science', status: 'Active' }
+    ]
+    setUsers(mockUsers)
+    setIsLoading(false)
   }, [])
-
-  const loadUsers = async () => {
-    try {
-      const response = await fetch('http://localhost:8000/api/v1/users/')
-      
-      if (response.ok) {
-        const userData = await response.json()
-        const formattedUsers = userData.map((user: any) => ({
-          id: user.id,
-          name: user.name || `${user.first_name} ${user.last_name}`.trim() || 'Unnamed User',
-          email: user.email || '',
-          role: user.role || 'Unknown',
-          department: user.department || '',
-          status: 'Active'
-        }))
-        setUsers(formattedUsers)
-      } else {
-        setError('Failed to load users')
-      }
-    } catch (error) {
-      setError('Failed to load users')
-      console.error('Error loading users:', error)
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -81,7 +63,7 @@ export default function UsersPage() {
           <div className="text-center">
             <div className="text-4xl mb-4">⚠️</div>
             <p className="text-red-600 dark:text-red-400">{error}</p>
-            <button onClick={loadUsers} className="btn-primary mt-4">
+            <button onClick={() => window.location.reload()} className="btn-primary mt-4">
               Try Again
             </button>
           </div>

@@ -24,24 +24,45 @@ export default function StudentsPage() {
   const [selectedYear, setSelectedYear] = useState('')
 
   useEffect(() => {
-    loadStudents()
-  }, [])
-
-  const loadStudents = async () => {
-    try {
-      const response = await fetch('http://localhost:8000/api/v1/students/')
-      if (response.ok) {
-        const data = await response.json()
-        setStudents(data)
-      } else {
-        setError('Failed to load students data')
+    // Set static mock students instead of API call
+    const mockStudents = [
+      { 
+        id: 1, 
+        student_id: 'STU001', 
+        student_name: 'Rahul Sharma', 
+        department: 'Computer Science', 
+        course: 'B.Tech CSE', 
+        elective_chosen: 'Machine Learning', 
+        year: 2, 
+        semester: 4, 
+        faculty_assigned: 'Dr. Rajesh Kumar' 
+      },
+      { 
+        id: 2, 
+        student_id: 'STU002', 
+        student_name: 'Priya Patel', 
+        department: 'Computer Science', 
+        course: 'B.Tech CSE', 
+        elective_chosen: 'Web Development', 
+        year: 3, 
+        semester: 5, 
+        faculty_assigned: 'Dr. Priya Sharma' 
+      },
+      { 
+        id: 3, 
+        student_id: 'STU003', 
+        student_name: 'Arjun Singh', 
+        department: 'Mathematics', 
+        course: 'B.Sc Math', 
+        elective_chosen: 'Statistics', 
+        year: 1, 
+        semester: 2, 
+        faculty_assigned: 'Prof. Amit Singh' 
       }
-    } catch (error) {
-      setError('Network error loading students')
-    } finally {
-      setIsLoading(false)
-    }
-  }
+    ]
+    setStudents(mockStudents)
+    setIsLoading(false)
+  }, [])
 
   const filteredStudents = students.filter(student => {
     const matchesSearch = student.student_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -74,7 +95,7 @@ export default function StudentsPage() {
           <div className="text-center">
             <div className="text-4xl mb-4">⚠️</div>
             <p className="text-red-600 dark:text-red-400">{error}</p>
-            <button onClick={loadStudents} className="btn-primary mt-4">
+            <button onClick={() => window.location.reload()} className="btn-primary mt-4">
               Try Again
             </button>
           </div>

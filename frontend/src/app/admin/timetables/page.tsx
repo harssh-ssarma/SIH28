@@ -29,57 +29,42 @@ export default function AdminTimetablesPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadTimetables()
-    loadFacultyAvailability()
+    // Set static mock data instead of API calls
+    const mockTimetables: TimetableItem[] = [
+      {
+        id: '1',
+        year: 2,
+        batch: 'A',
+        department: 'Computer Science',
+        semester: '4',
+        status: 'approved',
+        lastUpdated: new Date().toLocaleDateString(),
+        conflicts: 0,
+        score: 95
+      },
+      {
+        id: '2',
+        year: 3,
+        batch: 'B',
+        department: 'Computer Science',
+        semester: '5',
+        status: 'pending',
+        lastUpdated: new Date().toLocaleDateString(),
+        conflicts: 2,
+        score: 87
+      }
+    ]
+    
+    const mockFacultyAvailability: FacultyAvailability[] = [
+      { id: '1', name: 'Dr. Rajesh Kumar', available: true },
+      { id: '2', name: 'Dr. Priya Sharma', available: true },
+      { id: '3', name: 'Prof. Amit Singh', available: false }
+    ]
+    
+    setTimetables(mockTimetables)
+    setFacultyAvailability(mockFacultyAvailability)
+    setLoading(false)
   }, [])
-
-  const loadTimetables = async () => {
-    try {
-      const response = await fetch('http://localhost:8000/api/v1/timetables/')
-      if (response.ok) {
-        const data = await response.json()
-        const timetableItems: TimetableItem[] = data.map((t: any) => ({
-          id: t.id.toString(),
-          year: parseInt(t.semester) <= 2 ? 1 : parseInt(t.semester) <= 4 ? 2 : parseInt(t.semester) <= 6 ? 3 : 4,
-          batch: t.name.split(' - ')[1] || 'A',
-          department: t.department,
-          semester: t.semester,
-          status: t.status as 'approved' | 'pending' | 'draft' | 'rejected',
-          lastUpdated: new Date(t.updated_at).toLocaleDateString(),
-          conflicts: t.conflicts?.length || 0,
-          score: t.score
-        }))
-        setTimetables(timetableItems)
-      } else {
-        setTimetables([])
-      }
-    } catch (error) {
-      console.error('Failed to load timetables from PostgreSQL:', error)
-      setTimetables([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const loadFacultyAvailability = async () => {
-    try {
-      const response = await fetch('http://localhost:8000/api/v1/auth/faculty/')
-      if (response.ok) {
-        const data = await response.json()
-        const facultyList: FacultyAvailability[] = data.map((f: any) => ({
-          id: f.id.toString(),
-          name: f.name,
-          available: true // Default to available
-        }))
-        setFacultyAvailability(facultyList)
-      } else {
-        setFacultyAvailability([])
-      }
-    } catch (error) {
-      console.error('Failed to load faculty from PostgreSQL:', error)
-      setFacultyAvailability([])
-    }
-  }
 
   const toggleFacultyAvailability = async (facultyId: string) => {
     setFacultyAvailability(prev => 
