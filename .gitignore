@@ -8,13 +8,6 @@ build/
 dist/
 
 # Environment variables
-<<<<<<< HEAD
-# .env
-# .env.local
-# .env.production
-# .env.development
-=======
->>>>>>> 956765f518cc4e253414b8eacef210c0807bc9ed
 
 # Python
 __pycache__/
@@ -66,3 +59,6 @@ yarn-error.log*
 # Temporary files
 *.tmp
 *.temp
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md
