@@ -25,6 +25,7 @@ interface PaginatedResponse<T> {
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isTableLoading, setIsTableLoading] = useState(false) // New: Table-specific loading
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedRole, setSelectedRole] = useState('')
@@ -47,8 +48,14 @@ export default function UsersPage() {
     return () => clearTimeout(timer)
   }, [searchTerm, selectedRole, selectedDepartment, currentPage])
 
-  const fetchUsers = async () => {
-    setIsLoading(true)
+  const fetchUsers = async (isPageChange = false) => {
+    // For initial load, show full loading. For pagination/search, show table loading only
+    if (isPageChange || searchTerm || selectedRole || selectedDepartment || currentPage > 1) {
+      setIsTableLoading(true)
+    } else {
+      setIsLoading(true)
+    }
+    
     setError(null)
     try {
       // Build query params for backend filtering
@@ -71,6 +78,7 @@ export default function UsersPage() {
       setError('Failed to fetch users')
     } finally {
       setIsLoading(false)
+      setIsTableLoading(false) // Stop both loading states
     }
   }
 
@@ -80,6 +88,23 @@ export default function UsersPage() {
   // Get unique departments and roles from current page
   const departments = [...new Set(users.map(u => u.department))].filter(Boolean)
   const roles = ['admin', 'staff', 'faculty', 'student'] // Fixed roles
+
+  // Pagination handlers with table loading
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage)
+  }
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      handlePageChange(currentPage - 1)
+    }
+  }
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      handlePageChange(currentPage + 1)
+    }
+  }
 
   if (error) {
     return (
@@ -162,8 +187,18 @@ export default function UsersPage() {
           )}
           
           {/* Mobile Card View */}
-            <div className="block sm:hidden space-y-3">
-              {filteredUsers.map((user) => (
+          <div className="block sm:hidden space-y-3 relative">
+            {/* Mobile Loading Overlay */}
+            {isTableLoading && (
+              <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-center justify-center z-10 rounded-lg">
+                <div className="flex flex-col items-center">
+                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Loading...</span>
+                </div>
+              </div>
+            )}
+            
+            {filteredUsers.map((user) => (
               <div key={user.id} className="interactive-element p-4 border border-gray-200 dark:border-[#3c4043]">
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1 min-w-0">
@@ -191,7 +226,17 @@ export default function UsersPage() {
           </div>
           
           {/* Desktop Table View */}
-          <div className="hidden sm:block overflow-x-auto">
+          <div className="hidden sm:block overflow-x-auto relative">
+            {/* Table Loading Overlay */}
+            {isTableLoading && (
+              <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-center justify-center z-10 rounded-lg">
+                <div className="flex flex-col items-center">
+                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Loading...</span>
+                </div>
+              </div>
+            )}
+            
             <table className="table">
               <thead className="table-header">
                 <tr>
@@ -238,11 +283,18 @@ export default function UsersPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-[#3c4043]">
               <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
+                onClick={handlePreviousPage}
+                disabled={currentPage === 1 || isTableLoading}
                 className="btn-secondary px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                ← Previous
+                {isTableLoading && currentPage > 1 ? (
+                  <div className="flex items-center">
+                    <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-2"></div>
+                    Loading...
+                  </div>
+                ) : (
+                  '← Previous'
+                )}
               </button>
               
               <div className="flex items-center gap-2">
@@ -255,8 +307,9 @@ export default function UsersPage() {
                     {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
                       <button
                         key={page}
-                        onClick={() => setCurrentPage(page)}
-                        className={`px-3 py-1 rounded text-sm ${
+                        onClick={() => handlePageChange(page)}
+                        disabled={isTableLoading}
+                        className={`px-3 py-1 rounded text-sm disabled:opacity-50 ${
                           currentPage === page
                             ? 'bg-blue-500 text-white'
                             : 'bg-gray-200 dark:bg-[#3c4043] text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-[#4c5053]'
@@ -271,7 +324,7 @@ export default function UsersPage() {
                   <div className="flex gap-1">
                     {currentPage > 3 && (
                       <>
-                        <button onClick={() => setCurrentPage(1)} className="px-3 py-1 rounded text-sm bg-gray-200 dark:bg-[#3c4043]">1</button>
+                        <button onClick={() => handlePageChange(1)} disabled={isTableLoading} className="px-3 py-1 rounded text-sm bg-gray-200 dark:bg-[#3c4043] disabled:opacity-50">1</button>
                         <span className="px-2">...</span>
                       </>
                     )}
@@ -281,8 +334,9 @@ export default function UsersPage() {
                       return (
                         <button
                           key={page}
-                          onClick={() => setCurrentPage(page)}
-                          className={`px-3 py-1 rounded text-sm ${
+                          onClick={() => handlePageChange(page)}
+                          disabled={isTableLoading}
+                          className={`px-3 py-1 rounded text-sm disabled:opacity-50 ${
                             currentPage === page
                               ? 'bg-blue-500 text-white'
                               : 'bg-gray-200 dark:bg-[#3c4043] text-gray-700 dark:text-gray-300'
@@ -295,7 +349,7 @@ export default function UsersPage() {
                     {currentPage < totalPages - 2 && (
                       <>
                         <span className="px-2">...</span>
-                        <button onClick={() => setCurrentPage(totalPages)} className="px-3 py-1 rounded text-sm bg-gray-200 dark:bg-[#3c4043]">{totalPages}</button>
+                        <button onClick={() => handlePageChange(totalPages)} disabled={isTableLoading} className="px-3 py-1 rounded text-sm bg-gray-200 dark:bg-[#3c4043] disabled:opacity-50">{totalPages}</button>
                       </>
                     )}
                   </div>
@@ -303,11 +357,18 @@ export default function UsersPage() {
               </div>
 
               <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
+                onClick={handleNextPage}
+                disabled={currentPage === totalPages || isTableLoading}
                 className="btn-secondary px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Next →
+                {isTableLoading && currentPage < totalPages ? (
+                  <div className="flex items-center">
+                    <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-2"></div>
+                    Loading...
+                  </div>
+                ) : (
+                  'Next →'
+                )}
               </button>
             </div>
           )}
