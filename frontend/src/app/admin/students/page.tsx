@@ -28,6 +28,7 @@ interface Student {
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isTableLoading, setIsTableLoading] = useState(false) // New: Table-specific loading
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedDepartment, setSelectedDepartment] = useState('')
@@ -41,7 +42,13 @@ export default function StudentsPage() {
   }, [currentPage])
 
   const fetchStudents = async () => {
-    setIsLoading(true)
+    // For initial load, show full loading. For pagination, show table loading only
+    if (currentPage > 1) {
+      setIsTableLoading(true)
+    } else {
+      setIsLoading(true)
+    }
+    
     setError(null)
     try {
       const response = await apiClient.getStudents(currentPage)
@@ -58,6 +65,7 @@ export default function StudentsPage() {
       setError('Failed to fetch students')
     } finally {
       setIsLoading(false)
+      setIsTableLoading(false) // Stop both loading states
     }
   }
 
@@ -71,6 +79,23 @@ export default function StudentsPage() {
 
   const departments = [...new Set(students.map(s => s.department.department_name))].filter(Boolean)
   const years = [...new Set(students.map(s => s.year))].sort((a, b) => a - b)
+
+  // Pagination handlers with table loading
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage)
+  }
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      handlePageChange(currentPage - 1)
+    }
+  }
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      handlePageChange(currentPage + 1)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -172,7 +197,17 @@ export default function StudentsPage() {
           ) : (
             <div>
               {/* Mobile Card View */}
-              <div className="block lg:hidden space-y-3">
+              <div className="block lg:hidden space-y-3 relative">
+                {/* Mobile Loading Overlay */}
+                {isTableLoading && (
+                  <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-center justify-center z-10 rounded-lg">
+                    <div className="flex flex-col items-center">
+                      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Loading...</span>
+                    </div>
+                  </div>
+                )}
+                
                 {filteredStudents.map((student) => (
                   <div key={student.id} className="interactive-element p-4 border border-gray-200 dark:border-[#3c4043]">
                     <div className="flex items-start justify-between mb-2">
@@ -198,7 +233,17 @@ export default function StudentsPage() {
               </div>
               
               {/* Desktop Table View */}
-              <div className="hidden lg:block overflow-x-auto">
+              <div className="hidden lg:block overflow-x-auto relative">
+                {/* Table Loading Overlay */}
+                {isTableLoading && (
+                  <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-center justify-center z-10 rounded-lg">
+                    <div className="flex flex-col items-center">
+                      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Loading...</span>
+                    </div>
+                  </div>
+                )}
+                
                 <table className="table">
                   <thead className="table-header">
                     <tr>
@@ -247,11 +292,18 @@ export default function StudentsPage() {
               {totalPages > 1 && (
                 <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-[#3c4043]">
                   <button
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
+                    onClick={handlePreviousPage}
+                    disabled={currentPage === 1 || isTableLoading}
                     className="btn-secondary px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    ← Previous
+                    {isTableLoading && currentPage > 1 ? (
+                      <div className="flex items-center">
+                        <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-2"></div>
+                        Loading...
+                      </div>
+                    ) : (
+                      '← Previous'
+                    )}
                   </button>
                   
                   <div className="flex items-center gap-2">
@@ -261,11 +313,18 @@ export default function StudentsPage() {
                   </div>
 
                   <button
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
+                    onClick={handleNextPage}
+                    disabled={currentPage === totalPages || isTableLoading}
                     className="btn-secondary px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Next →
+                    {isTableLoading && currentPage < totalPages ? (
+                      <div className="flex items-center">
+                        <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-2"></div>
+                        Loading...
+                      </div>
+                    ) : (
+                      'Next →'
+                    )}
                   </button>
                 </div>
               )}

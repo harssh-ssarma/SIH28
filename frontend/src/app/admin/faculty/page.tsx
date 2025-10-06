@@ -21,6 +21,7 @@ interface Faculty {
 export default function FacultyManagePage() {
   const [faculty, setFaculty] = useState<Faculty[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isTableLoading, setIsTableLoading] = useState(false) // New: Table-specific loading
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedDepartment, setSelectedDepartment] = useState('')
@@ -32,7 +33,13 @@ export default function FacultyManagePage() {
   }, [currentPage])
 
   const fetchFaculty = async () => {
-    setIsLoading(true)
+    // For initial load, show full loading. For pagination, show table loading only
+    if (currentPage > 1) {
+      setIsTableLoading(true)
+    } else {
+      setIsLoading(true)
+    }
+    
     setError(null)
     try {
       const response = await apiClient.getFaculty(currentPage)
@@ -48,6 +55,7 @@ export default function FacultyManagePage() {
       setError('Failed to fetch faculty')
     } finally {
       setIsLoading(false)
+      setIsTableLoading(false) // Stop both loading states
     }
   }
 
@@ -59,6 +67,23 @@ export default function FacultyManagePage() {
   })
 
   const departments = [...new Set(faculty.map(f => f.department.department_name))].filter(Boolean)
+
+  // Pagination handlers with table loading
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage)
+  }
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      handlePageChange(currentPage - 1)
+    }
+  }
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      handlePageChange(currentPage + 1)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -171,7 +196,17 @@ export default function FacultyManagePage() {
               </div>
               
               {/* Desktop Table View */}
-              <div className="hidden lg:block overflow-x-auto">
+              <div className="hidden lg:block overflow-x-auto relative">
+                {/* Table Loading Overlay */}
+                {isTableLoading && (
+                  <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-center justify-center z-10 rounded-lg">
+                    <div className="flex flex-col items-center">
+                      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Loading...</span>
+                    </div>
+                  </div>
+                )}
+                
                 <table className="table">
                   <thead className="table-header">
                     <tr>
