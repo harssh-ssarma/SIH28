@@ -41,14 +41,15 @@ services:
 
   django:
     build: 
-      context: ./backend/django
+      context: .
       dockerfile: Dockerfile
+      target: django-production
     container_name: sih28_django
     restart: unless-stopped
     ports:
       - "${DJANGO_PORT:-8000}:8000"
     environment:
-      - DEBUG=${DEBUG:-True}
+      - DEBUG=${DEBUG:-False}
       - SECRET_KEY=${DJANGO_SECRET_KEY:-django-insecure-change-this-in-production}
       - DB_HOST=postgres
       - DB_NAME=${POSTGRES_DB:-sih28}
@@ -81,14 +82,15 @@ services:
 
   fastapi:
     build: 
-      context: ./backend/fastapi
+      context: .
       dockerfile: Dockerfile
+      target: fastapi-production
     container_name: sih28_fastapi
     restart: unless-stopped
     ports:
       - "${FASTAPI_PORT:-8001}:8001"
     environment:
-      - DEBUG=${DEBUG:-True}
+      - DEBUG=${DEBUG:-False}
       - REDIS_URL=redis://redis:6379/1
       - DJANGO_API_URL=http://django:8000
     depends_on:
@@ -108,16 +110,15 @@ services:
 
   frontend:
     build: 
-      context: ./frontend
+      context: .
       dockerfile: Dockerfile
-      args:
-        - NODE_ENV=${NODE_ENV:-development}
+      target: frontend-production
     container_name: sih28_frontend
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
-      - NODE_ENV=${NODE_ENV:-development}
+      - NODE_ENV=production
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       - NEXT_PUBLIC_FASTAPI_URL=${NEXT_PUBLIC_FASTAPI_URL:-http://localhost:8001}
     depends_on:
