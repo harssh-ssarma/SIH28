@@ -5,8 +5,8 @@
 FROM node:18-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-# Install dependencies with exact versions from lock file
-RUN npm ci --only=production --omit=dev
+# Install ALL dependencies (dev + prod) needed for build
+RUN npm ci
 COPY frontend/ ./
 RUN mkdir -p public
 RUN npm run build
