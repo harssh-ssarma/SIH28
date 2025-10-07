@@ -370,6 +370,11 @@ config_local.py
 htmlcov/
 .coverage
 
+# Test and demo files
+test_*.py
+demo_*.py
+*_test.py
+
 # Documentation builds
 docs/_build/
 site/
