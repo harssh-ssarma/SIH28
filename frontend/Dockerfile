@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies (production by default, dev if NODE_ENV=development)
-RUN if [ "$NODE_ENV" = "development" ] ; then npm install ; else npm ci --only=production ; fi
+RUN if [ "$NODE_ENV" = "development" ] ; then npm install ; else npm ci --only=production && npm audit fix --force || true ; fi
 
 # Copy source code
 COPY . .
