@@ -5,9 +5,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies (production by default, dev if NODE_ENV=development)
-# Remove npm audit fix to avoid version conflicts
-RUN if [ "$NODE_ENV" = "development" ] ; then npm install ; else npm ci --only=production --omit=dev ; fi
+# Install dependencies (all deps for build, then prune in production)
+RUN npm ci
 
 # Copy source code
 COPY . .
