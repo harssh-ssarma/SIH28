@@ -12,6 +12,10 @@ const nextConfig = {
     // your project has ESLint errors.
     ignoreDuringBuilds: true,
   },
+  experimental: {
+    // Enable modern path mapping
+    typedRoutes: false,
+  },
   async rewrites() {
     return [
       {
