@@ -8,6 +8,7 @@ COPY frontend/package*.json ./
 # Install dependencies with exact versions from lock file
 RUN npm ci --only=production --omit=dev
 COPY frontend/ ./
+RUN mkdir -p public
 RUN npm run build
 
 # Stage 2: Build Django Backend
