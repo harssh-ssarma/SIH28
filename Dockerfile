@@ -5,23 +5,36 @@
 FROM node:18-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm ci --only=production
+# Install dependencies and fix vulnerabilities
+RUN npm ci --only=production && npm audit fix --force || true
 COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Build Django Backend
 FROM python:3.11-slim AS django-builder
 WORKDIR /app/backend/django
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 COPY backend/django/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 COPY backend/django/ ./
 RUN python manage.py collectstatic --noinput
 
 # Stage 3: Build FastAPI Service
 FROM python:3.11-slim AS fastapi-builder
 WORKDIR /app/backend/fastapi
+# Install system dependencies for ortools
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 COPY backend/fastapi/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 COPY backend/fastapi/ ./
 
 # Stage 4: Final Production Image with Nginx
