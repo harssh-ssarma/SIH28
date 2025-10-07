@@ -176,7 +176,7 @@ CORS_ALLOW_CREDENTIALS = True
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'rediss://default:AUxcAAIncDI0ZWM0YjhkZjM2MGU0OWZmYWUxNjMxOTYzODBhYWFjNXAyMTk1NDg@singular-ghost-19548.upstash.io:6379',
+        'LOCATION': os.getenv('REDIS_URL', 'rediss://default:AUxcAAIncDI0ZWM0YjhkZjM2MGU0OWZmYWUxNjMxOTYzODBhYWFjNXAyMTk1NDg@singular-ghost-19548.upstash.io:6379'),
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
             'IGNORE_EXCEPTIONS': True,
