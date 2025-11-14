@@ -1,5 +1,10 @@
  # SIH28 - Timetable Optimization Platform
 
+[![Backend Tests](https://github.com/YOUR_USERNAME/SIH28/actions/workflows/backend-tests.yml/badge.svg)](https://github.com/YOUR_USERNAME/SIH28/actions/workflows/backend-tests.yml)
+[![Frontend Tests](https://github.com/YOUR_USERNAME/SIH28/actions/workflows/frontend-tests.yml/badge.svg)](https://github.com/YOUR_USERNAME/SIH28/actions/workflows/frontend-tests.yml)
+[![Security Scan](https://github.com/YOUR_USERNAME/SIH28/actions/workflows/security-scan.yml/badge.svg)](https://github.com/YOUR_USERNAME/SIH28/actions/workflows/security-scan.yml)
+[![codecov](https://codecov.io/gh/YOUR_USERNAME/SIH28/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_USERNAME/SIH28)
+
 A comprehensive timetable optimization platform with AI-powered scheduling, role-based dashboards, and responsive design.
 
 ## 🚀 Project Overview
