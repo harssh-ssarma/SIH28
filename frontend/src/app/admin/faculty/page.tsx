@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import DashboardLayout from '@/components/dashboard-layout'
+import Pagination from '@/components/Pagination'
 import apiClient from '@/lib/api'
 
 interface Faculty {
@@ -27,10 +28,25 @@ export default function FacultyManagePage() {
   const [selectedDepartment, setSelectedDepartment] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [itemsPerPage, setItemsPerPage] = useState(25)
 
   useEffect(() => {
     fetchFaculty()
   }, [currentPage])
+
+  useEffect(() => {
+    setCurrentPage(1)
+    fetchFaculty()
+  }, [itemsPerPage])
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+  }
+
+  const handleItemsPerPageChange = (newItemsPerPage: number) => {
+    setItemsPerPage(newItemsPerPage)
+  }
 
   const fetchFaculty = async () => {
     // For initial load, show full loading. For pagination, show table loading only
@@ -47,8 +63,9 @@ export default function FacultyManagePage() {
         setError(response.error)
       } else if (response.data) {
         setFaculty(response.data.results || response.data)
+        setTotalCount(response.data.count || 0)
         if (response.data.count) {
-          setTotalPages(Math.ceil(response.data.count / 100))
+          setTotalPages(Math.ceil(response.data.count / itemsPerPage))
         }
       }
     } catch (err) {
@@ -67,23 +84,6 @@ export default function FacultyManagePage() {
   })
 
   const departments = [...new Set(faculty.map(f => f.department.department_name))].filter(Boolean)
-
-  // Pagination handlers with table loading
-  const handlePageChange = (newPage: number) => {
-    setCurrentPage(newPage)
-  }
-
-  const handlePreviousPage = () => {
-    if (currentPage > 1) {
-      handlePageChange(currentPage - 1)
-    }
-  }
-
-  const handleNextPage = () => {
-    if (currentPage < totalPages) {
-      handlePageChange(currentPage + 1)
-    }
-  }
 
   if (isLoading) {
     return (
@@ -244,6 +244,21 @@ export default function FacultyManagePage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="mt-6 pt-4 border-t border-gray-200 dark:border-[#3c4043]">
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalCount={totalCount}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={handlePageChange}
+                    onItemsPerPageChange={handleItemsPerPageChange}
+                    showItemsPerPage={true}
+                  />
+                </div>
+              )}
             </>
           )}
         </div>
