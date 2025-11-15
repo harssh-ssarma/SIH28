@@ -43,8 +43,8 @@ class CachedModelViewSet(viewsets.ModelViewSet):
             # Fallback: clear entire cache if pattern delete fails
             try:
                 cache.clear()
-            except:
-                pass  # Ignore cache errors
+            except Exception:  # nosec B110 - Cache errors are non-critical
+                pass  # Ignore cache errors gracefully
     
     def create(self, request, *args, **kwargs):
         response = super().create(request, *args, **kwargs)
