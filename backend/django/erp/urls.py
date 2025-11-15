@@ -26,9 +26,13 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
     SpectacularRedocView,
 )
+from core.views import health_check, ping
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    # Health check endpoints (no authentication required)
+    path('health/', health_check, name='health_check'),
+    path('ping/', ping, name='ping'),
     path('api/', include('academics.urls')),
     # JWT Authentication endpoints
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
