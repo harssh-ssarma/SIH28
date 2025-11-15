@@ -14,11 +14,12 @@ RUN npm run build
 # Stage 2: Build Backend (Django + FastAPI)
 FROM python:3.11-slim AS backend-builder
 WORKDIR /app/backend
-# Install system dependencies
+# Install system dependencies (including for argon2-cffi)
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     postgresql-client \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 # Copy shared requirements
 COPY backend/requirements.txt ./
@@ -50,11 +51,12 @@ CMD ["/render-entrypoint.sh"]
 FROM python:3.11-slim AS django-production
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies (including for argon2-cffi)
 RUN apt-get update && apt-get install -y \
     postgresql-client \
     curl \
     bash \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python dependencies from builder
