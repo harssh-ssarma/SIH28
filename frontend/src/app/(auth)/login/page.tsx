@@ -30,15 +30,39 @@ export default function LoginPage() {
       await login(data.username, data.password)
       showToast('success', 'Login successful! Redirecting...')
 
-      // Redirect based on role after login
-      if (data.username.includes('admin')) {
-        router.push('/admin/dashboard')
-      } else if (data.username.includes('staff')) {
-        router.push('/staff/dashboard')
-      } else if (data.username.includes('student')) {
-        router.push('/student/dashboard')
+      // Get user data from localStorage to check role
+      const userData = localStorage.getItem('user')
+      if (userData) {
+        const user = JSON.parse(userData)
+        
+        // Redirect based on user role
+        switch (user.role) {
+          case 'admin':
+            router.push('/admin/dashboard')
+            break
+          case 'staff':
+            router.push('/staff/dashboard')
+            break
+          case 'student':
+            router.push('/student/dashboard')
+            break
+          case 'faculty':
+            router.push('/faculty/dashboard')
+            break
+          default:
+            router.push('/dashboard')
+        }
       } else {
-        router.push('/faculty/dashboard')
+        // Fallback to username-based redirect if role not available
+        if (data.username.includes('admin')) {
+          router.push('/admin/dashboard')
+        } else if (data.username.includes('staff')) {
+          router.push('/staff/dashboard')
+        } else if (data.username.includes('student')) {
+          router.push('/student/dashboard')
+        } else {
+          router.push('/faculty/dashboard')
+        }
       }
     } catch (err) {
       showToast('error', 'Login failed. Please check your credentials and try again.')
