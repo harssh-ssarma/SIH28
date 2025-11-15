@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import DashboardLayout from '@/components/dashboard-layout'
+import Pagination from '@/components/Pagination'
 import apiClient from '@/lib/api'
 
 interface Student {
@@ -36,10 +37,25 @@ export default function StudentsPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
+  const [itemsPerPage, setItemsPerPage] = useState(25)
 
   useEffect(() => {
     fetchStudents()
   }, [currentPage])
+
+  useEffect(() => {
+    // Reset to page 1 when items per page changes
+    setCurrentPage(1)
+    fetchStudents()
+  }, [itemsPerPage])
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+  }
+
+  const handleItemsPerPageChange = (newItemsPerPage: number) => {
+    setItemsPerPage(newItemsPerPage)
+  }
 
   const fetchStudents = async () => {
     // For initial load, show full loading. For pagination, show table loading only
@@ -58,7 +74,7 @@ export default function StudentsPage() {
         setStudents(response.data.results || response.data)
         setTotalCount(response.data.count || 0)
         if (response.data.count) {
-          setTotalPages(Math.ceil(response.data.count / 100))
+          setTotalPages(Math.ceil(response.data.count / itemsPerPage))
         }
       }
     } catch (err) {
@@ -79,23 +95,6 @@ export default function StudentsPage() {
 
   const departments = [...new Set(students.map(s => s.department.department_name))].filter(Boolean)
   const years = [...new Set(students.map(s => s.year))].sort((a, b) => a - b)
-
-  // Pagination handlers with table loading
-  const handlePageChange = (newPage: number) => {
-    setCurrentPage(newPage)
-  }
-
-  const handlePreviousPage = () => {
-    if (currentPage > 1) {
-      handlePageChange(currentPage - 1)
-    }
-  }
-
-  const handleNextPage = () => {
-    if (currentPage < totalPages) {
-      handlePageChange(currentPage + 1)
-    }
-  }
 
   if (isLoading) {
     return (
@@ -195,7 +194,7 @@ export default function StudentsPage() {
               </p>
             </div>
           ) : (
-            <div>
+            <>
               {/* Mobile Card View */}
               <div className="block lg:hidden space-y-3 relative">
                 {/* Mobile Loading Overlay */}
@@ -219,13 +218,13 @@ export default function StudentsPage() {
                     </div>
                     <div className="space-y-2">
                       <div className="flex gap-2">
-                        <span key={`dept-${student.id}`} className="badge badge-neutral text-xs">{student.department.department_name}</span>
-                        <span key={`year-${student.id}`} className="badge badge-info text-xs">Year {student.year}</span>
-                        <span key={`sem-${student.id}`} className="badge badge-success text-xs">Sem {student.semester}</span>
+                        <span className="badge badge-neutral text-xs">{student.department.department_name}</span>
+                        <span className="badge badge-info text-xs">Year {student.year}</span>
+                        <span className="badge badge-success text-xs">Sem {student.semester}</span>
                       </div>
                       <div className="text-xs text-gray-600 dark:text-gray-400">
-                        <p key={`electives-${student.id}`}><strong>Electives:</strong> {student.electives || 'None'}</p>
-                        <p key={`faculty-${student.id}`}><strong>Faculty:</strong> {student.faculty_advisor?.faculty_name || 'Not assigned'}</p>
+                        <p><strong>Electives:</strong> {student.electives || 'None'}</p>
+                        <p><strong>Faculty:</strong> {student.faculty_advisor?.faculty_name || 'Not assigned'}</p>
                       </div>
                     </div>
                   </div>
@@ -290,45 +289,19 @@ export default function StudentsPage() {
               
               {/* Pagination Controls */}
               {totalPages > 1 && (
-                <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-[#3c4043]">
-                  <button
-                    onClick={handlePreviousPage}
-                    disabled={currentPage === 1 || isTableLoading}
-                    className="btn-secondary px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isTableLoading && currentPage > 1 ? (
-                      <div className="flex items-center">
-                        <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-2"></div>
-                        Loading...
-                      </div>
-                    ) : (
-                      '← Previous'
-                    )}
-                  </button>
-                  
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      Page {currentPage} of {totalPages}
-                    </span>
-                  </div>
-
-                  <button
-                    onClick={handleNextPage}
-                    disabled={currentPage === totalPages || isTableLoading}
-                    className="btn-secondary px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isTableLoading && currentPage < totalPages ? (
-                      <div className="flex items-center">
-                        <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-2"></div>
-                        Loading...
-                      </div>
-                    ) : (
-                      'Next →'
-                    )}
-                  </button>
+                <div className="mt-6 pt-4 border-t border-gray-200 dark:border-[#3c4043]">
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalCount={totalCount}
+                    itemsPerPage={itemsPerPage}
+                    onPageChange={handlePageChange}
+                    onItemsPerPageChange={handleItemsPerPageChange}
+                    showItemsPerPage={true}
+                  />
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>
