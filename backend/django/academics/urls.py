@@ -12,7 +12,7 @@ from .views import (
     LabViewSet,
     TimetableViewSet,
     TimetableSlotViewSet,
-    AttendanceViewSet,
+    # AttendanceViewSet - Old attendance system, replaced by attendance_urls
     login_view,
     logout_view,
     current_user_view,
@@ -31,12 +31,13 @@ router.register(r"classrooms", ClassroomViewSet)
 router.register(r"labs", LabViewSet)
 router.register(r"timetables", TimetableViewSet)
 router.register(r"timetable-slots", TimetableSlotViewSet)
-router.register(r"attendance", AttendanceViewSet)
+# Old attendance ViewSet - commented out in favor of new attendance system
+# router.register(r"attendance", AttendanceViewSet)
 router.register(r"generation-jobs", GenerationJobViewSet, basename="generation-job")
 
 urlpatterns = [
     path("", include(router.urls)),
-    # Attendance management routes
+    # New Attendance management routes (takes priority)
     path("attendance/", include("academics.attendance_urls")),
     # Auth endpoints - support both with and without trailing slash
     path("auth/login/", login_view, name="login"),
