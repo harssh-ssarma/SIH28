@@ -24,6 +24,10 @@ def django_db_setup():
         'ATOMIC_REQUESTS': True,
         'CONN_MAX_AGE': 600,
     }
+    # Use faster password hasher for testing
+    settings.PASSWORD_HASHERS = [
+        'django.contrib.auth.hashers.MD5PasswordHasher',
+    ]
 
 
 @pytest.fixture
