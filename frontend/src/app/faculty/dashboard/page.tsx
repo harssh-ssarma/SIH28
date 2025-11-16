@@ -1,10 +1,19 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import DashboardLayout from '@/components/dashboard-layout'
 import TimetableGrid from '@/components/shared/TimetableGrid'
 import ExportButton from '@/components/shared/ExportButton'
 import apiClient from '@/lib/api'
+
+interface Subject {
+  subject_id: string
+  subject_name: string
+  total_sessions: number
+  total_students: number
+  average_attendance: number
+}
 
 interface ClassSession {
   id: number
@@ -36,6 +45,8 @@ interface TimetableSlot {
 }
 
 export default function FacultyDashboard() {
+  const router = useRouter()
+  const [mySubjects, setMySubjects] = useState<Subject[]>([])
   const [todaysClasses, setTodaysClasses] = useState<ClassSession[]>([])
   const [mySchedule, setMySchedule] = useState<TimeSlot[]>([])
   const [selectedClass, setSelectedClass] = useState<ClassSession | null>(null)
@@ -44,8 +55,28 @@ export default function FacultyDashboard() {
   const [timetableData, setTimetableData] = useState<any>(null)
 
   useEffect(() => {
+    loadMySubjects()
     loadTimetableData()
   }, [])
+
+  const loadMySubjects = async () => {
+    try {
+      const token = localStorage.getItem('auth_token')
+      const response = await fetch('http://localhost:8000/api/attendance/faculty/my-classes/', {
+        headers: {
+          'Authorization': `Token ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (!response.ok) throw new Error('Failed to load subjects')
+      
+      const data = await response.json()
+      setMySubjects(Array.isArray(data) ? data : [])
+    } catch (error) {
+      console.error('Failed to load subjects:', error)
+    }
+  }
 
   const loadTimetableData = async () => {
     try {
@@ -170,9 +201,9 @@ export default function FacultyDashboard() {
     // This method is now replaced by loadTimetableData, keeping for compatibility
   }
 
-  const handleTakeAttendance = (classSession: ClassSession) => {
-    setSelectedClass(classSession)
-    setShowAttendanceModal(true)
+  const handleTakeAttendance = (subjectId?: string) => {
+    // Redirect to attendance page
+    router.push('/faculty/attendance')
   }
 
   const closeAttendanceModal = () => {
@@ -189,39 +220,39 @@ export default function FacultyDashboard() {
           </h1>
         </div>
 
-        {/* Today's Classes for Attendance */}
+        {/* My Assigned Subjects */}
         <div className="card">
           <div className="card-header">
-            <h3 className="card-title">Today's Classes for Attendance</h3>
-            <p className="card-description">Mark attendance for your classes scheduled today</p>
+            <h3 className="card-title">My Assigned Subjects</h3>
+            <p className="card-description">Subjects assigned to you for attendance management</p>
           </div>
 
           {loading ? (
             <div className="text-center py-8">
               <div className="loading-spinner w-6 h-6 mx-auto mb-4"></div>
-              <p className="text-gray-600 dark:text-gray-400">Loading today's classes...</p>
+              <p className="text-gray-600 dark:text-gray-400">Loading your subjects...</p>
             </div>
-          ) : todaysClasses.length > 0 ? (
+          ) : mySubjects.length > 0 ? (
             <div className="space-y-3">
-              {todaysClasses.map(classSession => (
+              {mySubjects.map(subject => (
                 <div
-                  key={classSession.id}
+                  key={subject.subject_id}
                   className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-lg gap-3"
                 >
                   <div className="flex-1">
                     <h4 className="font-medium text-gray-900 dark:text-white">
-                      {classSession.course_name}
+                      {subject.subject_name}
                     </h4>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {classSession.batch} • {classSession.time_slot} • {classSession.classroom}
+                      Subject ID: {subject.subject_id}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-500">
-                      {classSession.students_count} students enrolled
+                      {subject.total_students} students • {subject.total_sessions} sessions • {subject.average_attendance.toFixed(1)}% avg attendance
                     </p>
                   </div>
 
                   <button
-                    onClick={() => handleTakeAttendance(classSession)}
+                    onClick={() => handleTakeAttendance(subject.subject_id)}
                     className="btn-primary w-full sm:w-auto"
                   >
                     📝 Take Attendance
@@ -231,12 +262,12 @@ export default function FacultyDashboard() {
             </div>
           ) : (
             <div className="text-center py-8">
-              <div className="text-4xl mb-4">📅</div>
+              <div className="text-4xl mb-4">📚</div>
               <h4 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                No Classes Today
+                No Subjects Assigned
               </h4>
               <p className="text-gray-600 dark:text-gray-400">
-                You don't have any classes scheduled for today.
+                You don't have any subjects assigned yet.
               </p>
             </div>
           )}
