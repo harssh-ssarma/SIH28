@@ -74,7 +74,8 @@ export default function FacultyAttendancePage() {
       if (!response.ok) throw new Error('Failed to load classes')
       
       const data = await response.json()
-      setMyClasses(data.results || [])
+      // Backend returns array directly, not wrapped in results
+      setMyClasses(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error('Failed to load classes:', error)
       showErrorToast('Failed to load classes')
