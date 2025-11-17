@@ -1,4 +1,4 @@
-// API Client for Django Backend
+// 🔐 API Client for Django Backend with Secure HttpOnly Cookie Authentication
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 
 interface LoginCredentials {
@@ -14,48 +14,44 @@ interface ApiResponse<T> {
 
 class ApiClient {
   private baseUrl: string;
-  private token: string | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
-    // Try to get token from localStorage on initialization
-    if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem('auth_token');
-    }
   }
 
   private getHeaders(): HeadersInit {
-    const headers: HeadersInit = {
+    return {
       'Content-Type': 'application/json',
     };
-
-    if (this.token) {
-      headers['Authorization'] = `Token ${this.token}`;
-    }
-
-    return headers;
   }
 
-  setToken(token: string | null) {
-    this.token = token;
-    if (typeof window !== 'undefined') {
-      if (token) {
-        localStorage.setItem('auth_token', token);
-      } else {
-        localStorage.removeItem('auth_token');
-      }
-    }
-  }
-
+  /**
+   * 🔐 CRITICAL: credentials: 'include' sends HttpOnly cookies with every request
+   * This is required for secure JWT authentication
+   */
   async request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
     try {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         ...options,
+        credentials: 'include',  // 🔐 CRITICAL: Send cookies with request
         headers: {
           ...this.getHeaders(),
           ...options?.headers,
         },
       });
+
+      // Handle 401 Unauthorized - try to refresh token
+      if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/refresh')) {
+        const refreshed = await this.refreshToken();
+        if (refreshed) {
+          // Retry original request after refresh
+          return this.request<T>(endpoint, options);
+        }
+        // Refresh failed, redirect to login
+        if (typeof window !== 'undefined') {
+          window.location.href = '/auth/signin';
+        }
+      }
 
       const data = await response.json();
 
@@ -72,21 +68,37 @@ class ApiClient {
     }
   }
 
+  /**
+   * 🔐 Refresh JWT access token using refresh token from HttpOnly cookie
+   */
+  private async refreshToken(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.baseUrl}/auth/refresh/`, {
+        method: 'POST',
+        credentials: 'include',  // 🔐 CRITICAL: Send refresh token cookie
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
   // Authentication
   async login(credentials: LoginCredentials) {
-    return this.request<{ token: string; user: any }>('/auth/login/', {
+    return this.request<{ message: string; user: any }>('/auth/login/', {
       method: 'POST',
       body: JSON.stringify(credentials),
     });
   }
 
   async logout() {
-    this.setToken(null);
-    return { status: 200 };
+    return this.request<{ message: string }>('/auth/logout/', {
+      method: 'POST',
+    });
   }
 
   async getCurrentUser() {
-    return this.request<any>('/users/me/');
+    return this.request<any>('/auth/me/');
   }
 
   // Users

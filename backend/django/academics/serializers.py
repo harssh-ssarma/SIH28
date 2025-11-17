@@ -1,14 +1,15 @@
 from rest_framework import serializers
 from .models import (
     User,
+    Organization,
     Department,
-    Course,
+    Program,  # Changed from Course
     Subject,
     Faculty,
     Student,
     Batch,
     Classroom,
-    Lab,
+    # Lab removed - not in multi-tenant models
     GenerationJob,
     Timetable,
     TimetableSlot,
@@ -17,6 +18,8 @@ from .models import (
 
 
 class UserSerializer(serializers.ModelSerializer):
+    organization_name = serializers.CharField(source='organization.org_name', read_only=True)
+    
     class Meta:
         model = User
         fields = [
@@ -24,7 +27,8 @@ class UserSerializer(serializers.ModelSerializer):
             "username",
             "email",
             "role",
-            "department",
+            "organization",
+            "organization_name",
             "first_name",
             "last_name",
             "is_active",
@@ -38,21 +42,34 @@ class DepartmentSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class CourseSerializer(serializers.ModelSerializer):
+class ProgramSerializer(serializers.ModelSerializer):
+    """Serializer for Program model (formerly Course)"""
     class Meta:
-        model = Course
+        model = Program
         fields = "__all__"
 
 
+# Alias for backwards compatibility
+CourseSerializer = ProgramSerializer
+
+
 class SubjectSerializer(serializers.ModelSerializer):
-    course = CourseSerializer(read_only=True)
+    program = ProgramSerializer(read_only=True)
     department = DepartmentSerializer(read_only=True)
-    course_id = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), source="course", write_only=True
+    program_id = serializers.PrimaryKeyRelatedField(
+        queryset=Program.objects.all(), source="program", write_only=True, required=False
     )
     department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(), source="department", write_only=True
+        queryset=Department.objects.all(), source="department", write_only=True, required=False
     )
+    
+    # Backwards compatibility
+    course = serializers.SerializerMethodField()
+    
+    def get_course(self, obj):
+        if hasattr(obj, 'program') and obj.program:
+            return ProgramSerializer(obj.program).data
+        return None
 
     class Meta:
         model = Subject
@@ -60,7 +77,7 @@ class SubjectSerializer(serializers.ModelSerializer):
 
 
 class FacultySerializer(serializers.ModelSerializer):
-    department = DepartmentSerializer(read_only=True)
+    department = serializers.SerializerMethodField()
     department_id = serializers.PrimaryKeyRelatedField(
         queryset=Department.objects.all(), source="department", write_only=True
     )
@@ -71,6 +88,24 @@ class FacultySerializer(serializers.ModelSerializer):
     )
     status = serializers.SerializerMethodField()
 
+    def get_department(self, obj):
+        if obj.department:
+            return {
+                "dept_id": str(obj.department.dept_id),
+                "dept_code": obj.department.dept_code,
+                "dept_name": obj.department.dept_name,
+                "hod_name": obj.department.hod_name,
+                "hod_email": obj.department.hod_email,
+                "building_name": obj.department.building_name,
+                "floor_numbers": obj.department.floor_numbers,
+                "is_active": obj.department.is_active,
+                "created_at": obj.department.created_at,
+                "updated_at": obj.department.updated_at,
+                "organization": str(obj.department.organization_id),
+                "school": str(obj.department.school_id) if obj.department.school_id else None,
+            }
+        return None
+
     def get_status(self, obj):
         return "Active"  # Default status
 
@@ -80,25 +115,77 @@ class FacultySerializer(serializers.ModelSerializer):
 
 
 class StudentSerializer(serializers.ModelSerializer):
-    department = DepartmentSerializer(read_only=True)
-    course = CourseSerializer(read_only=True)
+    department = serializers.SerializerMethodField()
+    program = serializers.SerializerMethodField()
     faculty_advisor = serializers.SerializerMethodField()
 
     # Write-only fields for creating/updating
     department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(), source="department", write_only=True
+        queryset=Department.objects.all(), source="department", write_only=True, required=False
     )
-    course_id = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), source="course", write_only=True
+    program_id = serializers.PrimaryKeyRelatedField(
+        queryset=Program.objects.all(), source="program", write_only=True, required=False
     )
 
-    # Alias for consistency
-    student_name = serializers.CharField(source="name", read_only=True)
+    # Backwards compatibility - map old field names to new
+    student_id = serializers.CharField(source="roll_number", required=False)
+    name = serializers.CharField(source="student_name", required=False)
+    year = serializers.IntegerField(source="current_year", required=False)
+    semester = serializers.IntegerField(source="current_semester", required=False)
+    
+    # Alias course to program for backwards compatibility
+    course = serializers.SerializerMethodField()
+    
+    def get_department(self, obj):
+        if obj.department:
+            return {
+                "dept_id": str(obj.department.dept_id),
+                "dept_code": obj.department.dept_code,
+                "dept_name": obj.department.dept_name,
+                "hod_name": obj.department.hod_name,
+                "hod_email": obj.department.hod_email,
+                "building_name": obj.department.building_name,
+                "floor_numbers": obj.department.floor_numbers,
+                "is_active": obj.department.is_active,
+                "created_at": obj.department.created_at,
+                "updated_at": obj.department.updated_at,
+                "organization": str(obj.department.organization_id),
+                "school": str(obj.department.school_id) if obj.department.school_id else None,
+            }
+        return None
+
+    def get_program(self, obj):
+        if obj.program:
+            return {
+                "program_id": str(obj.program.program_id),
+                "program_code": obj.program.program_code,
+                "program_name": obj.program.program_name,
+                "program_type": obj.program.program_type,
+                "duration_years": obj.program.duration_years,
+                "total_semesters": obj.program.total_semesters,
+                "total_credits": obj.program.total_credits,
+                "allow_multiple_entry_exit": obj.program.allow_multiple_entry_exit,
+                "exit_certificate_1_year": obj.program.exit_certificate_1_year,
+                "exit_diploma_2_years": obj.program.exit_diploma_2_years,
+                "exit_degree_3_years": obj.program.exit_degree_3_years,
+                "intake_capacity": obj.program.intake_capacity,
+                "min_eligibility": obj.program.min_eligibility,
+                "is_active": obj.program.is_active,
+                "created_at": obj.program.created_at,
+                "updated_at": obj.program.updated_at,
+                "department": str(obj.program.department_id) if obj.program.department_id else None,
+                "organization": str(obj.program.organization_id),
+            }
+        return None
+
+    def get_course(self, obj):
+        # Alias for backwards compatibility
+        return self.get_program(obj)
 
     def get_faculty_advisor(self, obj):
         if obj.faculty_advisor:
             return {
-                "faculty_id": obj.faculty_advisor.faculty_id,
+                "faculty_id": str(obj.faculty_advisor.faculty_id),
                 "faculty_name": obj.faculty_advisor.faculty_name,
             }
         return None
@@ -109,14 +196,24 @@ class StudentSerializer(serializers.ModelSerializer):
 
 
 class BatchSerializer(serializers.ModelSerializer):
-    course = CourseSerializer(read_only=True)
+    program = ProgramSerializer(read_only=True)
     department = DepartmentSerializer(read_only=True)
-    course_id = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), source="course", write_only=True
+    program_id = serializers.PrimaryKeyRelatedField(
+        queryset=Program.objects.all(), source="program", write_only=True, required=False
     )
     department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(), source="department", write_only=True
+        queryset=Department.objects.all(), source="department", write_only=True, required=False
     )
+    
+    # Backwards compatibility
+    course = serializers.SerializerMethodField()
+    year = serializers.IntegerField(source="year_of_admission", required=False)
+    semester = serializers.IntegerField(source="current_semester", required=False)
+    
+    def get_course(self, obj):
+        if hasattr(obj, 'program') and obj.program:
+            return ProgramSerializer(obj.program).data
+        return None
 
     class Meta:
         model = Batch
@@ -124,25 +221,15 @@ class BatchSerializer(serializers.ModelSerializer):
 
 
 class ClassroomSerializer(serializers.ModelSerializer):
-    department = DepartmentSerializer(read_only=True)
-    department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(), source="department", write_only=True
-    )
-
+    # Multi-tenant Classroom model doesn't have department FK
+    # It has organization FK instead
     class Meta:
         model = Classroom
         fields = "__all__"
 
 
-class LabSerializer(serializers.ModelSerializer):
-    department = DepartmentSerializer(read_only=True)
-    department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(), source="department", write_only=True
-    )
-
-    class Meta:
-        model = Lab
-        fields = "__all__"
+# Lab model removed in multi-tenant architecture
+# Labs are now handled as Classroom with room_type='lab'
 
 
 class TimetableSlotSerializer(serializers.ModelSerializer):

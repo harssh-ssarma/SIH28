@@ -1,8 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import DashboardLayout from '@/components/dashboard-layout'
 import { useToast } from '@/components/Toast'
 import apiClient from '@/lib/api'
 
@@ -18,34 +17,53 @@ export default function AdminDashboard() {
   })
   const [loading, setLoading] = useState(true)
   const [faculty, setFaculty] = useState<any[]>([])
-
   useEffect(() => {
+    // Fetch data when component mounts
     fetchDashboardData()
+    
+    // Cleanup function is not needed as we want fresh data on each visit
   }, [])
 
   const fetchDashboardData = async () => {
+    setLoading(true)
     try {
-      // Add cache buster to force fresh data
-      const timestamp = Date.now()
+      // Remove cache busters to allow Redis caching for better performance
       const [usersRes, studentsRes, facultyRes, coursesRes] = await Promise.all([
-        apiClient.request(`/users/?_t=${timestamp}`),
-        apiClient.request(`/students/?_t=${timestamp}`),
-        apiClient.request(`/faculty/?_t=${timestamp}`),
-        apiClient.request(`/courses/?_t=${timestamp}`)
+        apiClient.request(`/users/`),
+        apiClient.request(`/students/`),
+        apiClient.request(`/faculty/`),
+        apiClient.request(`/courses/`)
       ])
 
-      // Calculate total users: Admin/Staff from users table + Faculty + Students
+      // Calculate total users: All users from users table (includes admin, staff, faculty, students)
       const usersData = (usersRes.data as any)
+      const totalUsers = usersData?.count || usersData?.results?.length || 0
       const allUsers = usersData?.results || []
       const adminStaffCount = allUsers.filter((u: any) => u.role === 'admin' || u.role === 'staff').length
       
-      const totalFaculty = (facultyRes.data as any)?.count || (facultyRes.data as any)?.results?.length || 0
-      const totalStudents = (studentsRes.data as any)?.count || (studentsRes.data as any)?.results?.length || 0
+      const facultyData = (facultyRes.data as any)
+      const totalFaculty = facultyData?.count || facultyData?.results?.length || 0
       
-      // Total users = Admin/Staff + Faculty + Students (no duplicates)
-      const totalUsers = adminStaffCount + totalFaculty + totalStudents
+      const studentsData = (studentsRes.data as any)
+      const totalStudents = studentsData?.count || studentsData?.results?.length || 0
       
-      const activeCourses = (coursesRes.data as any)?.length || (coursesRes.data as any)?.results?.length || 0
+      const coursesData = (coursesRes.data as any)
+      const activeCourses = coursesData?.count || coursesData?.results?.length || 0
+      
+      console.log('Dashboard API responses:', { 
+        usersData, 
+        facultyData, 
+        studentsData, 
+        coursesData 
+      })
+      
+      console.log('Dashboard calculated stats:', { 
+        totalUsers, 
+        adminStaffCount, 
+        totalFaculty, 
+        totalStudents, 
+        activeCourses 
+      })
       
       setStats({
         totalUsers,
@@ -53,11 +71,9 @@ export default function AdminDashboard() {
         pendingApprovals: 0,
         systemHealth: 98
       })
-      
-      console.log('Dashboard updated:', { totalUsers, adminStaffCount, totalFaculty, totalStudents, activeCourses })
 
-      const facultyData = (facultyRes.data as any)?.results || facultyRes.data || []
-      setFaculty(facultyData.slice(0, 3).map((f: any) => ({
+      const facultyResults = facultyData?.results || facultyData || []
+      setFaculty(facultyResults.slice(0, 3).map((f: any) => ({
         id: f.faculty_id || f.id,
         name: f.faculty_name || f.name || 'Unknown',
         department: f.department?.department_name || f.department || 'N/A',
@@ -171,8 +187,7 @@ export default function AdminDashboard() {
   }
 
   return (
-    <DashboardLayout role="admin">
-      <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4 sm:space-y-6">
         {/* Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
           <div className="card">
@@ -272,7 +287,7 @@ export default function AdminDashboard() {
                     {faculty.name}
                   </p>
                   <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                    {faculty.department}
+                    {faculty.department?.dept_name || 'N/A'}
                   </p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
@@ -676,6 +691,5 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
-    </DashboardLayout>
   )
 }

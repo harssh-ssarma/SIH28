@@ -7,7 +7,7 @@ import apiClient from '@/lib/api'
 interface AuthContextType {
   user: User | null
   login: (username: string, password: string) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   isLoading: boolean
   error: string | null
 }
@@ -20,19 +20,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('user')
-    const token = localStorage.getItem('auth_token')
-
-    if (savedUser && token) {
+    // 🔐 On mount, try to get current user from backend (cookie auth)
+    // No need to check localStorage - cookies are sent automatically
+    const checkAuth = async () => {
       try {
-        setUser(JSON.parse(savedUser))
-        apiClient.setToken(token)
+        const response = await apiClient.getCurrentUser()
+        if (response.data) {
+          setUser(response.data)
+        }
       } catch {
-        localStorage.removeItem('user')
-        localStorage.removeItem('auth_token')
+        // Not authenticated or error
+        setUser(null)
+      } finally {
+        setIsLoading(false)
       }
     }
-    setIsLoading(false)
+
+    checkAuth()
   }, [])
 
   const login = async (username: string, password: string) => {
@@ -48,21 +52,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(response.error || 'Invalid credentials')
       }
 
-      const { token, user: userData } = response.data
+      // 🔐 JWT tokens are set in HttpOnly cookies by backend
+      // We only store user data (no tokens in frontend!)
+      const userData = response.data.user
 
-      // Set token in API client and localStorage
-      apiClient.setToken(token)
-      localStorage.setItem('auth_token', token)
-
-      // Store user data
       const userWithoutPassword = {
         id: userData.id,
         username: userData.username,
         email: userData.email,
         role: userData.role,
+        first_name: userData.first_name,
+        last_name: userData.last_name,
+        department: userData.department,
+        organization: userData.organization,
       }
 
       setUser(userWithoutPassword)
+      // Store user info in localStorage (not sensitive, just for UI)
       localStorage.setItem('user', JSON.stringify(userWithoutPassword))
       setIsLoading(false)
     } catch (err) {
@@ -71,12 +77,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const logout = () => {
-    setUser(null)
-    setError(null)
-    localStorage.removeItem('user')
-    localStorage.removeItem('auth_token')
-    apiClient.setToken(null)
+  const logout = async () => {
+    try {
+      // Call backend logout to blacklist refresh token
+      await apiClient.logout()
+    } catch {
+      // Logout anyway even if backend call fails
+    } finally {
+      setUser(null)
+      setError(null)
+      localStorage.removeItem('user')
+      // Cookies are deleted by backend
+    }
   }
 
   return (

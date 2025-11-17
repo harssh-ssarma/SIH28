@@ -237,46 +237,63 @@ class AdminAttendanceViewSet(viewsets.ViewSet):
         overall_attendance = (present_records / total_records * 100) if total_records > 0 else 0
         
         # Department-wise statistics
-        from .models import Department
+        from .models import Department, Student
         departments = Department.objects.all()
         dept_stats = []
         
         for dept in departments:
             dept_sessions = AttendanceSession.objects.filter(
                 subject__department=dept
-            ).count()
+            )
+            dept_total_sessions = dept_sessions.count()
+            dept_marked = dept_sessions.filter(is_marked=True).count()
             
             dept_records = AttendanceRecord.objects.filter(
                 session__subject__department=dept
             )
-            dept_total = dept_records.count()
+            dept_total_records = dept_records.count()
             dept_present = dept_records.filter(
                 Q(status='present') | Q(status='late')
             ).count()
-            dept_percentage = (dept_present / dept_total * 100) if dept_total > 0 else 0
+            dept_percentage = (dept_present / dept_total_records * 100) if dept_total_records > 0 else 0
+            
+            # Count at-risk students in this department
+            dept_students = Student.objects.filter(department=dept)
+            at_risk_count = 0
+            for student in dept_students:
+                student_records = AttendanceRecord.objects.filter(student=student)
+                if student_records.exists():
+                    student_present = student_records.filter(Q(status='present') | Q(status='late')).count()
+                    student_percentage = (student_present / student_records.count() * 100)
+                    if student_percentage < 75:
+                        at_risk_count += 1
             
             dept_stats.append({
-                'department': dept.department_name,
-                'sessions': dept_sessions,
-                'attendance_percentage': round(dept_percentage, 2)
+                'department_name': dept.department_name,
+                'total_sessions': dept_total_sessions,
+                'sessions_marked': dept_marked,
+                'average_attendance': round(dept_percentage, 2),
+                'at_risk_students': at_risk_count
             })
         
-        # At-risk students count
-        at_risk_alerts = AttendanceAlert.objects.filter(
-            alert_type='low_attendance',
-            severity__in=['high', 'critical'],
-            is_read=False
-        ).count()
+        # At-risk students count (university-wide)
+        all_students = Student.objects.all()
+        total_at_risk = 0
+        for student in all_students:
+            student_records = AttendanceRecord.objects.filter(student=student)
+            if student_records.exists():
+                student_present = student_records.filter(Q(status='present') | Q(status='late')).count()
+                student_percentage = (student_present / student_records.count() * 100)
+                if student_percentage < 75:
+                    total_at_risk += 1
         
         return Response({
-            "overview": {
-                "total_sessions": total_sessions,
-                "marked_sessions": marked_sessions,
-                "pending_sessions": pending_sessions,
-                "overall_attendance": round(overall_attendance, 2)
-            },
-            "department_wise": dept_stats,
-            "at_risk_students": at_risk_alerts
+            "total_sessions": total_sessions,
+            "sessions_marked": marked_sessions,
+            "sessions_pending": pending_sessions,
+            "overall_attendance_percentage": round(overall_attendance, 2),
+            "at_risk_students_count": total_at_risk,
+            "department_stats": dept_stats
         })
 
     @action(detail=False, methods=['post'], url_path='override')

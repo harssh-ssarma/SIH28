@@ -1,6 +1,8 @@
 'use client'
 
+import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useState, useEffect } from 'react'
 
 interface SidebarProps {
   sidebarOpen: boolean
@@ -68,6 +70,22 @@ export default function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname()
   const items = getNavigationItems(role)
+  const [userName, setUserName] = useState('')
+  const [userEmail, setUserEmail] = useState('')
+
+  useEffect(() => {
+    // Get user info from localStorage
+    const userStr = localStorage.getItem('user')
+    if (userStr) {
+      try {
+        const user = JSON.parse(userStr)
+        setUserName(user.username || user.name || '')
+        setUserEmail(user.email || '')
+      } catch (e) {
+        console.error('Error parsing user data:', e)
+      }
+    }
+  }, [])
 
   return (
     <>
@@ -89,7 +107,7 @@ export default function Sidebar({
             {items.map(item => {
               const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
               return (
-                <a
+                <Link
                   key={item.name}
                   href={item.href}
                   className={`${isActive ? 'nav-link-active' : 'nav-link'} ${sidebarCollapsed ? 'md:justify-start md:w-10' : ''} pl-2 sm:pl-2 h-10 text-xs sm:text-sm`}
@@ -104,7 +122,7 @@ export default function Sidebar({
                   >
                     {item.name}
                   </span>
-                </a>
+                </Link>
               )
             })}
           </nav>
@@ -119,22 +137,16 @@ export default function Sidebar({
               </div>
               <div className={`flex-1 min-w-0 ${sidebarCollapsed ? 'md:hidden' : ''}`}>
                 <p className="text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
-                  {role === 'admin'
-                    ? 'Harsh Sharma'
+                  {userName || (role === 'admin'
+                    ? 'Admin User'
                     : role === 'staff'
-                      ? 'Priya Patel'
+                      ? 'Staff User'
                       : role === 'faculty'
-                        ? 'Dr. Rajesh Kumar'
-                        : 'Arjun Singh'}
+                        ? 'Faculty User'
+                        : 'Student User')}
                 </p>
                 <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                  {role === 'admin'
-                    ? 'harsh.sharma@sih28.edu'
-                    : role === 'staff'
-                      ? 'priya.patel@sih28.edu'
-                      : role === 'faculty'
-                        ? 'rajesh.kumar@sih28.edu'
-                        : 'arjun.singh@sih28.edu'}
+                  {userEmail || `${role}@sih28.edu`}
                 </p>
               </div>
             </div>

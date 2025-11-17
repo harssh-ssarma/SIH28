@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import DashboardLayout from '@/components/dashboard-layout'
 import apiClient from '@/lib/api'
 import AddEditUserModal from './components/AddEditUserModal'
 import { useToast } from '@/components/Toast'
@@ -187,23 +186,20 @@ export default function AdminUsersPage() {
 
   if (error) {
     return (
-      <DashboardLayout role="admin">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="text-4xl mb-4">⚠️</div>
-            <p className="text-red-600 dark:text-red-400">{error}</p>
-            <button onClick={() => window.location.reload()} className="btn-primary mt-4">
-              Try Again
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="text-4xl mb-4">⚠️</div>
+          <p className="text-red-600 dark:text-red-400">{error}</p>
+          <button onClick={() => window.location.reload()} className="btn-primary mt-4">
+            Try Again
             </button>
-          </div>
         </div>
-      </DashboardLayout>
+      </div>
     )
   }
 
   return (
-    <DashboardLayout role="admin">
-      <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4 sm:space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-gray-800 dark:text-gray-200">
@@ -315,7 +311,7 @@ export default function AdminUsersPage() {
                   <div className="flex gap-2">
                     <span className="badge badge-neutral">{user.role}</span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
-                      {user.department}
+                      {user.department || 'N/A'}
                     </span>
                   </div>
                   <div className="flex gap-1">
@@ -381,7 +377,7 @@ export default function AdminUsersPage() {
                     <td className="table-cell">
                       <span className="badge badge-neutral text-xs">{user.role}</span>
                     </td>
-                    <td className="table-cell">{user.department}</td>
+                    <td className="table-cell">{user.department || 'N/A'}</td>
                     <td className="table-cell">
                       <span
                         className={`badge ${user.is_active ? 'badge-success' : 'badge-error'} text-xs`}
@@ -528,6 +524,5 @@ export default function AdminUsersPage() {
           onSave={handleSaveUser}
         />
       </div>
-    </DashboardLayout>
   )
 }

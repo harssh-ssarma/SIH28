@@ -6,5 +6,20 @@ class AcademicsConfig(AppConfig):
     name = "academics"
 
     def ready(self):
-        """Import signals when app is ready"""
+        """
+        Initialize app: Import signals and register cache invalidation.
+        This ensures automatic cache updates when models change.
+        """
         import academics.signals  # noqa: F401
+        
+        # Register automatic cache invalidation for all models
+        from core.cache_service import register_cache_invalidation
+        from .models import (
+            User, Faculty, Student, Department, Program, Subject,
+            Batch, Classroom, Timetable, TimetableSlot, Attendance
+        )
+        
+        # Register each model for automatic cache invalidation
+        for model in [User, Faculty, Student, Department, Program, Subject, 
+                      Batch, Classroom, Timetable, TimetableSlot, Attendance]:
+            register_cache_invalidation(model)

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import DashboardLayout from '@/components/dashboard-layout'
 import Pagination from '@/components/Pagination'
 import AddEditStudentModal from './components/AddEditStudentModal'
 import { SimpleStudentInput } from '@/lib/validations'
@@ -111,7 +110,7 @@ export default function StudentsPage() {
     try {
       if (selectedStudent) {
         // Update existing student
-        const response = await apiClient.updateStudent(selectedStudent.id, {
+        const response = await apiClient.updateStudent(selectedStudent.id.toString(), {
           student_id: studentData.student_id,
           name: studentData.name,
           email: studentData.email || '',
@@ -159,7 +158,7 @@ export default function StudentsPage() {
 
     setIsDeleting(id)
     try {
-      const response = await apiClient.deleteStudent(id)
+      const response = await apiClient.deleteStudent(id.toString())
       if (response.error) {
         showToast('error', `❌ Failed to delete student: ${response.error}`)
       } else {
@@ -186,38 +185,22 @@ export default function StudentsPage() {
   const departments = [...new Set(students.map(s => s.department.department_name))].filter(Boolean)
   const years = [...new Set(students.map(s => s.year))].sort((a, b) => a - b)
 
-  if (isLoading) {
-    return (
-      <DashboardLayout role="admin">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-400">Loading students...</p>
-          </div>
-        </div>
-      </DashboardLayout>
-    )
-  }
-
   if (error) {
     return (
-      <DashboardLayout role="admin">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="text-4xl mb-4">⚠️</div>
-            <p className="text-red-600 dark:text-red-400">{error}</p>
-            <button onClick={() => window.location.reload()} className="btn-primary mt-4">
-              Try Again
-            </button>
-          </div>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="text-4xl mb-4">⚠️</div>
+          <p className="text-red-600 dark:text-red-400">{error}</p>
+          <button onClick={() => window.location.reload()} className="btn-primary mt-4">
+            Try Again
+          </button>
         </div>
-      </DashboardLayout>
+      </div>
     )
   }
 
   return (
-    <DashboardLayout role="admin">
-      <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4 sm:space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200">
@@ -292,7 +275,15 @@ export default function StudentsPage() {
             </div>
           </div>
 
-          {filteredStudents.length === 0 ? (
+          {/* Loading indicator */}
+          {isLoading && (
+            <div className="flex items-center justify-center py-8">
+              <div className="loading-spinner w-6 h-6 mr-2"></div>
+              <span className="text-gray-600 dark:text-gray-400">Loading students...</span>
+            </div>
+          )}
+
+          {!isLoading && filteredStudents.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-4xl sm:text-6xl mb-4">🎓</div>
               <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-2">
@@ -307,16 +298,7 @@ export default function StudentsPage() {
           ) : (
             <>
               {/* Mobile Card View */}
-              <div className="block lg:hidden space-y-3 relative">
-                {/* Mobile Loading Overlay */}
-                {isTableLoading && (
-                  <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-center justify-center z-10 rounded-lg">
-                    <div className="flex flex-col items-center">
-                      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Loading...</span>
-                    </div>
-                  </div>
-                )}
+              <div className="block sm:hidden space-y-3">
 
                 {filteredStudents.map(student => (
                   <div
@@ -375,16 +357,7 @@ export default function StudentsPage() {
               </div>
 
               {/* Desktop Table View */}
-              <div className="hidden lg:block overflow-x-auto relative">
-                {/* Table Loading Overlay */}
-                {isTableLoading && (
-                  <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-center justify-center z-10 rounded-lg">
-                    <div className="flex flex-col items-center">
-                      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
-                      <span className="text-sm text-gray-600 dark:text-gray-400">Loading...</span>
-                    </div>
-                  </div>
-                )}
+              <div className="hidden sm:block">
 
                 <table className="table">
                   <thead className="table-header">
@@ -474,17 +447,16 @@ export default function StudentsPage() {
             </>
           )}
         </div>
-      </div>
 
-      <AddEditStudentModal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false)
-          setSelectedStudent(null)
-        }}
-        onSave={handleSaveStudent}
-        student={selectedStudent}
-      />
-    </DashboardLayout>
+        <AddEditStudentModal
+          isOpen={isModalOpen}
+          onClose={() => {
+            setIsModalOpen(false)
+            setSelectedStudent(null)
+          }}
+          onSave={handleSaveStudent}
+          student={selectedStudent}
+        />
+    </div>
   )
 }

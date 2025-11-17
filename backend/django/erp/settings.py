@@ -80,6 +80,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",  # JWT token blacklisting
     "drf_spectacular",
     "corsheaders",
     "django_filters",
@@ -93,7 +94,7 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
+    "core.csrf_middleware.APICSRFExemptMiddleware",  # Custom: Exempts /api/ endpoints
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -208,8 +209,8 @@ AUTH_USER_MODEL = "academics.User"
 # REST Framework Settings
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "rest_framework.authentication.TokenAuthentication",
+        "core.authentication.JWTCookieAuthentication",  # 🔐 Custom JWT from HttpOnly cookies
+        "rest_framework_simplejwt.authentication.JWTAuthentication",  # Fallback for Authorization header
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -276,20 +277,31 @@ CORS_ALLOW_HEADERS = [
 # Cache Configuration with Redis
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/1")
 
+# Upstash Redis uses TLS - detect and configure accordingly
+REDIS_USE_TLS = REDIS_URL.startswith("rediss://")
+
+CACHE_OPTIONS = {
+    "CLIENT_CLASS": "django_redis.client.DefaultClient",
+    "IGNORE_EXCEPTIONS": False,  # Show errors during development
+    "CONNECTION_POOL_KWARGS": {
+        "max_connections": 50,
+        "retry_on_timeout": True,
+    },
+    "SOCKET_CONNECT_TIMEOUT": 10,  # Longer timeout for Upstash
+    "SOCKET_TIMEOUT": 10,
+}
+
+# Add TLS/SSL support for Upstash Redis
+if REDIS_USE_TLS:
+    import ssl
+    CACHE_OPTIONS["CONNECTION_POOL_KWARGS"]["ssl_cert_reqs"] = ssl.CERT_NONE
+    CACHE_OPTIONS["CONNECTION_POOL_KWARGS"]["ssl_check_hostname"] = False
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_URL,
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            "IGNORE_EXCEPTIONS": True,  # Don't crash if Redis is unavailable
-            "CONNECTION_POOL_KWARGS": {
-                "max_connections": 50,
-                "retry_on_timeout": True,
-            },
-            "SOCKET_CONNECT_TIMEOUT": 5,
-            "SOCKET_TIMEOUT": 5,
-        },
+        "OPTIONS": CACHE_OPTIONS,
         "KEY_PREFIX": "sih28",
         "TIMEOUT": 300,  # 5 minutes default
     }
@@ -378,23 +390,34 @@ LOGGING = {
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
-    "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": True,
+    # Token Lifetimes - SHORT expiry for security (Industry best practice)
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),  # 15 min (was 60)
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),     # 7 days with rotation
+    
+    # Token Rotation & Blacklisting (CRITICAL for security)
+    "ROTATE_REFRESH_TOKENS": True,              # Generate new refresh token on each refresh
+    "BLACKLIST_AFTER_ROTATION": True,           # Blacklist old refresh tokens immediately
     "UPDATE_LAST_LOGIN": True,
+    
+    # Encryption & Signing
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,
     "VERIFYING_KEY": None,
     "AUDIENCE": None,
     "ISSUER": None,
+    
+    # Authentication Headers
     "AUTH_HEADER_TYPES": ("Bearer",),
     "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
+    
+    # Token Claims
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
     "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
     "TOKEN_TYPE_CLAIM": "token_type",
-    "JTI_CLAIM": "jti",
+    "JTI_CLAIM": "jti",  # JWT ID for blacklisting
+    
+    # Sliding Tokens (not used but configured)
     "SLIDING_TOKEN_REFRESH_EXP_CLAIM": "refresh_exp",
     "SLIDING_TOKEN_LIFETIME": timedelta(minutes=5),
     "SLIDING_TOKEN_REFRESH_LIFETIME": timedelta(days=1),
@@ -411,13 +434,28 @@ SESSION_COOKIE_SAMESITE = "Lax"  # CSRF protection
 SESSION_COOKIE_AGE = 86400  # 24 hours
 
 # CSRF Protection
+# Note: Auth endpoints (login, logout, refresh) are CSRF-exempt because
+# JWT + HttpOnly + SameSite=Lax provides equivalent CSRF protection
 CSRF_COOKIE_SECURE = not DEBUG  # Use secure cookies in production (HTTPS only)
-CSRF_COOKIE_HTTPONLY = True  # Prevent JavaScript access to CSRF token
+CSRF_COOKIE_HTTPONLY = False  # Allow JavaScript to read CSRF token for non-auth endpoints
 CSRF_COOKIE_SAMESITE = "Lax"  # Additional CSRF protection
 CSRF_USE_SESSIONS = False  # Use cookie-based CSRF tokens
 CSRF_TRUSTED_ORIGINS = [
     "https://sih28.onrender.com",
+    "http://localhost:3000",  # Frontend development
 ]
+
+# =============================
+# JWT COOKIE SETTINGS (CRITICAL SECURITY)
+# =============================
+# HttpOnly Secure Cookies for JWT tokens (prevents XSS attacks)
+JWT_AUTH_COOKIE = "access_token"  # Cookie name for access token
+JWT_AUTH_REFRESH_COOKIE = "refresh_token"  # Cookie name for refresh token
+JWT_AUTH_SECURE = not DEBUG  # HTTPS only in production
+JWT_AUTH_HTTPONLY = True  # JavaScript cannot access (prevents XSS)
+JWT_AUTH_SAMESITE = "Lax"  # CSRF protection (Lax allows GET from external sites)
+JWT_AUTH_COOKIE_USE_CSRF = True  # Require CSRF token for cookie-based auth
+JWT_AUTH_COOKIE_ENFORCE_CSRF_ON_UNAUTHENTICATED = False  # Don't require CSRF for login
 
 # Browser Security Headers
 SECURE_BROWSER_XSS_FILTER = True  # Enable browser's XSS filtering

@@ -30,7 +30,7 @@ export default function UserTable({ users }: UserTableProps) {
             <div className="flex items-center justify-between">
               <div className="flex gap-2">
                 <span className="badge badge-neutral">{user.role}</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">{user.department}</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">{user.department || 'N/A'}</span>
               </div>
               <div className="flex gap-1">
                 <button className="btn-ghost text-xs px-2 py-1">Edit</button>
@@ -69,7 +69,7 @@ export default function UserTable({ users }: UserTableProps) {
                 <td className="table-cell">
                   <span className="badge badge-neutral text-xs">{user.role}</span>
                 </td>
-                <td className="table-cell hidden lg:table-cell">{user.department}</td>
+                <td className="table-cell hidden lg:table-cell">{user.department || 'N/A'}</td>
                 <td className="table-cell">
                   <span className="badge badge-success text-xs">{user.status}</span>
                 </td>

@@ -328,7 +328,7 @@ export default function AdminAttendancePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                {overview.department_stats.map(dept => (
+                {overview?.department_stats?.map(dept => (
                   <tr key={dept.department_name} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                     <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">
                       {dept.department_name}

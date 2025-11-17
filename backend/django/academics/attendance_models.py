@@ -26,7 +26,7 @@ class SubjectEnrollment(models.Model):
     batch = models.ForeignKey(
         Batch,
         on_delete=models.CASCADE,
-        related_name="subject_enrollments",
+        related_name="student_subject_enrollments",  # Changed to avoid clash with BatchSubjectEnrollment
         null=True
     )
     academic_year = models.CharField(max_length=10)  # e.g., "2024-25"
