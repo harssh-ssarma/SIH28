@@ -3,75 +3,90 @@
 import { useState, useEffect } from 'react'
 import DashboardLayout from '@/components/dashboard-layout'
 import InContentNav from '@/components/ui/InContentNav'
-
-interface TimetableItem {
-  id: string
-  year: number
-  batch: string
-  department: string
-  semester: string
-  status: 'approved' | 'pending' | 'draft' | 'rejected'
-  lastUpdated: string
-  conflicts: number
-  score?: number
-}
-
-interface FacultyAvailability {
-  id: string
-  name: string
-  available: boolean
-}
+import { useAuth } from '@/context/AuthContext'
+import {
+  fetchTimetableWorkflows,
+  transformWorkflowsToListItems,
+  fetchFacultyAvailability,
+  updateFacultyAvailability,
+} from '@/lib/api/timetable'
+import type { TimetableListItem, FacultyAvailability } from '@/types/timetable'
 
 export default function AdminTimetablesPage() {
   const [activeYear, setActiveYear] = useState('all')
-  const [timetables, setTimetables] = useState<TimetableItem[]>([])
+  const [timetables, setTimetables] = useState<TimetableListItem[]>([])
   const [facultyAvailability, setFacultyAvailability] = useState<FacultyAvailability[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const { user } = useAuth()
 
   useEffect(() => {
-    // Set static mock data instead of API calls
-    const mockTimetables: TimetableItem[] = [
-      {
-        id: '1',
-        year: 2,
-        batch: 'A',
-        department: 'Computer Science',
-        semester: '4',
-        status: 'approved',
-        lastUpdated: new Date().toLocaleDateString(),
-        conflicts: 0,
-        score: 95,
-      },
-      {
-        id: '2',
-        year: 3,
-        batch: 'B',
-        department: 'Computer Science',
-        semester: '5',
-        status: 'pending',
-        lastUpdated: new Date().toLocaleDateString(),
-        conflicts: 2,
-        score: 87,
-      },
-    ]
-
-    const mockFacultyAvailability: FacultyAvailability[] = [
-      { id: '1', name: 'Dr. Rajesh Kumar', available: true },
-      { id: '2', name: 'Dr. Priya Sharma', available: true },
-      { id: '3', name: 'Prof. Amit Singh', available: false },
-    ]
-
-    setTimetables(mockTimetables)
-    setFacultyAvailability(mockFacultyAvailability)
-    setLoading(false)
+    loadTimetableData()
+    loadFacultyData()
   }, [])
 
+  const loadTimetableData = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // Get organization_id from authenticated user
+      const workflows = await fetchTimetableWorkflows({
+        organization_id: user?.organization,
+      })
+
+      const listItems = transformWorkflowsToListItems(workflows)
+      setTimetables(listItems)
+    } catch (err) {
+      console.error('Failed to load timetables:', err)
+      setError(err instanceof Error ? err.message : 'Failed to load timetables')
+      // Set empty array on error so UI doesn't break
+      setTimetables([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadFacultyData = async () => {
+    try {
+      // Get department_id and organization_id from authenticated user
+      const faculty = await fetchFacultyAvailability({
+        department_id: user?.department,
+        organization_id: user?.organization,
+      })
+      setFacultyAvailability(faculty)
+    } catch (err) {
+      console.error('Failed to load faculty:', err)
+      // Don't set error state for faculty - it's not critical
+      setFacultyAvailability([])
+    }
+  }
+
   const toggleFacultyAvailability = async (facultyId: string) => {
+    // Optimistically update UI
     setFacultyAvailability(prev =>
       prev.map(faculty =>
         faculty.id === facultyId ? { ...faculty, available: !faculty.available } : faculty
       )
     )
+
+    // Update backend
+    try {
+      const faculty = facultyAvailability.find(f => f.id === facultyId)
+      if (faculty) {
+        await updateFacultyAvailability(facultyId, !faculty.available)
+      }
+    } catch (err) {
+      console.error('Failed to update faculty availability:', err)
+      // Revert optimistic update on error
+      setFacultyAvailability(prev =>
+        prev.map(faculty =>
+          faculty.id === facultyId ? { ...faculty, available: !faculty.available } : faculty
+        )
+      )
+      alert('Failed to update faculty availability. Please try again.')
+    }
   }
 
   const getFilteredTimetables = () => {
@@ -81,7 +96,7 @@ export default function AdminTimetablesPage() {
 
   const getGroupedTimetables = () => {
     const filtered = getFilteredTimetables()
-    const grouped: { [key: number]: TimetableItem[] } = {}
+    const grouped: { [key: number]: TimetableListItem[] } = {}
 
     filtered.forEach(timetable => {
       if (!grouped[timetable.year]) {
@@ -140,6 +155,39 @@ export default function AdminTimetablesPage() {
           <div className="text-center">
             <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
             <p className="text-gray-600 dark:text-gray-400">Loading timetables...</p>
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  if (error) {
+    return (
+      <DashboardLayout role="admin">
+        <div className="space-y-6">
+          <div className="card border-[#F44336] bg-[#F44336]/5">
+            <div className="card-header">
+              <div className="flex items-center gap-3">
+                <svg
+                  className="w-6 h-6 text-[#F44336]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <h3 className="text-lg font-semibold text-[#F44336]">Error Loading Timetables</h3>
+              </div>
+            </div>
+            <p className="text-sm text-[#2C2C2C] dark:text-[#FFFFFF]">{error}</p>
+            <button onClick={loadTimetableData} className="btn-primary mt-4">
+              Retry
+            </button>
           </div>
         </div>
       </DashboardLayout>
@@ -281,7 +329,15 @@ export default function AdminTimetablesPage() {
                 <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mb-4 sm:mb-6 px-4">
                   {activeYear === 'all'
                     ? 'No timetables have been created yet.'
-                    : `No timetables found for ${activeYear === '1' ? '1st' : activeYear === '2' ? '2nd' : activeYear === '3' ? '3rd' : '4th'} year.`}
+                    : `No timetables found for ${
+                        activeYear === '1'
+                          ? '1st'
+                          : activeYear === '2'
+                            ? '2nd'
+                            : activeYear === '3'
+                              ? '3rd'
+                              : '4th'
+                      } year.`}
                 </p>
                 <a href="/admin/timetables/new" className="btn-primary">
                   Create First Timetable
@@ -324,7 +380,9 @@ export default function AdminTimetablesPage() {
                               </p>
                             </div>
                             <span
-                              className={`px-2 py-1 text-xs font-medium flex-shrink-0 ml-2 ${getStatusColor(timetable.status)}`}
+                              className={`px-2 py-1 text-xs font-medium flex-shrink-0 ml-2 ${getStatusColor(
+                                timetable.status
+                              )}`}
                             >
                               <span className="hidden sm:inline">
                                 {getStatusIcon(timetable.status)}{' '}
@@ -355,7 +413,9 @@ export default function AdminTimetablesPage() {
                             <div className="flex items-center justify-between text-sm">
                               <span className="text-[#606060] dark:text-[#aaaaaa]">Conflicts:</span>
                               <span
-                                className={`font-medium ${timetable.conflicts > 0 ? 'text-[#ff4444]' : 'text-[#00ba7c]'}`}
+                                className={`font-medium ${
+                                  timetable.conflicts > 0 ? 'text-[#ff4444]' : 'text-[#00ba7c]'
+                                }`}
                               >
                                 {timetable.conflicts}
                               </span>

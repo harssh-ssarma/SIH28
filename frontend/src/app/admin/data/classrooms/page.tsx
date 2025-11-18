@@ -67,7 +67,9 @@ export default function ClassroomsPage() {
             (classroom: Classroom) =>
               classroom.room_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
               classroom.room_type.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              classroom.department.department_name.toLowerCase().includes(searchTerm.toLowerCase())
+              classroom.department?.department_name
+                ?.toLowerCase()
+                .includes(searchTerm.toLowerCase())
           )
         }
 
@@ -87,8 +89,8 @@ export default function ClassroomsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const url = editingId
-      ? `http://localhost:8000/api/v1/classrooms/${editingId}/`
-      : 'http://localhost:8000/api/v1/classrooms/'
+      ? `http://localhost:8000/api/classrooms/${editingId}/`
+      : 'http://localhost:8000/api/classrooms/'
 
     try {
       const response = await fetch(url, {
@@ -275,7 +277,7 @@ export default function ClassroomsPage() {
                   <td className="table-cell">
                     <span className="badge badge-neutral">{classroom.room_type}</span>
                   </td>
-                  <td className="table-cell">{classroom.department.department_name}</td>
+                  <td className="table-cell">{classroom.department?.department_name || 'N/A'}</td>
                   <td className="table-cell">
                     <div className="flex gap-2">
                       <button

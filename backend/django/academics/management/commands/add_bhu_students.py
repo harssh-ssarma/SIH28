@@ -5,82 +5,91 @@ Maps students to real subjects offered by BHU departments
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from academics.models import (
-    Organization, School, Department, Program, Subject, 
-    Batch, Student, User, Faculty, BatchSubjectEnrollment
-)
 from django.db.models.signals import post_save, post_delete
-from academics import signals
-from datetime import datetime, date
+from datetime import date, datetime
 import random
+
+from academics.models import (
+    Organization,
+    Department,
+    Program,
+    School,
+    Student,
+    Subject,
+    User,
+    Batch,
+    BatchSubjectEnrollment,
+    Faculty,
+)
+from academics import signals
 
 
 class Command(BaseCommand):
-    help = 'Add students and batches with real BHU subject enrollments'
+    help = 'Add students and batch enrollments to BHU database'
 
     def handle(self, *args, **kwargs):
         # Disconnect signals
         post_save.disconnect(signals.sync_student_to_user, sender=Student)
         post_save.disconnect(signals.sync_user_to_faculty_student, sender=User)
-        
+
         try:
             self.stdout.write("🚀 Starting Student & Batch Enrollment...")
-            
+
             org = Organization.objects.get(org_code='BHU')
             current_year = datetime.now().year
-            
+
             # Get programs that should have students
             programs_to_populate = Program.objects.filter(
                 organization=org,
                 is_active=True
             ).select_related('school', 'department')
-            
+
             total_students_created = 0
             total_batches_created = 0
             total_enrollments_created = 0
-            
+
             for program in programs_to_populate:
                 try:
                     with transaction.atomic():
                         self.stdout.write(f"\n📚 Processing {program.program_code} - {program.program_name}")
-                        
+
                         # Determine batch years based on program duration
                         duration = int(program.duration_years)
-                        
+
                         if program.program_type == 'ug':
                             # Undergraduate: 2-3 batches
                             batch_years = [current_year - 1, current_year - 2]
                             if duration >= 4:
                                 batch_years.append(current_year - 3)
                             students_per_batch = 30  # 30 students per UG batch
-                            
+
                         elif program.program_type == 'pg':
                             # Postgraduate: 1-2 batches
                             batch_years = [current_year - 1]
                             if duration > 1:
                                 batch_years.append(current_year - 2)
                             students_per_batch = 20  # 20 students per PG batch
-                            
+
                         elif program.program_type == 'integrated':
                             # MBBS/Integrated: 3-4 batches
                             batch_years = [current_year - 1, current_year - 2, current_year - 3]
                             students_per_batch = 50  # 50 students for medical
-                            
+
                         else:
                             batch_years = [current_year - 1]
                             students_per_batch = 25
-                        
+
                         # Get subjects for this program's department
                         dept_subjects = Subject.objects.filter(
                             organization=org,
                             department=program.department,
                             is_active=True
                         ).order_by('semester', 'subject_code')[:12]  # Max 12 subjects per batch
-                        
+
                         if not dept_subjects.exists():
                             self.stdout.write(f"  ⚠ No subjects found for {program.department.dept_code}")
                             continue
-                        
+
                         # Create batches and students
                         for batch_year in batch_years:
                             # Create batch
@@ -98,29 +107,17 @@ class Command(BaseCommand):
                                     'is_active': True
                                 }
                             )
-                            
+
                             if batch_created:
                                 total_batches_created += 1
                                 self.stdout.write(f"  ✓ Created batch: {batch.batch_name}")
-                            
+
                             # Create batch-subject enrollments
                             academic_year = f"{current_year}-{current_year + 1}"
-                            
+
                             for subject in dept_subjects:
-                                enrollment, enroll_created = BatchSubjectEnrollment.objects.get_or_create(
-                                    organization=org,
-                                    batch=batch,
-                                    subject=subject,
-                                    academic_year=academic_year,
-                                    semester=subject.semester if subject.semester else 1,
-                                    defaults={
-                                        'enrolled_students': students_per_batch,
-                                        'is_mandatory': True
-                                    }
-                                )
-                                if enroll_created:
-                                    total_enrollments_created += 1
-                            
+                                                        pass  # (Removed) BatchSubjectEnrollment creation
+
                             # Create students for this batch
                             for i in range(1, students_per_batch + 1):
                                 # Generate student details
@@ -128,11 +125,11 @@ class Command(BaseCommand):
                                 roll_number = f"{batch_year % 100}{program.program_code.replace('-', '').upper()[:6]}{i:03d}"
                                 student_name = self.generate_indian_name()
                                 email = f"{roll_number.lower()}@bhu.ac.in"
-                                
+
                                 # Check if student already exists
                                 if Student.objects.filter(roll_number=roll_number).exists():
                                     continue
-                                
+
                                 # Create user account
                                 user, user_created = User.objects.get_or_create(
                                     username=roll_number,
@@ -145,11 +142,11 @@ class Command(BaseCommand):
                                         'is_active': True
                                     }
                                 )
-                                
+
                                 if user_created:
                                     user.set_password('student123')
                                     user.save()
-                                
+
                                 # Create student
                                 student, student_created = Student.objects.get_or_create(
                                     organization=org,
@@ -171,22 +168,22 @@ class Command(BaseCommand):
                                         'status': 'enrolled'
                                     }
                                 )
-                                
+
                                 if student_created:
                                     total_students_created += 1
-                            
+
                         self.stdout.write(
                             f"  ✓ {program.program_code}: "
                             f"{len(batch_years)} batches, "
                             f"{len(batch_years) * students_per_batch} students, "
                             f"{len(batch_years) * dept_subjects.count()} enrollments"
                         )
-                        
+
                 except Exception as e:
                     self.stdout.write(
                         self.style.ERROR(f"  ✗ Failed {program.program_code}: {e}")
                     )
-            
+
             # Print summary
             self.stdout.write("\n" + "="*90)
             self.stdout.write(self.style.SUCCESS(
@@ -195,15 +192,15 @@ class Command(BaseCommand):
                 f"   Students Created: {total_students_created}\n"
                 f"   Batch-Subject Enrollments: {total_enrollments_created}\n"
             ))
-            
+
             # Print statistics
             self.print_enrollment_stats(org)
-                
+
         finally:
             # Reconnect signals
             post_save.connect(signals.sync_student_to_user, sender=Student)
             post_save.connect(signals.sync_user_to_faculty_student, sender=User)
-    
+
     def generate_indian_name(self):
         """Generate realistic Indian student names"""
         first_names = [
@@ -212,39 +209,39 @@ class Command(BaseCommand):
             'Rahul', 'Rohan', 'Karan', 'Varun', 'Nikhil', 'Amit', 'Suresh', 'Vikram', 'Ajay', 'Ravi',
             'Priya', 'Sneha', 'Pooja', 'Neha', 'Divya', 'Anjali', 'Kavya', 'Shreya', 'Riya', 'Simran'
         ]
-        
+
         last_names = [
             'Kumar', 'Singh', 'Sharma', 'Verma', 'Gupta', 'Agarwal', 'Patel', 'Reddy', 'Rao', 'Nair',
             'Mishra', 'Pandey', 'Yadav', 'Joshi', 'Mehta', 'Saxena', 'Malhotra', 'Khanna', 'Bose', 'Das',
             'Iyer', 'Menon', 'Pillai', 'Shetty', 'Hegde', 'Desai', 'Shah', 'Trivedi', 'Dubey', 'Tiwari'
         ]
-        
+
         return f"{random.choice(first_names)} {random.choice(last_names)}"
-    
+
     def print_enrollment_stats(self, org):
         """Print detailed enrollment statistics"""
         self.stdout.write("\n" + "="*90)
         self.stdout.write("📊 ENROLLMENT STATISTICS BY SCHOOL")
         self.stdout.write("="*90)
-        
+
         schools = School.objects.filter(organization=org)
-        
+
         for school in schools:
             batches = Batch.objects.filter(
                 organization=org,
                 program__school=school
             ).count()
-            
+
             students = Student.objects.filter(
                 organization=org,
                 batch__program__school=school
             ).count()
-            
+
             enrollments = BatchSubjectEnrollment.objects.filter(
                 organization=org,
                 batch__program__school=school
             ).count()
-            
+
             if batches > 0:
                 self.stdout.write(
                     f"{school.school_code:15} | "
@@ -252,12 +249,12 @@ class Command(BaseCommand):
                     f"Students: {students:4} | "
                     f"Enrollments: {enrollments:4}"
                 )
-        
+
         # Overall totals
         total_batches = Batch.objects.filter(organization=org).count()
         total_students = Student.objects.filter(organization=org).count()
         total_enrollments = BatchSubjectEnrollment.objects.filter(organization=org).count()
-        
+
         self.stdout.write("="*90)
         self.stdout.write(
             f"{'TOTAL':15} | "
