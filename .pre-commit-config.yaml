@@ -1,6 +1,7 @@
 # Pre-commit Hook Configuration
 # Ensures code quality before commits
 # Install: pre-commit install
+# Updated to exclude management commands from flake8
 repos:
   # Python formatting
   - repo: https://github.com/psf/black
