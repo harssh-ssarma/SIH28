@@ -19,6 +19,7 @@ from copy import deepcopy
 
 from models.timetable_models import TimetableEntry
 from engine.orchestrator import TimetableOrchestrator
+from engine.context_engine import MultiDimensionalContextEngine
 from utils.progress_tracker import ProgressTracker
 
 logger = logging.getLogger(__name__)
@@ -30,10 +31,11 @@ class VariantGenerator:
     Each variant optimizes for different soft constraints.
     """
 
-    # Predefined weight profiles for different optimization goals
+    # Context-aware weight profiles for different optimization goals
     WEIGHT_PROFILES = {
         'balanced': {
-            'name': 'Balanced - All constraints equally weighted',
+            'name': 'Balanced - Context-aware optimization',
+            'context_focus': 'balanced',
             'weights': {
                 'faculty_preference': 0.20,
                 'compactness': 0.25,
@@ -43,48 +45,52 @@ class VariantGenerator:
                 'continuity': 0.10
             }
         },
-        'faculty_preference': {
-            'name': 'Maximize Faculty Preference Satisfaction',
+        'temporal_optimized': {
+            'name': 'Temporal-Optimized - Peak effectiveness times',
+            'context_focus': 'temporal',
             'weights': {
-                'faculty_preference': 0.40,
-                'compactness': 0.15,
+                'faculty_preference': 0.35,
+                'compactness': 0.20,
                 'room_utilization': 0.10,
                 'workload_balance': 0.20,
-                'peak_spreading': 0.08,
-                'continuity': 0.07
+                'peak_spreading': 0.10,
+                'continuity': 0.05
             }
         },
-        'student_compact': {
-            'name': 'Maximize Student Schedule Compactness',
+        'student_centric': {
+            'name': 'Student-Centric - Social cohesion and compactness',
+            'context_focus': 'social',
             'weights': {
-                'faculty_preference': 0.10,
-                'compactness': 0.40,
+                'faculty_preference': 0.15,
+                'compactness': 0.35,
                 'room_utilization': 0.10,
                 'workload_balance': 0.15,
                 'peak_spreading': 0.15,
                 'continuity': 0.10
             }
         },
-        'room_utilization': {
-            'name': 'Maximize Room Utilization',
+        'academic_coherent': {
+            'name': 'Academic-Coherent - Curricular continuity',
+            'context_focus': 'academic',
             'weights': {
-                'faculty_preference': 0.15,
-                'compactness': 0.15,
-                'room_utilization': 0.35,
+                'faculty_preference': 0.20,
+                'compactness': 0.20,
+                'room_utilization': 0.15,
                 'workload_balance': 0.15,
                 'peak_spreading': 0.10,
-                'continuity': 0.10
+                'continuity': 0.20
             }
         },
-        'faculty_balance': {
-            'name': 'Minimize Faculty Workload Variance',
+        'spatial_efficient': {
+            'name': 'Spatial-Efficient - Room optimization and travel',
+            'context_focus': 'spatial',
             'weights': {
                 'faculty_preference': 0.15,
-                'compactness': 0.15,
-                'room_utilization': 0.10,
-                'workload_balance': 0.35,
-                'peak_spreading': 0.15,
-                'continuity': 0.10
+                'compactness': 0.25,
+                'room_utilization': 0.30,
+                'workload_balance': 0.15,
+                'peak_spreading': 0.10,
+                'continuity': 0.05
             }
         }
     }
@@ -96,6 +102,9 @@ class VariantGenerator:
         self.original_settings = original_settings
 
         self.variants: Dict[str, Dict] = {}
+
+        # Context Engine for variant-specific optimization
+        self.context_engine = MultiDimensionalContextEngine()
 
         # OPTIMIZATION: Cache shared data across all variants
         self._shared_data_cache = None

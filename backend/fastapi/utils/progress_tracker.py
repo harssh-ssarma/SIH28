@@ -254,6 +254,50 @@ class ProgressTracker:
             logger.error(f"Failed to get progress: {e}")
             return None
 
+    def update_context_metrics(self, context_data: Dict[str, Any]):
+        """Update progress with context engine metrics"""
+        try:
+            current_data = self.redis_client.get(self.redis_key)
+            if current_data:
+                current = json.loads(current_data)
+                current["context_metrics"] = context_data
+
+                self.redis_client.setex(
+                    self.redis_key,
+                    settings.PROGRESS_EXPIRE_SECONDS,
+                    json.dumps(current)
+                )
+
+                if self.redis_publisher:
+                    self.redis_publisher.publish_context_update(self.job_id, context_data)
+
+        except Exception as e:
+            logger.error(f"Failed to update context metrics: {e}")
+
+    def update_cluster_progress(self, completed_clusters: int, total_clusters: int, cluster_metrics: List[Dict]):
+        """Update progress for cluster-based processing"""
+        try:
+            cluster_progress = {
+                "completed_clusters": completed_clusters,
+                "total_clusters": total_clusters,
+                "cluster_metrics": cluster_metrics,
+                "completion_rate": completed_clusters / total_clusters if total_clusters > 0 else 0
+            }
+
+            current_data = self.redis_client.get(self.redis_key)
+            if current_data:
+                current = json.loads(current_data)
+                current["cluster_progress"] = cluster_progress
+
+                self.redis_client.setex(
+                    self.redis_key,
+                    settings.PROGRESS_EXPIRE_SECONDS,
+                    json.dumps(current)
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to update cluster progress: {e}")
+
     def complete(self, result: Optional[Dict[str, Any]] = None, success: bool = True, error: Optional[str] = None):
         """Mark job as complete and publish final status."""
         self.current_progress = 100.0

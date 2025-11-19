@@ -15,7 +15,7 @@ interface EnrollmentStats {
 
 export default function BulkEnrollmentTool() {
   const { user } = useAuth()
-  const API_BASE = process.env.NEXT_PUBLIC_DJANGO_API_URL || 'http://localhost:8000/api'
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 
   const [formData, setFormData] = useState({
     academic_year: '2024-25',
@@ -152,10 +152,14 @@ export default function BulkEnrollmentTool() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Semester */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label
+                htmlFor="semester"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+              >
                 Semester
               </label>
               <select
+                id="semester"
                 value={formData.semester}
                 onChange={e => setFormData({ ...formData, semester: parseInt(e.target.value) })}
                 className="input-field"
@@ -171,10 +175,14 @@ export default function BulkEnrollmentTool() {
 
             {/* Academic Year */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label
+                htmlFor="academic_year"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+              >
                 Academic Year
               </label>
               <input
+                id="academic_year"
                 type="text"
                 value={formData.academic_year}
                 onChange={e => setFormData({ ...formData, academic_year: e.target.value })}
@@ -185,10 +193,14 @@ export default function BulkEnrollmentTool() {
 
             {/* Enrollment Type */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label
+                htmlFor="enrollment_type"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+              >
                 Enrollment Type
               </label>
               <select
+                id="enrollment_type"
                 value={formData.enrollment_type}
                 onChange={e => setFormData({ ...formData, enrollment_type: e.target.value })}
                 className="input-field"
@@ -202,10 +214,14 @@ export default function BulkEnrollmentTool() {
 
             {/* Max Electives */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label
+                htmlFor="max_electives"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+              >
                 Max Electives Per Student
               </label>
               <input
+                id="max_electives"
                 type="number"
                 value={formData.max_electives_per_student}
                 onChange={e =>

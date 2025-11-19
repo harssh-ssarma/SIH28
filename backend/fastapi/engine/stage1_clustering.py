@@ -4,6 +4,9 @@ import community.community_louvain as louvain
 import numpy as np
 from typing import List, Dict, Tuple, Set
 import logging
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import multiprocessing
+import math
 from models.timetable_models import Course, Faculty, Student
 from utils.progress_tracker import ProgressTracker
 
@@ -24,7 +27,8 @@ class ConstraintGraphClustering:
         progress_tracker: ProgressTracker,
         modularity_threshold: float = 0.7,
         density_threshold: float = 0.6,
-        coupling_threshold: float = 0.15
+        coupling_threshold: float = 0.15,
+        num_threads: int = None
     ):
         self.courses = courses
         self.faculty = faculty
@@ -34,6 +38,10 @@ class ConstraintGraphClustering:
         self.density_threshold = density_threshold
         self.coupling_threshold = coupling_threshold
         self.graph = None
+
+        # Parallel processing setup
+        self.num_threads = num_threads or min(16, multiprocessing.cpu_count())
+        self.thread_pool = ThreadPoolExecutor(max_workers=self.num_threads)
 
         # Weight parameters for edge weight calculation
         self.alpha_faculty = 10.0
@@ -68,26 +76,40 @@ class ConstraintGraphClustering:
 
         logger.info(f"Added {len(self.courses)} course vertices")
 
-        # Build edge weights based on shared constraints
-        total_comparisons = len(self.courses) * (len(self.courses) - 1) // 2
-        comparison_count = 0
+        # Parallel edge weight computation - O(n²/k) where k = threads
+        course_pairs = [(i, j) for i in range(len(self.courses))
+                       for j in range(i+1, len(self.courses))]
 
-        for i, course_i in enumerate(self.courses):
-            for j, course_j in enumerate(self.courses[i+1:], start=i+1):
-                weight = self._calculate_edge_weight(course_i, course_j)
+        # Divide pairs into chunks for parallel processing
+        chunk_size = max(1, len(course_pairs) // self.num_threads)
+        chunks = [course_pairs[i:i + chunk_size]
+                 for i in range(0, len(course_pairs), chunk_size)]
 
+        logger.info(f"Computing {len(course_pairs)} edges using {len(chunks)} parallel chunks")
+
+        # Process chunks in parallel
+        futures = []
+        for chunk in chunks:
+            future = self.thread_pool.submit(self._compute_edge_chunk, chunk)
+            futures.append(future)
+
+        # Collect results and build graph
+        total_edges = 0
+        for i, future in enumerate(futures):
+            edges = future.result()
+            for (course_i_id, course_j_id, weight) in edges:
                 if weight > 0:
-                    G.add_edge(course_i.course_id, course_j.course_id, weight=weight)
+                    G.add_edge(course_i_id, course_j_id, weight=weight)
+                    total_edges += 1
 
-                comparison_count += 1
-                if comparison_count % 100 == 0:
-                    progress = 5.0 + (comparison_count / total_comparisons) * 5.0
-                    self.progress_tracker.update(
-                        progress=progress,
-                        step=f"Computing edge weights: {comparison_count}/{total_comparisons}"
-                    )
+            # Update progress
+            progress = 5.0 + ((i + 1) / len(futures)) * 5.0
+            self.progress_tracker.update(
+                progress=progress,
+                step=f"Parallel edge computation: {i+1}/{len(futures)} chunks"
+            )
 
-        logger.info(f"Built graph with {G.number_of_edges()} edges")
+        logger.info(f"Built graph with {total_edges} edges using {self.num_threads} threads")
         self.graph = G
         return G
 
@@ -127,6 +149,17 @@ class ConstraintGraphClustering:
 
         return weight
 
+    def _compute_edge_chunk(self, course_pairs: List[Tuple[int, int]]) -> List[Tuple[str, str, float]]:
+        """Compute edge weights for a chunk of course pairs in parallel"""
+        edges = []
+        for i, j in course_pairs:
+            course_i = self.courses[i]
+            course_j = self.courses[j]
+            weight = self._calculate_edge_weight(course_i, course_j)
+            if weight > 0:
+                edges.append((course_i.course_id, course_j.course_id, weight))
+        return edges
+
     def apply_louvain_clustering(self) -> Dict[str, int]:
         """
         Apply Louvain algorithm to partition graph into clusters by maximizing modularity Q.
@@ -142,11 +175,24 @@ class ConstraintGraphClustering:
             step="Applying Louvain community detection"
         )
 
-        # Apply Louvain algorithm
-        partition = louvain.best_partition(self.graph, weight='weight')
+        # Apply optimized Louvain algorithm with multiple runs
+        best_partition = None
+        best_modularity = -1
 
-        # Calculate modularity
-        modularity = louvain.modularity(partition, self.graph, weight='weight')
+        # Run Louvain multiple times and select best result
+        num_runs = min(5, self.num_threads)
+
+        with ThreadPoolExecutor(max_workers=num_runs) as executor:
+            futures = [executor.submit(self._single_louvain_run) for _ in range(num_runs)]
+
+            for future in futures:
+                partition, modularity = future.result()
+                if modularity > best_modularity:
+                    best_modularity = modularity
+                    best_partition = partition
+
+        partition = best_partition
+        modularity = best_modularity
 
         logger.info(f"Louvain clustering complete: {len(set(partition.values()))} clusters, modularity={modularity:.4f}")
 
@@ -159,6 +205,12 @@ class ConstraintGraphClustering:
             }
         )
 
+        return partition, modularity
+
+    def _single_louvain_run(self) -> Tuple[Dict[str, int], float]:
+        """Single Louvain algorithm run for parallel execution"""
+        partition = louvain.best_partition(self.graph, weight='weight', random_state=None)
+        modularity = louvain.modularity(partition, self.graph, weight='weight')
         return partition, modularity
 
     def validate_and_refine_clusters(

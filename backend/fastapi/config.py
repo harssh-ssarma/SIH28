@@ -74,6 +74,17 @@ class Settings:
     RL_CONVERGENCE_THRESHOLD: float = 0.02  # Less strict convergence
     Q_TABLE_PATH: str = str(backend_dir / "fastapi" / "q_table.pkl")
 
+    # Multi-Dimensional Context Engine
+    CONTEXT_ENGINE_ENABLED: bool = True
+    CONTEXT_LEARNING_PATH: str = str(backend_dir / "fastapi" / "context_learning.json")
+
+    # Context Dimension Weights (how much each dimension influences decisions)
+    CONTEXT_TEMPORAL_WEIGHT: float = 0.25    # Time-of-day effectiveness
+    CONTEXT_BEHAVIORAL_WEIGHT: float = 0.25  # Historical patterns
+    CONTEXT_ACADEMIC_WEIGHT: float = 0.20    # Curricular coherence
+    CONTEXT_SOCIAL_WEIGHT: float = 0.15      # Peer group cohesion
+    CONTEXT_SPATIAL_WEIGHT: float = 0.15     # Room and travel optimization
+
     # Progress Tracking
     PROGRESS_UPDATE_INTERVAL: int = 1  # Seconds between WebSocket updates
     PROGRESS_EXPIRE_SECONDS: int = 3600  # 1 hour

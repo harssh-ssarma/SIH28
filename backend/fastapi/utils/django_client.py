@@ -26,27 +26,45 @@ class DjangoAPIClient:
         semester: int,
         include_electives: bool = True
     ) -> List[Course]:
-        """Fetch courses from Django API"""
+        """Fetch courses with NEP 2020 individual student enrollments"""
         try:
+            # Fetch courses with actual student enrollments (NEP 2020 critical)
             response = await self.client.get(
-                f"{self.base_url}/academics/courses/",
+                f"{self.base_url}/students/enrollments/",
                 params={
                     "department_id": department_id,
                     "batch_ids": ",".join(batch_ids),
                     "semester": semester,
-                    "include_electives": include_electives
+                    "include_electives": include_electives,
+                    "group_by_course": True  # NEP 2020: Group by course with student lists
                 }
             )
             response.raise_for_status()
 
             data = response.json()
-            courses = [Course(**course_data) for course_data in data["results"]]
+            courses = []
 
-            logger.info(f"Fetched {len(courses)} courses from Django")
+            for course_data in data["results"]:
+                # NEP 2020: Each course contains actual enrolled student IDs
+                course = Course(
+                    course_id=course_data["course_id"],
+                    course_code=course_data["course_code"],
+                    course_name=course_data["course_name"],
+                    faculty_id=course_data["faculty_id"],
+                    credits=course_data["credits"],
+                    duration=course_data["duration"],
+                    subject_type=course_data["subject_type"],
+                    required_features=course_data.get("required_features", []),
+                    student_ids=course_data["enrolled_student_ids"],  # NEP 2020: Individual students
+                    batch_ids=course_data.get("batch_ids", [])  # For display grouping only
+                )
+                courses.append(course)
+
+            logger.info(f"Fetched {len(courses)} courses with NEP 2020 student enrollments")
             return courses
 
         except Exception as e:
-            logger.error(f"Failed to fetch courses: {e}")
+            logger.error(f"Failed to fetch courses with enrollments: {e}")
             raise
 
     async def fetch_faculty(self, department_id: str) -> Dict[str, Faculty]:

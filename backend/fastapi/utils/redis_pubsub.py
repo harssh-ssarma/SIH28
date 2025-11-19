@@ -19,6 +19,7 @@ class RedisPublisher:
     - Decouples progress tracking from WebSocket connections
     - Multiple subscribers can listen (Django admin, mobile app, etc.)
     - No data loss if WebSocket disconnects
+    - Enhanced for NEP 2020 context-aware features
     """
 
     def __init__(self, redis_client: redis.Redis):
@@ -157,3 +158,83 @@ class RedisSubscriber:
     def close(self) -> None:
         """Close pub/sub connection."""
         self.pubsub.close()
+
+
+# =============================================================================
+# ENHANCED PUBLISHER: Context-Aware Updates (NEP 2020)
+# =============================================================================
+
+class EnhancedRedisPublisher(RedisPublisher):
+    """Enhanced publisher with context-aware features for NEP 2020 system"""
+
+    def publish_context_update(
+        self,
+        job_id: str,
+        context_data: Dict[str, Any]
+    ) -> None:
+        """Publish context engine updates."""
+        try:
+            channel = f"context:{job_id}"
+
+            message = {
+                'job_id': job_id,
+                'type': 'context_update',
+                'context_data': context_data,
+                'timestamp': datetime.utcnow().isoformat(),
+            }
+
+            self.redis.publish(channel, json.dumps(message))
+            logger.debug(f"Published context update for job {job_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to publish context update: {e}")
+
+    def publish_cluster_progress(
+        self,
+        job_id: str,
+        completed_clusters: int,
+        total_clusters: int,
+        cluster_metrics: list
+    ) -> None:
+        """Publish cluster-based progress updates."""
+        try:
+            channel = f"progress:{job_id}"
+
+            message = {
+                'job_id': job_id,
+                'type': 'cluster_progress',
+                'completed_clusters': completed_clusters,
+                'total_clusters': total_clusters,
+                'cluster_metrics': cluster_metrics,
+                'completion_rate': completed_clusters / total_clusters if total_clusters > 0 else 0,
+                'timestamp': datetime.utcnow().isoformat(),
+            }
+
+            self.redis.publish(channel, json.dumps(message))
+            logger.debug(f"Published cluster progress: {completed_clusters}/{total_clusters}")
+
+        except Exception as e:
+            logger.error(f"Failed to publish cluster progress: {e}")
+
+    def publish_student_conflict_alert(
+        self,
+        job_id: str,
+        conflict_data: Dict[str, Any]
+    ) -> None:
+        """Publish NEP 2020 student enrollment conflict alerts."""
+        try:
+            channel = f"alerts:{job_id}"
+
+            message = {
+                'job_id': job_id,
+                'type': 'student_conflict',
+                'conflict_data': conflict_data,
+                'severity': conflict_data.get('severity', 'medium'),
+                'timestamp': datetime.utcnow().isoformat(),
+            }
+
+            self.redis.publish(channel, json.dumps(message))
+            logger.warning(f"Published student conflict alert for job {job_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to publish conflict alert: {e}")

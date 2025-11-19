@@ -166,7 +166,7 @@ def setup_metrics(app):
 
 
 # =============================================================================
-# HELPER FUNCTIONS: Record Metrics
+# HELPER FUNCTIONS: Record Metrics (Enhanced for NEP 2020)
 # =============================================================================
 
 def record_generation_request(organization_id: str, priority: str):
@@ -252,3 +252,64 @@ def record_cache_hit(cache_type: str):
 def record_cache_miss(cache_type: str):
     """Record Redis cache miss."""
     redis_cache_misses.labels(cache_type=cache_type).inc()
+
+
+# =============================================================================
+# CONTEXT ENGINE METRICS: NEP 2020 Enhanced Features
+# =============================================================================
+
+context_adaptations = Counter(
+    'context_adaptations_total',
+    'Total number of context-based adaptations',
+    ['adaptation_type', 'organization_id']
+)
+
+student_enrollment_conflicts = Counter(
+    'student_enrollment_conflicts_total',
+    'NEP 2020: Individual student enrollment conflicts detected',
+    ['organization_id', 'conflict_severity']
+)
+
+context_fitness_improvements = Histogram(
+    'context_fitness_improvements',
+    'Fitness improvements from context-aware optimization',
+    ['organization_id'],
+    buckets=[0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0]
+)
+
+cluster_quality_metrics = Histogram(
+    'cluster_quality_score',
+    'Quality metrics for constraint graph clustering',
+    ['metric_type'],
+    buckets=[0.1, 0.3, 0.5, 0.7, 0.8, 0.9, 0.95, 1.0]
+)
+
+
+def record_context_adaptation(adaptation_type: str, organization_id: str):
+    """Record context engine adaptation."""
+    context_adaptations.labels(
+        adaptation_type=adaptation_type,
+        organization_id=organization_id
+    ).inc()
+
+
+def record_student_conflict(organization_id: str, severity: str):
+    """Record NEP 2020 student enrollment conflict."""
+    student_enrollment_conflicts.labels(
+        organization_id=organization_id,
+        conflict_severity=severity
+    ).inc()
+
+
+def record_context_fitness_improvement(organization_id: str, improvement: float):
+    """Record fitness improvement from context awareness."""
+    context_fitness_improvements.labels(
+        organization_id=organization_id
+    ).observe(improvement)
+
+
+def record_cluster_quality(metric_type: str, score: float):
+    """Record cluster quality metrics."""
+    cluster_quality_metrics.labels(
+        metric_type=metric_type
+    ).observe(score)

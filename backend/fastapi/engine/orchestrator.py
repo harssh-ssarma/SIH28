@@ -17,7 +17,8 @@ from utils.redis_pubsub import RedisPublisher
 from utils.django_client import DjangoAPIClient
 from engine.stage1_clustering import ConstraintGraphClustering
 from engine.stage2_hybrid import HybridScheduler
-from engine.stage3_rl import QLearningResolver
+from engine.stage3_rl import OptimizedQLearningResolver
+from engine.context_engine import MultiDimensionalContextEngine
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,9 @@ class TimetableOrchestrator:
         self.cluster_schedules: Dict[int, Dict] = {}
         self.global_schedule: Dict = {}
         self.timetable_entries: List[TimetableEntry] = []
+
+        # Context Engine for intelligent optimization
+        self.context_engine = MultiDimensionalContextEngine()
 
         # Timing
         self.start_time: Optional[datetime] = None
@@ -213,7 +217,8 @@ class TimetableOrchestrator:
             courses=self.courses,
             faculty=self.faculty,
             students=self.students,
-            progress_tracker=self.progress_tracker
+            progress_tracker=self.progress_tracker,
+            num_threads=16  # Ultra-parallel processing
         )
 
         # Build graph with student-level conflict detection
@@ -252,7 +257,8 @@ class TimetableOrchestrator:
             time_slots=self.time_slots,
             faculty=self.faculty,
             students=self.students,  # NEP 2020: Individual students
-            progress_tracker=self.progress_tracker
+            progress_tracker=self.progress_tracker,
+            context_engine=self.context_engine
         )
 
         # Schedule all clusters in parallel (8-core = 8× speedup)
@@ -277,19 +283,19 @@ class TimetableOrchestrator:
         # Load existing Q-table if available (semester-to-semester learning)
         q_table = self._load_q_table()
 
-        resolver = QLearningResolver(
-            cluster_schedules=self.cluster_schedules,
+        resolver = OptimizedQLearningResolver(
             courses=self.courses,
             rooms=self.rooms,
             time_slots=self.time_slots,
             faculty=self.faculty,
             students=self.students,  # NEP 2020: Individual student conflicts
             progress_tracker=self.progress_tracker,
-            initial_q_table=q_table
+            q_table_path=settings.Q_TABLE_PATH,
+            context_engine=self.context_engine
         )
 
-        # Merge clusters and resolve conflicts
-        self.global_schedule = resolver.resolve_conflicts()
+        # Merge clusters and resolve conflicts with optimized algorithm
+        self.global_schedule, _ = resolver.execute(self.cluster_schedules)
 
         # Save updated Q-table for next semester
         self._save_q_table(resolver.q_table)

@@ -1,7 +1,7 @@
 """
 Enhanced timetable models for multiple options and review workflow
 """
-from django.contrib.auth.models import User
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -41,7 +41,7 @@ class TimetableVariant(models.Model):
     is_selected = models.BooleanField(default=False)
     selected_at = models.DateTimeField(null=True, blank=True)
     selected_by = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -93,7 +93,7 @@ class TimetableWorkflow(models.Model):
 
     # Creator
     created_by = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         related_name="created_workflow_timetables",
@@ -103,7 +103,7 @@ class TimetableWorkflow(models.Model):
     # Submission
     submitted_for_review_at = models.DateTimeField(null=True, blank=True)
     submitted_by = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -113,7 +113,7 @@ class TimetableWorkflow(models.Model):
     # Publishing
     published_at = models.DateTimeField(null=True, blank=True)
     published_by = models.ForeignKey(
-        User,
+        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -162,7 +162,9 @@ class TimetableReview(models.Model):
     timetable = models.ForeignKey(
         TimetableWorkflow, on_delete=models.CASCADE, related_name="reviews"
     )
-    reviewer = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True
+    )
 
     action = models.CharField(max_length=20, choices=REVIEW_ACTIONS)
     comments = models.TextField(blank=True)
@@ -223,7 +225,9 @@ class FixedSlot(models.Model):
     is_active = models.BooleanField(default=True)
 
     # Metadata
-    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
