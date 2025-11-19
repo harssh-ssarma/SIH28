@@ -1,25 +1,27 @@
 from rest_framework import serializers
-from .models import (
-    User,
-    Organization,
-    Department,
-    Program,  # Changed from Course
-    Subject,
-    Faculty,
-    Student,
+
+from .models import Program  # Changed from Course
+from .models import (  # Lab removed - not in multi-tenant models
+    Attendance,
     Batch,
     Classroom,
-    # Lab removed - not in multi-tenant models
+    Department,
+    Faculty,
     GenerationJob,
+    Organization,
+    Student,
+    Subject,
     Timetable,
     TimetableSlot,
-    Attendance,
+    User,
 )
 
 
 class UserSerializer(serializers.ModelSerializer):
-    organization_name = serializers.CharField(source='organization.org_name', read_only=True)
-    
+    organization_name = serializers.CharField(
+        source="organization.org_name", read_only=True
+    )
+
     class Meta:
         model = User
         fields = [
@@ -44,6 +46,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
 class ProgramSerializer(serializers.ModelSerializer):
     """Serializer for Program model (formerly Course)"""
+
     class Meta:
         model = Program
         fields = "__all__"
@@ -57,17 +60,23 @@ class SubjectSerializer(serializers.ModelSerializer):
     program = ProgramSerializer(read_only=True)
     department = DepartmentSerializer(read_only=True)
     program_id = serializers.PrimaryKeyRelatedField(
-        queryset=Program.objects.all(), source="program", write_only=True, required=False
+        queryset=Program.objects.all(),
+        source="program",
+        write_only=True,
+        required=False,
     )
     department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(), source="department", write_only=True, required=False
+        queryset=Department.objects.all(),
+        source="department",
+        write_only=True,
+        required=False,
     )
-    
+
     # Backwards compatibility
     course = serializers.SerializerMethodField()
-    
+
     def get_course(self, obj):
-        if hasattr(obj, 'program') and obj.program:
+        if hasattr(obj, "program") and obj.program:
             return ProgramSerializer(obj.program).data
         return None
 
@@ -102,7 +111,9 @@ class FacultySerializer(serializers.ModelSerializer):
                 "created_at": obj.department.created_at,
                 "updated_at": obj.department.updated_at,
                 "organization": str(obj.department.organization_id),
-                "school": str(obj.department.school_id) if obj.department.school_id else None,
+                "school": str(obj.department.school_id)
+                if obj.department.school_id
+                else None,
             }
         return None
 
@@ -121,10 +132,16 @@ class StudentSerializer(serializers.ModelSerializer):
 
     # Write-only fields for creating/updating
     department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(), source="department", write_only=True, required=False
+        queryset=Department.objects.all(),
+        source="department",
+        write_only=True,
+        required=False,
     )
     program_id = serializers.PrimaryKeyRelatedField(
-        queryset=Program.objects.all(), source="program", write_only=True, required=False
+        queryset=Program.objects.all(),
+        source="program",
+        write_only=True,
+        required=False,
     )
 
     # Backwards compatibility - map old field names to new
@@ -132,10 +149,10 @@ class StudentSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="student_name", required=False)
     year = serializers.IntegerField(source="current_year", required=False)
     semester = serializers.IntegerField(source="current_semester", required=False)
-    
+
     # Alias course to program for backwards compatibility
     course = serializers.SerializerMethodField()
-    
+
     def get_department(self, obj):
         if obj.department:
             return {
@@ -150,7 +167,9 @@ class StudentSerializer(serializers.ModelSerializer):
                 "created_at": obj.department.created_at,
                 "updated_at": obj.department.updated_at,
                 "organization": str(obj.department.organization_id),
-                "school": str(obj.department.school_id) if obj.department.school_id else None,
+                "school": str(obj.department.school_id)
+                if obj.department.school_id
+                else None,
             }
         return None
 
@@ -173,7 +192,9 @@ class StudentSerializer(serializers.ModelSerializer):
                 "is_active": obj.program.is_active,
                 "created_at": obj.program.created_at,
                 "updated_at": obj.program.updated_at,
-                "department": str(obj.program.department_id) if obj.program.department_id else None,
+                "department": str(obj.program.department_id)
+                if obj.program.department_id
+                else None,
                 "organization": str(obj.program.organization_id),
             }
         return None
@@ -199,19 +220,25 @@ class BatchSerializer(serializers.ModelSerializer):
     program = ProgramSerializer(read_only=True)
     department = DepartmentSerializer(read_only=True)
     program_id = serializers.PrimaryKeyRelatedField(
-        queryset=Program.objects.all(), source="program", write_only=True, required=False
+        queryset=Program.objects.all(),
+        source="program",
+        write_only=True,
+        required=False,
     )
     department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(), source="department", write_only=True, required=False
+        queryset=Department.objects.all(),
+        source="department",
+        write_only=True,
+        required=False,
     )
-    
+
     # Backwards compatibility
     course = serializers.SerializerMethodField()
     year = serializers.IntegerField(source="year_of_admission", required=False)
     semester = serializers.IntegerField(source="current_semester", required=False)
-    
+
     def get_course(self, obj):
-        if hasattr(obj, 'program') and obj.program:
+        if hasattr(obj, "program") and obj.program:
             return ProgramSerializer(obj.program).data
         return None
 
@@ -279,22 +306,51 @@ class GenerationJobSerializer(serializers.ModelSerializer):
 
 
 class GenerationJobCreateSerializer(serializers.Serializer):
-    """Serializer for creating a timetable generation job"""
+    """
+    Serializer for creating a timetable generation job (NEP 2020 Compatible)
+    Supports both legacy batch-based and new student-enrollment-based models
+    """
 
     department_id = serializers.CharField(required=True)
-    batch_id = serializers.CharField(required=True)
     semester = serializers.IntegerField(required=True, min_value=1, max_value=8)
     academic_year = serializers.CharField(required=True)
+    organization_id = serializers.CharField(required=True)
+    num_variants = serializers.IntegerField(
+        required=False, default=5, min_value=3, max_value=10
+    )
+
+    # NEP 2020: student enrollment-based
+    student_enrollments = serializers.ListField(
+        child=serializers.DictField(), required=True, allow_empty=False
+    )
+    subjects = serializers.ListField(
+        child=serializers.DictField(), required=False, allow_empty=True
+    )
+
+    # Optional constraints
+    fixed_slots = serializers.ListField(
+        child=serializers.DictField(), required=False, allow_empty=True, default=list
+    )
+    shifts = serializers.ListField(
+        child=serializers.DictField(), required=False, allow_empty=True, default=list
+    )
+
+    # Redis cache key for pre-fetched data
+    redis_cache_key = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True
+    )
 
     def validate_department_id(self, value):
         if not Department.objects.filter(department_id=value).exists():
             raise serializers.ValidationError("Department does not exist")
         return value
 
-    def validate_batch_id(self, value):
-        if not Batch.objects.filter(batch_id=value).exists():
-            raise serializers.ValidationError("Batch does not exist")
-        return value
+    def validate(self, data):
+        if not data.get("student_enrollments"):
+            raise serializers.ValidationError(
+                "student_enrollments (NEP 2020) must be provided"
+            )
+        return data
 
 
 class AttendanceSerializer(serializers.ModelSerializer):

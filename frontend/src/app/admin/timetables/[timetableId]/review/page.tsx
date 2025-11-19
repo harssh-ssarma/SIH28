@@ -1,347 +1,645 @@
+/**
+ * Timetable Variant Review & Approval Page
+ * Multi-variant comparison with workflow management
+ * Matches backend: TimetableWorkflow, TimetableVariant models
+ */
+
 'use client'
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import DashboardLayout from '@/components/dashboard-layout'
-import TimetableGrid from '@/components/shared/TimetableGrid'
+import { useAuth } from '@/context/AuthContext'
 
-interface TimeSlot {
-  day: string
-  time: string
-  subject: string
-  faculty: string
-  classroom: string
-  batch: string
+// Backend types matching Django models
+interface TimetableEntry {
+  day: number // 0-4 (Monday-Friday)
+  time_slot: string
+  subject_id: string
+  subject_name: string
+  subject_code: string
+  faculty_id: string
+  faculty_name: string
+  batch_id: string
+  batch_name: string
+  classroom_id: string
+  room_number: string
+  duration_minutes: number
 }
 
-interface TimetableOption {
-  id: number
-  name: string
-  score: number
-  conflicts: string[]
-  schedule: TimeSlot[]
-  description: string
+interface QualityMetrics {
+  total_conflicts: number
+  hard_constraint_violations: number
+  soft_constraint_violations: number
+  room_utilization_score: number
+  faculty_workload_balance_score: number
+  student_compactness_score: number
+  overall_score: number
 }
 
-interface TimetableData {
-  id: number
-  name: string
-  department: string
-  semester: string
-  status: string
-  options: TimetableOption[]
+interface Statistics {
+  total_classes: number
+  total_hours: number
+  unique_subjects: number
+  unique_faculty: number
+  unique_rooms: number
+  average_classes_per_day: number
 }
 
-export default function ReviewTimetablePage() {
+interface TimetableVariant {
+  id: string
+  job_id: string
+  variant_number: number
+  optimization_priority: string
+  organization_id: string
+  department_id: string
+  semester: number
+  academic_year: string
+  timetable_entries: TimetableEntry[]
+  statistics: Statistics
+  quality_metrics: QualityMetrics
+  is_selected: boolean
+  selected_at: string | null
+  selected_by: number | null
+  generated_at: string
+}
+
+interface TimetableWorkflow {
+  id: string
+  variant: string | null
+  job_id: string
+  organization_id: string
+  department_id: string
+  semester: number
+  academic_year: string
+  status: 'draft' | 'pending_review' | 'approved' | 'rejected' | 'published'
+  created_by: number
+  created_at: string
+  submitted_for_review_at: string | null
+  submitted_by: number | null
+  published_at: string | null
+  published_by: number | null
+  timetable_entries: TimetableEntry[]
+}
+
+interface Review {
+  id: string
+  timetable: string
+  reviewer: number
+  reviewer_name: string
+  reviewer_username: string
+  action: 'approved' | 'rejected' | 'revision_requested'
+  comments: string
+  suggested_changes: any | null
+  reviewed_at: string
+}
+
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+
+export default function TimetableReviewPage() {
   const params = useParams()
   const router = useRouter()
-  const timetableId = params.timetableId as string
+  const { user } = useAuth()
+  const workflowId = params.timetableId as string
 
-  const [timetableData, setTimetableData] = useState<TimetableData | null>(null)
-  const [selectedOption, setSelectedOption] = useState<TimetableOption | null>(null)
-  const [showModal, setShowModal] = useState(false)
+  const API_BASE = process.env.NEXT_PUBLIC_DJANGO_API_URL || 'http://localhost:8000/api'
+
+  const [workflow, setWorkflow] = useState<TimetableWorkflow | null>(null)
+  const [variants, setVariants] = useState<TimetableVariant[]>([])
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
 
-  useEffect(() => {
-    if (timetableId) {
-      fetchTimetableData()
-    }
-  }, [timetableId])
+  // Modals
+  const [showApprovalModal, setShowApprovalModal] = useState(false)
+  const [showRejectionModal, setShowRejectionModal] = useState(false)
+  const [approvalComments, setApprovalComments] = useState('')
+  const [rejectionReason, setRejectionReason] = useState('')
 
-  const fetchTimetableData = async () => {
+  // View state
+  const [activeVariant, setActiveVariant] = useState<TimetableVariant | null>(null)
+  const [viewMode, setViewMode] = useState<'comparison' | 'detail'>('comparison')
+  const [selectedDay, setSelectedDay] = useState(0)
+
+  useEffect(() => {
+    if (workflowId) {
+      loadWorkflowData()
+    }
+  }, [workflowId])
+
+  const loadWorkflowData = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/timetables/${timetableId}/`)
-      if (response.ok) {
-        const data = await response.json()
-        setTimetableData(data)
-      } else {
-        console.error('Failed to fetch timetable:', response.statusText)
+      setLoading(true)
+      setError(null)
+
+      const token = localStorage.getItem('access_token')
+
+      // Fetch workflow details
+      const workflowRes = await fetch(`${API_BASE}/timetable/workflows/${workflowId}/`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!workflowRes.ok) {
+        throw new Error('Failed to load workflow')
       }
-    } catch (error) {
-      console.error('Failed to fetch timetable data:', error)
+
+      const workflowData = await workflowRes.json()
+      setWorkflow(workflowData)
+
+      // Fetch variants for this job
+      if (workflowData.job_id) {
+        const variantsRes = await fetch(
+          `${API_BASE}/timetable/variants/?job_id=${workflowData.job_id}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        )
+
+        if (variantsRes.ok) {
+          const variantsData = await variantsRes.json()
+          setVariants(variantsData)
+
+          // Pre-select variant
+          const selected = variantsData.find((v: TimetableVariant) => v.is_selected)
+          if (selected) {
+            setSelectedVariantId(selected.id)
+            setActiveVariant(selected)
+          } else if (variantsData.length > 0) {
+            // Default to first variant
+            setActiveVariant(variantsData[0])
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load workflow:', err)
+      setError(err instanceof Error ? err.message : 'Failed to load timetable data')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleApprove = async (optionId: number) => {
-    setActionLoading(true)
+  const handleVariantSelect = async (variantId: string) => {
     try {
-      await fetch(`http://localhost:8000/api/v1/timetables/${timetableId}/approve/`, {
+      setActionLoading(true)
+      const token = localStorage.getItem('access_token')
+
+      const response = await fetch(`${API_BASE}/timetable/variants/${variantId}/select/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ option_id: optionId }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
       })
-      alert('Timetable approved successfully!')
-      router.push('/admin/timetables')
-    } catch (error) {
-      alert('Failed to approve timetable')
+
+      if (!response.ok) {
+        throw new Error('Failed to select variant')
+      }
+
+      setSelectedVariantId(variantId)
+
+      // Update local state
+      setVariants(prev =>
+        prev.map(v => ({
+          ...v,
+          is_selected: v.id === variantId,
+        }))
+      )
+
+      // Reload workflow
+      await loadWorkflowData()
+    } catch (err) {
+      console.error('Failed to select variant:', err)
+      alert('Failed to select variant. Please try again.')
     } finally {
       setActionLoading(false)
-      setShowModal(false)
+    }
+  }
+
+  const handleApprove = async () => {
+    if (!selectedVariantId) {
+      alert('Please select a variant first')
+      return
+    }
+
+    try {
+      setActionLoading(true)
+      const token = localStorage.getItem('access_token')
+
+      const response = await fetch(`${API_BASE}/timetable/workflows/${workflowId}/approve/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          comments: approvalComments,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to approve timetable')
+      }
+
+      alert('Timetable approved successfully!')
+      setShowApprovalModal(false)
+      router.push('/admin/timetables')
+    } catch (err) {
+      console.error('Failed to approve:', err)
+      alert('Failed to approve timetable. Please try again.')
+    } finally {
+      setActionLoading(false)
     }
   }
 
   const handleReject = async () => {
-    setActionLoading(true)
+    if (!rejectionReason.trim()) {
+      alert('Please provide a reason for rejection')
+      return
+    }
+
     try {
-      await fetch(`http://localhost:8000/api/v1/timetables/${timetableId}/reject/`, {
+      setActionLoading(true)
+      const token = localStorage.getItem('access_token')
+
+      const response = await fetch(`${API_BASE}/timetable/workflows/${workflowId}/reject/`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          comments: rejectionReason,
+        }),
       })
-      alert('All options rejected. Generate new timetable.')
+
+      if (!response.ok) {
+        throw new Error('Failed to reject timetable')
+      }
+
+      alert('Timetable rejected')
+      setShowRejectionModal(false)
       router.push('/admin/timetables')
-    } catch (error) {
-      alert('Failed to reject timetable')
+    } catch (err) {
+      console.error('Failed to reject:', err)
+      alert('Failed to reject timetable. Please try again.')
     } finally {
       setActionLoading(false)
     }
   }
 
-  const openModal = (option: TimetableOption) => {
-    setSelectedOption(option)
-    setShowModal(true)
-  }
+  const renderTimetableGrid = (variant: TimetableVariant) => {
+    // Group entries by day and time
+    const grid: { [key: string]: TimetableEntry[] } = {}
+    variant.timetable_entries.forEach(entry => {
+      const key = `${entry.day}-${entry.time_slot}`
+      if (!grid[key]) grid[key] = []
+      grid[key].push(entry)
+    })
 
-  const getScoreColor = (score: number) => {
-    if (score >= 8.5) return 'text-green-600 dark:text-green-400'
-    if (score >= 7.5) return 'text-yellow-600 dark:text-yellow-400'
-    return 'text-red-600 dark:text-red-400'
-  }
+    // Get unique time slots
+    const timeSlots = Array.from(new Set(variant.timetable_entries.map(e => e.time_slot))).sort()
 
-  const getScoreBg = (score: number) => {
-    if (score >= 8.5)
-      return 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
-    if (score >= 7.5)
-      return 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
-    return 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <thead className="bg-gray-50 dark:bg-gray-800">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Time
+              </th>
+              {DAYS.map(day => (
+                <th
+                  key={day}
+                  className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"
+                >
+                  {day}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+            {timeSlots.map(time => (
+              <tr key={time}>
+                <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                  {time}
+                </td>
+                {DAYS.map((_, dayIndex) => {
+                  const entries = grid[`${dayIndex}-${time}`] || []
+                  return (
+                    <td key={dayIndex} className="px-4 py-4 text-sm">
+                      {entries.length > 0 ? (
+                        <div className="space-y-1">
+                          {entries.map((entry, idx) => (
+                            <div
+                              key={idx}
+                              className="p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-xs"
+                            >
+                              <div className="font-semibold text-blue-900 dark:text-blue-200">
+                                {entry.subject_code}
+                              </div>
+                              <div className="text-blue-700 dark:text-blue-300">
+                                {entry.faculty_name}
+                              </div>
+                              <div className="text-blue-600 dark:text-blue-400">
+                                {entry.room_number}
+                              </div>
+                              <div className="text-blue-500 dark:text-blue-500 text-xs">
+                                {entry.batch_name}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 dark:text-gray-600">-</span>
+                      )}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
   }
 
   if (loading) {
     return (
-      <DashboardLayout role="admin">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-400">Loading timetable options...</p>
-          </div>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Loading timetable variants...</p>
         </div>
-      </DashboardLayout>
+      </div>
     )
   }
 
-  if (!timetableData) {
+  if (error) {
     return (
-      <DashboardLayout role="admin">
-        <div className="card">
-          <div className="text-center py-12">
-            <p className="text-gray-500 dark:text-gray-400">Timetable not found</p>
-            <button onClick={() => router.push('/admin/timetables')} className="btn-secondary mt-4">
-              ← Back to Management
-            </button>
-          </div>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="text-red-600 text-6xl mb-4">⚠️</div>
+          <p className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Error</p>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">{error}</p>
+          <button
+            onClick={() => router.push('/admin/timetables')}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Back to Timetables
+          </button>
         </div>
-      </DashboardLayout>
+      </div>
     )
   }
 
   return (
-    <DashboardLayout role="admin">
-      <div className="space-y-4 sm:space-y-6">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className="max-w-7xl mx-auto p-6">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200">
-              Review Generated Options
-            </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              {timetableData.department} • Semester {timetableData.semester} •{' '}
-              {timetableData.options.length} Options Generated
-            </p>
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+                Review Timetable Variants
+              </h1>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                {workflow?.department_id} • Semester {workflow?.semester} •{' '}
+                {workflow?.academic_year}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-medium ${
+                  workflow?.status === 'approved'
+                    ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                    : workflow?.status === 'rejected'
+                      ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
+                      : workflow?.status === 'pending_review'
+                        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
+                        : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                }`}
+              >
+                {workflow?.status.replace('_', ' ').toUpperCase()}
+              </span>
+            </div>
           </div>
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-            <span className="px-3 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 rounded-full text-sm font-medium">
-              🧠 AI Generated
-            </span>
-            <span className="px-3 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 rounded-full text-sm font-medium">
-              Pending Review
-            </span>
+
+          {/* Action Buttons */}
+          <div className="flex gap-3">
+            <button
+              onClick={() => router.push('/admin/timetables')}
+              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              ← Back
+            </button>
+            {workflow?.status === 'draft' && (
+              <>
+                <button
+                  onClick={() => setShowApprovalModal(true)}
+                  disabled={!selectedVariantId || actionLoading}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Approve Timetable
+                </button>
+                <button
+                  onClick={() => setShowRejectionModal(true)}
+                  disabled={actionLoading}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Reject
+                </button>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Options Gallery */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-          {timetableData.options.map((option, index) => (
-            <div
-              key={option.id}
-              onClick={() => openModal(option)}
-              className={`card hover:shadow-lg transition-all duration-300 cursor-pointer transform hover:scale-105 ${getScoreBg(option.score)} border-2`}
-            >
-              <div className="p-4 sm:p-6">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-                    Option {index + 1}
-                  </h3>
-                  <span className={`text-2xl font-bold ${getScoreColor(option.score)}`}>
-                    {option.score.toFixed(1)}
-                  </span>
+        {/* Variants Comparison */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Compare Variants ({variants.length})
+          </h2>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {variants.map(variant => (
+              <div
+                key={variant.id}
+                className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                  selectedVariantId === variant.id
+                    ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                }`}
+                onClick={() => {
+                  setActiveVariant(variant)
+                  setViewMode('detail')
+                }}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white">
+                      Variant {variant.variant_number}
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {variant.optimization_priority.replace('_', ' ')}
+                    </p>
+                  </div>
+                  {variant.is_selected && (
+                    <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs rounded-full">
+                      Selected
+                    </span>
+                  )}
                 </div>
 
-                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  {option.name}
-                </h4>
-
-                <p className="text-xs text-gray-600 dark:text-gray-400 mb-4 line-clamp-2">
-                  {option.description}
-                </p>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-gray-600 dark:text-gray-400">Classes:</span>
-                    <span className="font-medium text-gray-800 dark:text-gray-200">
-                      {option.schedule.length}
+                {/* Metrics */}
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Overall Score:</span>
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {variant.quality_metrics.overall_score.toFixed(1)}%
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
+                  <div className="flex justify-between">
                     <span className="text-gray-600 dark:text-gray-400">Conflicts:</span>
                     <span
-                      className={`font-medium ${option.conflicts.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}
+                      className={`font-semibold ${
+                        variant.quality_metrics.total_conflicts === 0
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}
                     >
-                      {option.conflicts.length}
+                      {variant.quality_metrics.total_conflicts}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Room Utilization:</span>
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {variant.quality_metrics.room_utilization_score.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Total Classes:</span>
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {variant.statistics.total_classes}
                     </span>
                   </div>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-600">
-                  <button className="w-full text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors">
-                    👁️ View Details
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Actions */}
-        <div className="flex flex-col sm:flex-row justify-between gap-4">
-          <button
-            onClick={() => router.push('/admin/timetables')}
-            className="btn-secondary w-full sm:w-auto"
-          >
-            ← Back to Management
-          </button>
-          <button
-            onClick={handleReject}
-            disabled={actionLoading}
-            className="btn-danger w-full sm:w-auto disabled:opacity-50"
-          >
-            {actionLoading ? (
-              <>
-                <div className="loading-spinner w-4 h-4 mr-2"></div>
-                Rejecting...
-              </>
-            ) : (
-              <>❌ Reject All & Regenerate</>
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Modal */}
-      {showModal && selectedOption && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
-          <div className="bg-white dark:bg-[#2a2a2a] rounded-xl w-full max-w-6xl max-h-[90vh] overflow-hidden border border-gray-200 dark:border-gray-700 shadow-2xl">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-semibold text-gray-800 dark:text-gray-200">
-                  {selectedOption.name}
-                </h2>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  Score:{' '}
-                  <span className={`font-semibold ${getScoreColor(selectedOption.score)}`}>
-                    {selectedOption.score.toFixed(1)}
-                  </span>{' '}
-                  • Conflicts:{' '}
-                  <span
-                    className={
-                      selectedOption.conflicts.length > 0
-                        ? 'text-red-600 dark:text-red-400'
-                        : 'text-green-600 dark:text-green-400'
-                    }
+                {/* Select Button */}
+                {!variant.is_selected && (
+                  <button
+                    onClick={e => {
+                      e.stopPropagation()
+                      handleVariantSelect(variant.id)
+                    }}
+                    disabled={actionLoading}
+                    className="mt-3 w-full px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
                   >
-                    {selectedOption.conflicts.length}
-                  </span>
-                </p>
-              </div>
-              <button
-                onClick={() => setShowModal(false)}
-                className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-center text-gray-600 dark:text-gray-300"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-4 sm:p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
-              {/* Description */}
-              <div className="mb-6">
-                <p className="text-sm text-gray-700 dark:text-gray-300">
-                  {selectedOption.description}
-                </p>
-              </div>
-
-              {/* Conflicts */}
-              {selectedOption.conflicts.length > 0 && (
-                <div className="mb-6 p-3 sm:p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                  <h4 className="text-sm font-medium text-red-800 dark:text-red-300 mb-2">
-                    ⚠️ Conflicts Detected:
-                  </h4>
-                  <ul className="text-xs sm:text-sm text-red-700 dark:text-red-400 space-y-1">
-                    {selectedOption.conflicts.map((conflict, idx) => (
-                      <li key={idx}>• {conflict}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Timetable Grid */}
-              <div className="mb-6">
-                <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
-                  📅 Full Schedule:
-                </h4>
-                <div className="overflow-x-auto">
-                  <TimetableGrid schedule={selectedOption.schedule} />
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => setShowModal(false)}
-                className="btn-secondary w-full sm:w-auto"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => handleApprove(selectedOption.id)}
-                disabled={actionLoading}
-                className="btn-success w-full sm:w-auto disabled:opacity-50"
-              >
-                {actionLoading ? (
-                  <>
-                    <div className="loading-spinner w-4 h-4 mr-2"></div>
-                    Approving...
-                  </>
-                ) : (
-                  <>✅ Approve This Option</>
+                    Select This Variant
+                  </button>
                 )}
-              </button>
-            </div>
+              </div>
+            ))}
           </div>
         </div>
-      )}
-    </DashboardLayout>
+
+        {/* Detailed View */}
+        {activeVariant && viewMode === 'detail' && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Variant {activeVariant.variant_number} - Detailed View
+              </h2>
+              <button
+                onClick={() => setViewMode('comparison')}
+                className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Back to Comparison
+              </button>
+            </div>
+
+            {renderTimetableGrid(activeVariant)}
+          </div>
+        )}
+
+        {/* Approval Modal */}
+        {showApprovalModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                Approve Timetable
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                Are you sure you want to approve this timetable? This action will make it available
+                for publishing.
+              </p>
+              <textarea
+                value={approvalComments}
+                onChange={e => setApprovalComments(e.target.value)}
+                placeholder="Optional comments..."
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white mb-4"
+                rows={3}
+              />
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowApprovalModal(false)}
+                  disabled={actionLoading}
+                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleApprove}
+                  disabled={actionLoading}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                >
+                  {actionLoading ? 'Approving...' : 'Approve'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Rejection Modal */}
+        {showRejectionModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                Reject Timetable
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                Please provide a reason for rejecting this timetable.
+              </p>
+              <textarea
+                value={rejectionReason}
+                onChange={e => setRejectionReason(e.target.value)}
+                placeholder="Reason for rejection (required)..."
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white mb-4"
+                rows={3}
+                required
+              />
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowRejectionModal(false)}
+                  disabled={actionLoading}
+                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleReject}
+                  disabled={actionLoading || !rejectionReason.trim()}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                >
+                  {actionLoading ? 'Rejecting...' : 'Reject'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }

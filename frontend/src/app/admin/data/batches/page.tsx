@@ -68,8 +68,8 @@ export default function BatchesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const url = editingId
-      ? `http://localhost:8000/api/v1/auth/batches/${editingId}/`
-      : 'http://localhost:8000/api/v1/auth/batches/'
+      ? `http://localhost:8000/api/batches/${editingId}/`
+      : 'http://localhost:8000/api/batches/'
 
     try {
       const response = await fetch(url, {
@@ -104,7 +104,7 @@ export default function BatchesPage() {
     if (!confirm('Delete this batch?')) return
 
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/auth/batches/${id}/`, {
+      const response = await fetch(`http://localhost:8000/api/batches/${id}/`, {
         method: 'DELETE',
       })
 
@@ -253,8 +253,8 @@ export default function BatchesPage() {
               {batches.map(batch => (
                 <tr key={batch.batch_id} className="table-row">
                   <td className="table-cell font-medium">{batch.batch_id}</td>
-                  <td className="table-cell">{batch.course.course_name}</td>
-                  <td className="table-cell">{batch.department.department_name}</td>
+                  <td className="table-cell">{batch.course?.course_name || 'N/A'}</td>
+                  <td className="table-cell">{batch.department?.department_name || 'N/A'}</td>
                   <td className="table-cell">Year {batch.year}</td>
                   <td className="table-cell">
                     <span className="badge badge-neutral">Sem {batch.semester}</span>

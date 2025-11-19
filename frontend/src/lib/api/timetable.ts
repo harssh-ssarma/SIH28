@@ -1,0 +1,356 @@
+/**
+ * API Service for Timetable Management
+ * Handles all backend API calls for timetable generation, workflow, and approval
+ */
+
+import {
+  GenerationJob,
+  TimetableWorkflow,
+  TimetableVariant,
+  TimetableListItem,
+  GenerateTimetableRequest,
+  GenerateTimetableResponse,
+  ApprovalRequest,
+  ApprovalResponse,
+  ProgressMessage,
+  FacultyAvailability,
+} from '@/types/timetable'
+
+const DJANGO_API_BASE = process.env.NEXT_PUBLIC_DJANGO_API_URL || 'http://localhost:8000/api'
+const FASTAPI_BASE = process.env.NEXT_PUBLIC_FASTAPI_URL || 'http://localhost:8001'
+const FASTAPI_WS_BASE = process.env.NEXT_PUBLIC_FASTAPI_WS_URL || 'ws://localhost:8001'
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+async function handleResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }))
+    throw new Error(
+      error.error || error.detail || `HTTP ${response.status}: ${response.statusText}`
+    )
+  }
+  return response.json()
+}
+
+function getAuthHeaders(): HeadersInit {
+  // Using HttpOnly cookies for authentication (like rest of the app)
+  // No need for Authorization header - cookies sent automatically
+  return {
+    'Content-Type': 'application/json',
+  }
+}
+
+function getFetchOptions(): RequestInit {
+  return {
+    headers: getAuthHeaders(),
+    credentials: 'include', // Send HttpOnly cookies with request
+  }
+}
+
+// ============================================
+// TIMETABLE WORKFLOW API
+// ============================================
+
+export async function fetchTimetableWorkflows(filters?: {
+  organization_id?: string
+  status?: string
+  semester?: number
+  academic_year?: string
+}): Promise<TimetableWorkflow[]> {
+  const params = new URLSearchParams()
+  if (filters?.organization_id) params.append('organization_id', filters.organization_id)
+  if (filters?.status) params.append('status', filters.status)
+  if (filters?.semester) params.append('semester', filters.semester.toString())
+  if (filters?.academic_year) params.append('academic_year', filters.academic_year)
+
+  const response = await fetch(
+    `${DJANGO_API_BASE}/timetable-workflow/?${params.toString()}`,
+    getFetchOptions()
+  )
+  const data = await handleResponse<any>(response)
+  // Handle both paginated {results: [], count: X} and direct array responses
+  return Array.isArray(data) ? data : data.results || []
+}
+
+export async function fetchTimetableWorkflowById(id: string): Promise<TimetableWorkflow> {
+  const response = await fetch(`${DJANGO_API_BASE}/timetable-workflow/${id}/`, getFetchOptions())
+  return handleResponse<TimetableWorkflow>(response)
+}
+
+// ============================================
+// TIMETABLE VARIANTS API
+// ============================================
+
+export async function fetchTimetableVariants(filters?: {
+  job_id?: string
+  organization_id?: string
+}): Promise<TimetableVariant[]> {
+  const params = new URLSearchParams()
+  if (filters?.job_id) params.append('job_id', filters.job_id)
+  if (filters?.organization_id) params.append('organization_id', filters.organization_id)
+
+  const response = await fetch(
+    `${DJANGO_API_BASE}/timetable-variants/?${params.toString()}`,
+    getFetchOptions()
+  )
+  const data = await handleResponse<any>(response)
+  // Handle both paginated {results: [], count: X} and direct array responses
+  return Array.isArray(data) ? data : data.results || []
+}
+
+export async function selectVariant(
+  variantId: string
+): Promise<{ message: string; timetable_id: string }> {
+  const response = await fetch(`${DJANGO_API_BASE}/timetable-variants/select_variant/`, {
+    method: 'POST',
+    ...getFetchOptions(),
+    body: JSON.stringify({ variant_id: variantId }),
+  })
+  return handleResponse(response)
+}
+
+// ============================================
+// GENERATION JOB API
+// ============================================
+
+export async function generateTimetable(
+  request: GenerateTimetableRequest
+): Promise<GenerateTimetableResponse> {
+  const response = await fetch(`${DJANGO_API_BASE}/generation-jobs/generate/`, {
+    method: 'POST',
+    ...getFetchOptions(),
+    body: JSON.stringify(request),
+  })
+  return handleResponse<GenerateTimetableResponse>(response)
+}
+
+export async function fetchGenerationJobStatus(jobId: string): Promise<GenerationJob> {
+  const response = await fetch(`${DJANGO_API_BASE}/generation-jobs/${jobId}/`, getFetchOptions())
+  return handleResponse<GenerationJob>(response)
+}
+
+export async function listGenerationJobs(filters?: {
+  status?: string
+  limit?: number
+}): Promise<GenerationJob[]> {
+  const params = new URLSearchParams()
+  if (filters?.status) params.append('status', filters.status)
+  if (filters?.limit) params.append('limit', filters.limit.toString())
+
+  const response = await fetch(
+    `${DJANGO_API_BASE}/generation-jobs/?${params.toString()}`,
+    getFetchOptions()
+  )
+  const data = await handleResponse<any>(response)
+  // Handle both paginated {results: [], count: X} and direct array responses
+  return Array.isArray(data) ? data : data.results || []
+}
+
+// ============================================
+// APPROVAL WORKFLOW API
+// ============================================
+
+export async function submitReview(
+  workflowId: string,
+  request: ApprovalRequest
+): Promise<ApprovalResponse> {
+  const response = await fetch(
+    `${DJANGO_API_BASE}/timetable-workflow/${workflowId}/submit_review/`,
+    {
+      method: 'POST',
+      ...getFetchOptions(),
+      body: JSON.stringify(request),
+    }
+  )
+  return handleResponse<ApprovalResponse>(response)
+}
+
+export async function approveTimetable(
+  workflowId: string,
+  comments?: string
+): Promise<ApprovalResponse> {
+  return submitReview(workflowId, {
+    variant_id: '', // Will be extracted from workflow
+    review_type: 'approve',
+    comments,
+  })
+}
+
+export async function rejectTimetable(
+  workflowId: string,
+  reason: string
+): Promise<ApprovalResponse> {
+  return submitReview(workflowId, {
+    variant_id: '',
+    review_type: 'reject',
+    comments: reason,
+  })
+}
+
+// ============================================
+// FACULTY AVAILABILITY API
+// ============================================
+
+export async function fetchFacultyAvailability(filters?: {
+  department_id?: string
+  organization_id?: string
+}): Promise<FacultyAvailability[]> {
+  const params = new URLSearchParams()
+  if (filters?.department_id) params.append('department', filters.department_id)
+  if (filters?.organization_id) params.append('organization', filters.organization_id)
+
+  const response = await fetch(
+    `${DJANGO_API_BASE}/faculty/?${params.toString()}`,
+    getFetchOptions()
+  )
+
+  const data = await handleResponse<any>(response)
+  // Handle both paginated {results: [], count: X} and direct array responses
+  const faculty = Array.isArray(data) ? data : data.results || []
+
+  // Transform to FacultyAvailability format
+  return faculty.map((f: any) => ({
+    id: f.faculty_id || f.id,
+    name: f.faculty_name || f.name,
+    available: f.is_active !== false, // Assume active faculty are available
+    email: f.email,
+    department: f.department?.dept_name,
+  }))
+}
+
+export async function updateFacultyAvailability(
+  facultyId: string,
+  available: boolean
+): Promise<{ success: boolean }> {
+  const response = await fetch(`${DJANGO_API_BASE}/faculty/${facultyId}/`, {
+    method: 'PATCH',
+    ...getFetchOptions(),
+    body: JSON.stringify({ is_active: available }),
+  })
+  return handleResponse(response)
+}
+
+// ============================================
+// WEBSOCKET PROGRESS TRACKING
+// ============================================
+
+export class ProgressTracker {
+  private ws: WebSocket | null = null
+  private jobId: string
+  private onProgress: (message: ProgressMessage) => void
+  private onComplete: (message: ProgressMessage) => void
+  private onError: (error: string) => void
+  private reconnectAttempts = 0
+  private maxReconnectAttempts = 5
+
+  constructor(
+    jobId: string,
+    callbacks: {
+      onProgress: (message: ProgressMessage) => void
+      onComplete: (message: ProgressMessage) => void
+      onError: (error: string) => void
+    }
+  ) {
+    this.jobId = jobId
+    this.onProgress = callbacks.onProgress
+    this.onComplete = callbacks.onComplete
+    this.onError = callbacks.onError
+  }
+
+  connect(): void {
+    const wsUrl = `${FASTAPI_WS_BASE}/ws/progress/${this.jobId}`
+
+    try {
+      this.ws = new WebSocket(wsUrl)
+
+      this.ws.onopen = () => {
+        console.log(`WebSocket connected for job ${this.jobId}`)
+        this.reconnectAttempts = 0
+      }
+
+      this.ws.onmessage = event => {
+        try {
+          const message: ProgressMessage = JSON.parse(event.data)
+
+          if (message.status === 'completed' || message.status === 'failed') {
+            this.onComplete(message)
+            this.disconnect()
+          } else {
+            this.onProgress(message)
+          }
+        } catch (error) {
+          console.error('Failed to parse WebSocket message:', error)
+        }
+      }
+
+      this.ws.onerror = error => {
+        console.error('WebSocket error:', error)
+        this.onError('Connection error occurred')
+      }
+
+      this.ws.onclose = event => {
+        console.log('WebSocket closed:', event.code, event.reason)
+
+        // Attempt reconnection if not intentionally closed
+        if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.reconnectAttempts++
+          const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000)
+
+          console.log(
+            `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`
+          )
+
+          setTimeout(() => this.connect(), delay)
+        } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          this.onError('Failed to maintain connection after multiple attempts')
+        }
+      }
+    } catch (error) {
+      console.error('Failed to create WebSocket:', error)
+      this.onError('Failed to establish connection')
+    }
+  }
+
+  disconnect(): void {
+    if (this.ws) {
+      this.ws.close(1000, 'Client disconnect')
+      this.ws = null
+    }
+  }
+}
+
+// ============================================
+// UTILITY: Transform Workflows to List Items
+// ============================================
+
+export function transformWorkflowsToListItems(workflows: TimetableWorkflow[]): TimetableListItem[] {
+  // Handle null/undefined workflows
+  if (!workflows || !Array.isArray(workflows)) {
+    return []
+  }
+
+  return workflows.map(workflow => {
+    // Extract year from semester (assuming semesters 1-2 = year 1, 3-4 = year 2, etc.)
+    const year = Math.ceil(workflow.semester / 2)
+
+    // Get batch name from variant or use department as fallback
+    const batchNames = workflow.variant?.batch_ids?.join(', ') || 'All Batches'
+
+    return {
+      id: workflow.id,
+      year,
+      batch: batchNames,
+      department: workflow.department_id,
+      semester: workflow.semester,
+      status: workflow.status === 'pending_review' ? 'pending' : workflow.status,
+      lastUpdated: new Date(workflow.updated_at).toLocaleDateString(),
+      conflicts: workflow.variant?.conflict_count || 0,
+      score: workflow.variant?.score,
+      academic_year: workflow.academic_year,
+      variant_id: workflow.variant?.id,
+      job_id: workflow.job_id,
+    }
+  })
+}

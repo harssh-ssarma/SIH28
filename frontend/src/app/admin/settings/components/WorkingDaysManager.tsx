@@ -23,7 +23,7 @@ export default function WorkingDaysManager() {
 
   const loadWorkingDays = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/v1/settings/working-days/')
+      const response = await fetch('http://localhost:8000/api/settings/working-days/')
       if (response.ok) {
         const data = await response.json()
         setWorkingDays(data.working_days || [])
@@ -44,7 +44,7 @@ export default function WorkingDaysManager() {
   const saveWorkingDays = async () => {
     setSaving(true)
     try {
-      const response = await fetch('http://localhost:8000/api/v1/settings/working-days/update/', {
+      const response = await fetch('http://localhost:8000/api/settings/working-days/update/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ working_days: workingDays }),

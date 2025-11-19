@@ -1,0 +1,100 @@
+"""
+Configuration settings for FastAPI Timetable Generation Service
+Reads from shared backend/.env file
+"""
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from parent backend/.env
+backend_dir = Path(__file__).resolve().parent.parent
+env_path = backend_dir / ".env"
+load_dotenv(dotenv_path=env_path)
+
+
+class Settings:
+    """Application settings loaded from environment variables"""
+
+    # Redis Configuration (shared with Django)
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+    # Django Backend API Configuration
+    DJANGO_API_BASE_URL: str = os.getenv("DJANGO_API_BASE_URL", "http://localhost:8000")
+    DJANGO_API_TIMEOUT: int = int(os.getenv("DJANGO_API_TIMEOUT", "30"))
+
+    # Celery Configuration (for callbacks)
+    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+
+    # FastAPI Service Configuration
+    FASTAPI_HOST: str = os.getenv("FASTAPI_HOST", "0.0.0.0")
+    FASTAPI_PORT: int = int(os.getenv("FASTAPI_PORT", "8001"))
+
+    # CORS Settings
+    CORS_ORIGINS: list = [
+        "http://localhost:3000",  # Next.js dev
+        "http://localhost:8000",  # Django dev
+        "https://sih28.onrender.com",  # Production
+    ]
+
+    # Timetable Generation Algorithm Parameters
+
+    # Stage 1: Louvain Clustering
+    ALPHA_FACULTY: float = 10.0  # Weight for shared faculty
+    ALPHA_STUDENT: float = 10.0  # Weight for student overlap (PRIMARY for NEP 2020)
+    ALPHA_ROOM: float = 3.0  # Weight for room competition
+    MAX_CLUSTER_SIZE: int = 15  # Maximum courses per cluster
+    MIN_CLUSTER_SIZE: int = 3  # Minimum courses per cluster
+
+    # Stage 2A: CP-SAT Solver (OPTIMIZED for speed)
+    CPSAT_TIMEOUT_SECONDS: int = 60  # 1 minute per cluster (reduced from 5min)
+    CPSAT_NUM_WORKERS: int = 8  # Parallel workers
+
+    # Stage 2B: Genetic Algorithm (OPTIMIZED for speed)
+    GA_POPULATION_SIZE: int = 30  # Reduced from 50
+    GA_GENERATIONS: int = 50  # Reduced from 100 (50% faster)
+    GA_MUTATION_RATE: float = 0.15  # Slightly higher for faster exploration
+    GA_CROSSOVER_RATE: float = 0.8
+    GA_ELITISM_RATE: float = 0.15  # Keep more good solutions
+    GA_TOURNAMENT_SIZE: int = 3  # Smaller tournament for speed
+
+    # Soft Constraint Weights (must sum to 1.0)
+    WEIGHT_FACULTY_PREFERENCE: float = 0.20  # Faculty preferred time slots
+    WEIGHT_COMPACTNESS: float = 0.25  # Minimize gaps in student schedules
+    WEIGHT_ROOM_UTILIZATION: float = 0.15  # Efficient room usage
+    WEIGHT_WORKLOAD_BALANCE: float = 0.20  # Balance faculty workload
+    WEIGHT_PEAK_SPREADING: float = 0.10  # Avoid peak hour clustering
+    WEIGHT_CONTINUITY: float = 0.10  # Same course sessions on same days
+
+    # Stage 3: Q-Learning (OPTIMIZED for speed)
+    RL_LEARNING_RATE: float = 0.15  # α - faster learning
+    RL_DISCOUNT_FACTOR: float = 0.85  # γ - slightly reduced for speed
+    RL_EPSILON: float = 0.15  # Less exploration, more exploitation
+    RL_MAX_ITERATIONS: int = 500  # Reduced from 1000 (50% faster)
+    RL_CONVERGENCE_THRESHOLD: float = 0.02  # Less strict convergence
+    Q_TABLE_PATH: str = str(backend_dir / "fastapi" / "q_table.pkl")
+
+    # Multi-Dimensional Context Engine
+    CONTEXT_ENGINE_ENABLED: bool = True
+    CONTEXT_LEARNING_PATH: str = str(backend_dir / "fastapi" / "context_learning.json")
+
+    # Context Dimension Weights (how much each dimension influences decisions)
+    CONTEXT_TEMPORAL_WEIGHT: float = 0.25    # Time-of-day effectiveness
+    CONTEXT_BEHAVIORAL_WEIGHT: float = 0.25  # Historical patterns
+    CONTEXT_ACADEMIC_WEIGHT: float = 0.20    # Curricular coherence
+    CONTEXT_SOCIAL_WEIGHT: float = 0.15      # Peer group cohesion
+    CONTEXT_SPATIAL_WEIGHT: float = 0.15     # Room and travel optimization
+
+    # Progress Tracking
+    PROGRESS_UPDATE_INTERVAL: int = 1  # Seconds between WebSocket updates
+    PROGRESS_EXPIRE_SECONDS: int = 3600  # 1 hour
+    RESULT_EXPIRE_SECONDS: int = 86400  # 24 hours
+    REDIS_PROGRESS_PREFIX: str = "progress:job:"  # Redis key prefix for progress
+
+    # Logging
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    SENTRY_DSN: str = os.getenv("SENTRY_DSN", "")
+    SENTRY_ENVIRONMENT: str = os.getenv("SENTRY_ENVIRONMENT", "development")
+
+
+settings = Settings()

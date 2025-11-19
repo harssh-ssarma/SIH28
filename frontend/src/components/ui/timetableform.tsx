@@ -1,872 +1,565 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/context/AuthContext'
+import TimetableProgressTracker from './ProgressTracker'
 
-interface Classroom {
-  id: string
-  roomNumber: string
-  capacity: number
-  type: 'lecture' | 'lab'
+// NEP 2020 / Harvard-style Timetable Generation
+// NO batch selection - students enroll individually in subjects
+
+interface SubjectEnrollmentSummary {
+  subject_id: string
+  subject_code: string
+  subject_name: string
+  subject_type: 'theory' | 'practical' | 'hybrid'
+  total_enrolled: number
+  core_enrolled: number
+  elective_enrolled: number
+  cross_dept_enrolled: number
+  enrolled_students: string[] // student IDs
+  primary_department: string
+  cross_departments: string[]
 }
 
-interface Batch {
-  id: string
-  name: string
-  strength: number
-}
-
-interface Subject {
-  id: string
-  name: string
-  code: string
-  classesPerWeek: number
+interface FixedSlotInput {
+  subject_id: string
+  faculty_id: string
+  day: number
+  start_time: string
+  end_time: string
 }
 
 interface Faculty {
-  id: string
-  name: string
+  faculty_id: string
+  faculty_name: string
+  department_name?: string
 }
 
-interface FixedSlot {
-  id: string
-  subject: string
-  faculty: string
-  day: string
-  timeSlot: string
-}
+export default function NEP2020TimetableForm() {
+  const router = useRouter()
+  const { user } = useAuth()
 
-export default function TimetableForm() {
+  const API_BASE = process.env.NEXT_PUBLIC_DJANGO_API_URL || 'http://localhost:8000/api'
+
+  // Form State
   const [formData, setFormData] = useState({
-    department: '',
-    semester: '',
-    academicYear: '2024-25',
-    maxClassesPerDay: 6,
+    academic_year: '2024-25',
+    semester: 1,
+    num_variants: 5,
+    include_cross_dept: true, // Include cross-department enrollments
   })
 
-  const [classrooms, setClassrooms] = useState<Classroom[]>([])
-  const [batches, setBatches] = useState<Batch[]>([])
-  const [subjects, setSubjects] = useState<Subject[]>([])
+  // NEP 2020 Data
+  const [enrollmentSummary, setEnrollmentSummary] = useState<SubjectEnrollmentSummary[]>([])
   const [faculty, setFaculty] = useState<Faculty[]>([])
-  const [fixedSlots, setFixedSlots] = useState<FixedSlot[]>([])
+  const [fixedSlots, setFixedSlots] = useState<FixedSlotInput[]>([])
+
+  // UI State
   const [isGenerating, setIsGenerating] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [cacheKey, setCacheKey] = useState<string | null>(null)
 
-  // Smart autofill when department and semester change
+  // Fetch enrollment summary when semester changes
   useEffect(() => {
-    if (formData.department && formData.semester) {
-      loadFilteredData()
+    if (user?.organization && formData.semester) {
+      loadEnrollmentData()
     }
-  }, [formData.department, formData.semester])
+  }, [formData.semester, formData.academic_year, user?.organization])
 
-  useEffect(() => {
-    loadAllData()
-  }, [])
+  const loadEnrollmentData = async () => {
+    if (!user?.organization) return
 
-  const loadFilteredData = async () => {
     try {
-      const [batchesRes, subjectsRes, facultyRes] = await Promise.all([
-        fetch(
-          `http://localhost:8000/api/v1/auth/batches/?department=${formData.department}&semester=${formData.semester}`
-        ),
-        fetch(
-          `http://localhost:8000/api/v1/courses/?department=${formData.department}&semester=${formData.semester}`
-        ),
-        fetch(`http://localhost:8000/api/v1/auth/faculty/?department=${formData.department}`),
-      ])
+      setIsLoading(true)
+      setError(null)
 
-      if (batchesRes.ok) {
-        const batchData = await batchesRes.json()
-        setBatches(
-          batchData.map((b: any) => ({
-            id: b.id?.toString() || b.name,
-            name: b.name || '',
-            strength: b.strength || 0,
-          }))
+      // Check Redis cache first
+      const generatedCacheKey = `enrollment_${user.organization}_${formData.semester}_${formData.academic_year}`
+
+      let cachedData = null
+      try {
+        const cacheRes = await fetch(
+          `${API_BASE}/timetable/enrollment-cache/?cache_key=${generatedCacheKey}`,
+          { credentials: 'include' }
         )
+        if (cacheRes.ok) {
+          const cacheResponse = await cacheRes.json()
+          // Check if cache actually exists
+          if (cacheResponse.exists && cacheResponse.data) {
+            cachedData = cacheResponse.data
+            console.log('✅ Cache HIT - Loading from Redis')
+          } else {
+            console.log('ℹ️ Cache MISS - Cache does not exist')
+          }
+        }
+      } catch (err) {
+        console.log('⚠️ Cache check failed:', err)
       }
 
-      if (subjectsRes.ok) {
-        const subjectData = await subjectsRes.json()
-        setSubjects(
-          subjectData.map((s: any) => ({
-            id: s.id?.toString() || s.code,
-            name: s.name || '',
-            code: s.code || '',
-            classesPerWeek: s.classesPerWeek || s.classes_per_week || 0,
-          }))
+      if (cachedData && cachedData.subjects && cachedData.subjects.length > 0) {
+        // Load from cache
+        setEnrollmentSummary(cachedData.subjects || [])
+        setFaculty(cachedData.faculty || [])
+        setCacheKey(generatedCacheKey)
+        console.log(
+          `✅ Loaded from cache: ${cachedData.subjects.length} subjects, ${
+            cachedData.faculty?.length || 0
+          } faculty`
         )
-      }
+      } else {
+        // Fetch from database
+        console.log('📡 Fetching enrollment data...')
 
-      if (facultyRes.ok) {
-        const facultyData = await facultyRes.json()
-        setFaculty(
-          facultyData.map((f: any) => ({
-            id: f.id?.toString() || f.name,
-            name: f.name || '',
-          }))
-        )
-      }
-    } catch (error) {
-      console.error('Failed to load filtered data:', error)
-    }
-  }
+        const [enrollmentRes, facultyRes] = await Promise.all([
+          fetch(
+            `${API_BASE}/timetable/enrollments/?semester=${formData.semester}&academic_year=${formData.academic_year}&include_cross_dept=true`,
+            { credentials: 'include' }
+          ),
+          fetch(`${API_BASE}/enrollment-faculty/?semester=${formData.semester}`, {
+            credentials: 'include',
+          }),
+        ])
 
-  const loadAllData = async () => {
-    try {
-      const classroomsRes = await fetch('http://localhost:8000/api/v1/classrooms/')
+        let enrollData, facultyData
 
-      if (classroomsRes.ok) {
-        const classroomData = await classroomsRes.json()
-        setClassrooms(
-          classroomData.map((c: any) => ({
-            id: c.id?.toString() || c.roomNumber,
-            roomNumber: c.roomNumber || '',
-            capacity: c.capacity || 0,
-            type: c.type || 'lecture',
-          }))
-        )
+        if (enrollmentRes.ok) {
+          enrollData = await enrollmentRes.json()
+          // Backend returns {summary: [...], enrollments: [...], cross_department_summary: [...]}
+          const subjects = enrollData.summary || enrollData.results || enrollData
+          setEnrollmentSummary(Array.isArray(subjects) ? subjects : [])
+          console.log(`✅ Loaded ${subjects?.length || 0} subjects with enrollments`)
+        } else {
+          console.error('❌ Failed to fetch enrollments:', enrollmentRes.status)
+          setEnrollmentSummary([])
+        }
+
+        if (facultyRes.ok) {
+          facultyData = await facultyRes.json()
+          const faculties = facultyData.results || facultyData
+          setFaculty(Array.isArray(faculties) ? faculties : [])
+          console.log(`✅ Loaded ${faculties?.length || 0} faculty members`)
+        } else {
+          console.error('❌ Failed to fetch faculty:', facultyRes.status)
+          setFaculty([])
+        }
+
+        // Store in Redis cache for future use
+        if (enrollmentRes.ok && facultyRes.ok && enrollData && facultyData) {
+          try {
+            await fetch(`${API_BASE}/timetable/enrollment-cache/`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                cache_key: generatedCacheKey,
+                organization_id: user.organization,
+                semester: formData.semester,
+                academic_year: formData.academic_year,
+                subjects: enrollData.results || enrollData,
+                faculty: facultyData.results || facultyData,
+                ttl_hours: 24,
+              }),
+            })
+            setCacheKey(generatedCacheKey)
+            console.log('✅ Data cached in Redis')
+          } catch (cacheErr) {
+            console.warn('⚠️ Failed to cache data:', cacheErr)
+          }
+        }
       }
-    } catch (error) {
-      console.error('Failed to load data:', error)
-      setClassrooms([])
+    } catch (err) {
+      console.error('❌ Failed to load enrollment data:', err)
+      setError('Failed to load enrollment data')
     } finally {
       setIsLoading(false)
     }
   }
 
-  // Classroom functions
-  const addClassroom = () => {
-    setClassrooms([
-      ...classrooms,
-      {
-        id: Date.now().toString(),
-        roomNumber: '',
-        capacity: 30,
-        type: 'lecture',
-      },
-    ])
-  }
-
-  const updateClassroom = (id: string, field: keyof Classroom, value: any) => {
-    setClassrooms(
-      classrooms.map(room =>
-        room.id === id
-          ? {
-              ...room,
-              [field]: field === 'capacity' ? (value === '' ? 0 : parseInt(value, 10) || 0) : value,
-            }
-          : room
-      )
-    )
-  }
-
-  const removeClassroom = (id: string) => {
-    setClassrooms(classrooms.filter(room => room.id !== id))
-  }
-
-  // Batch functions
-  const addBatch = () => {
-    setBatches([
-      ...batches,
-      {
-        id: Date.now().toString(),
-        name: '',
-        strength: 60,
-      },
-    ])
-  }
-
-  const updateBatch = (id: string, field: keyof Batch, value: any) => {
-    setBatches(
-      batches.map(batch =>
-        batch.id === id
-          ? {
-              ...batch,
-              [field]: field === 'strength' ? (value === '' ? 0 : parseInt(value, 10) || 0) : value,
-            }
-          : batch
-      )
-    )
-  }
-
-  const removeBatch = (id: string) => {
-    setBatches(batches.filter(batch => batch.id !== id))
-  }
-
-  // Subject functions
-  const addSubject = () => {
-    setSubjects([
-      ...subjects,
-      {
-        id: Date.now().toString(),
-        name: '',
-        code: '',
-        classesPerWeek: 3,
-      },
-    ])
-  }
-
-  const updateSubject = (id: string, field: keyof Subject, value: any) => {
-    setSubjects(
-      subjects.map(subject =>
-        subject.id === id
-          ? {
-              ...subject,
-              [field]:
-                field === 'classesPerWeek' ? (value === '' ? 0 : parseInt(value, 10) || 0) : value,
-            }
-          : subject
-      )
-    )
-  }
-
-  const removeSubject = (id: string) => {
-    setSubjects(subjects.filter(subject => subject.id !== id))
-  }
-
-  // Faculty functions
-  const addFaculty = () => {
-    setFaculty([
-      ...faculty,
-      {
-        id: Date.now().toString(),
-        name: '',
-      },
-    ])
-  }
-
-  const updateFaculty = (id: string, field: keyof Faculty, value: string) => {
-    setFaculty(faculty.map(member => (member.id === id ? { ...member, [field]: value } : member)))
-  }
-
-  const removeFaculty = (id: string) => {
-    setFaculty(faculty.filter(member => member.id !== id))
-  }
-
-  // Fixed slot functions
   const addFixedSlot = () => {
-    setFixedSlots([
-      ...fixedSlots,
+    setFixedSlots(prev => [
+      ...prev,
       {
-        id: Date.now().toString(),
-        subject: '',
-        faculty: '',
-        day: '',
-        timeSlot: '',
+        subject_id: '',
+        faculty_id: '',
+        day: 0,
+        start_time: '09:00',
+        end_time: '10:00',
       },
     ])
   }
 
-  const updateFixedSlot = (id: string, field: keyof FixedSlot, value: string) => {
-    setFixedSlots(fixedSlots.map(slot => (slot.id === id ? { ...slot, [field]: value } : slot)))
+  const updateFixedSlot = (index: number, field: keyof FixedSlotInput, value: any) => {
+    setFixedSlots(prev => prev.map((slot, i) => (i === index ? { ...slot, [field]: value } : slot)))
   }
 
-  const removeFixedSlot = (id: string) => {
-    setFixedSlots(fixedSlots.filter(slot => slot.id !== id))
+  const removeFixedSlot = (index: number) => {
+    setFixedSlots(prev => prev.filter((_, i) => i !== index))
   }
 
   const handleGenerate = async () => {
-    setIsGenerating(true)
+    if (enrollmentSummary.length === 0) {
+      alert('No subjects with enrollments found. Please ensure students are enrolled in subjects.')
+      return
+    }
 
-    // Get enrollment data for NEP integration
-    let enrollmentData = []
+    if (!user?.organization) {
+      alert('User organization not found')
+      return
+    }
+
     try {
-      const enrollmentRes = await fetch(
-        `http://localhost:8000/api/v1/students/enrollments/summary/?semester=${formData.semester}&academic_year=${formData.academicYear}`
-      )
-      if (enrollmentRes.ok) {
-        enrollmentData = await enrollmentRes.json()
+      setIsGenerating(true)
+      setError(null)
+
+      // NEP 2020 payload - Organization-wide student enrollments
+      const requestPayload = {
+        // Selection criteria
+        semester: formData.semester,
+        academic_year: formData.academic_year,
+        organization_id: user.organization,
+
+        // Generation options
+        num_variants: formData.num_variants,
+        include_cross_dept: formData.include_cross_dept,
+        fixed_slots: fixedSlots.filter(slot => slot.subject_id && slot.faculty_id),
+
+        // Enrollment data (or cache key)
+        subjects: enrollmentSummary,
+        redis_cache_key: cacheKey,
       }
-    } catch (error) {
-      console.warn('Could not fetch enrollment data:', error)
-    }
 
-    const payload = {
-      department: formData.department,
-      semester: formData.semester,
-      academicYear: formData.academicYear,
-      maxClassesPerDay: formData.maxClassesPerDay,
-      classrooms: classrooms.filter(c => c.roomNumber && c.capacity > 0),
-      batches: batches.filter(b => b.name && b.strength > 0),
-      subjects: subjects.filter(s => s.name && s.code && s.classesPerWeek > 0),
-      faculty: faculty.filter(f => f.name),
-      fixedSlots: fixedSlots.filter(s => s.subject && s.faculty && s.day && s.timeSlot),
-      enrollments: enrollmentData,
-    }
+      console.log('🚀 Generating NEP 2020 timetable:', requestPayload)
 
-    try {
-      // Call Django API which will coordinate with FastAPI
-      const response = await fetch('http://localhost:8000/api/v1/timetables/generate/', {
+      const response = await fetch(`${API_BASE}/timetable/generate/`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(requestPayload),
       })
 
-      const result = await response.json()
+      const data = await response.json()
 
-      if (result.success && result.timetable_id) {
-        alert(`Generated ${result.options_count || 3} timetable options successfully!`)
-        // Redirect to the review page with the generated timetable ID
-        window.location.href = `/admin/timetables/${result.timetable_id}/review`
-      } else {
-        alert(`Generation failed: ${result.error || 'Unknown error occurred'}`)
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to start generation')
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Network error occurred'
-      alert(`Error: ${errorMessage}`)
-    } finally {
+
+      if (data.success) {
+        setJobId(data.job_id)
+      } else {
+        throw new Error(data.error || 'Generation failed')
+      }
+    } catch (err) {
+      console.error('Failed to generate timetable:', err)
+      setError(err instanceof Error ? err.message : 'Failed to generate timetable')
       setIsGenerating(false)
     }
   }
 
-  if (isLoading) {
+  if (isGenerating && jobId) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Loading form data...</p>
-        </div>
-      </div>
+      <TimetableProgressTracker
+        jobId={jobId}
+        onComplete={generatedTimetableId => {
+          router.push(`/admin/timetable/review/${generatedTimetableId}`)
+        }}
+      />
     )
   }
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-gray-800 dark:text-gray-200">
-          Generate Timetable
-        </h1>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-bold tracking-tight text-[#2C2C2C] dark:text-[#FFFFFF]">
+            Generate Timetable (NEP 2020)
+          </h2>
+          <p className="text-sm text-[#6B6B6B] dark:text-[#B3B3B3]">
+            Student-based flexible course enrollment (Harvard-style)
+          </p>
+        </div>
+      </div>
+
+      {error && (
+        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        </div>
+      )}
+
+      {/* Configuration */}
+      <div className="card">
+        <div className="p-4 sm:p-6 space-y-4">
+          <h3 className="text-base font-semibold text-gray-800 dark:text-gray-200">
+            Academic Configuration
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Semester */}
+            <div>
+              <label className="block text-sm font-medium text-[#2C2C2C] dark:text-[#FFFFFF] mb-2">
+                Semester <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={formData.semester}
+                onChange={e => setFormData({ ...formData, semester: parseInt(e.target.value) })}
+                className="input-field"
+                disabled={isGenerating || isLoading}
+                aria-label="Select semester"
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8].map(sem => (
+                  <option key={sem} value={sem}>
+                    Semester {sem}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Academic Year */}
+            <div>
+              <label className="block text-sm font-medium text-[#2C2C2C] dark:text-[#FFFFFF] mb-2">
+                Academic Year <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.academic_year}
+                onChange={e => setFormData({ ...formData, academic_year: e.target.value })}
+                placeholder="2024-25"
+                className="input-field"
+                disabled={isGenerating || isLoading}
+                aria-label="Academic year"
+              />
+            </div>
+
+            {/* Number of Variants */}
+            <div>
+              <label className="block text-sm font-medium text-[#2C2C2C] dark:text-[#FFFFFF] mb-2">
+                Variants
+              </label>
+              <input
+                type="number"
+                value={formData.num_variants}
+                onChange={e =>
+                  setFormData({ ...formData, num_variants: parseInt(e.target.value) || 5 })
+                }
+                min={3}
+                max={10}
+                className="input-field"
+                disabled={isGenerating || isLoading}
+                aria-label="Number of timetable variants"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Enrollment Summary */}
+      {isLoading ? (
+        <div className="card">
+          <div className="p-6 text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+            <p className="text-sm text-gray-600">Loading enrollment data...</p>
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          <div className="p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-gray-800 dark:text-gray-200">
+                Subject Enrollments
+              </h3>
+              <button
+                onClick={loadEnrollmentData}
+                className="btn-secondary text-xs px-3 py-1.5"
+                disabled={isLoading}
+              >
+                🔄 Refresh
+              </button>
+            </div>
+
+            {enrollmentSummary.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                No subjects with enrollments found for selected semester
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead className="bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Subject
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Type
+                      </th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                        Total
+                      </th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                        Core
+                      </th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                        Elective
+                      </th>
+                      <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                        Cross-Dept
+                      </th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Dept
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
+                    {enrollmentSummary.map(subj => (
+                      <tr key={subj.subject_id}>
+                        <td className="px-3 py-2 text-sm">
+                          <div className="font-medium text-gray-900 dark:text-white">
+                            {subj.subject_code}
+                          </div>
+                          <div className="text-xs text-gray-500">{subj.subject_name}</div>
+                        </td>
+                        <td className="px-3 py-2 text-sm">
+                          <span className="badge badge-neutral text-xs">{subj.subject_type}</span>
+                        </td>
+                        <td className="px-3 py-2 text-sm text-right font-semibold">
+                          {subj.total_enrolled}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-right">{subj.core_enrolled}</td>
+                        <td className="px-3 py-2 text-sm text-right">{subj.elective_enrolled}</td>
+                        <td className="px-3 py-2 text-sm text-right">
+                          {subj.cross_dept_enrolled > 0 && (
+                            <span className="text-orange-600 font-medium">
+                              {subj.cross_dept_enrolled}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-sm text-gray-600">
+                          {subj.primary_department}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="text-xs text-gray-500">
+              Total subjects: {enrollmentSummary.length} | Total students:{' '}
+              {enrollmentSummary.reduce((sum, s) => sum + s.total_enrolled, 0)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fixed Slots (Optional) */}
+      <div className="card">
+        <div className="p-4 sm:p-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold text-gray-800 dark:text-gray-200">
+              Fixed Slots <span className="text-xs font-normal text-gray-500">(Optional)</span>
+            </h3>
+            <button
+              onClick={addFixedSlot}
+              disabled={isGenerating}
+              className="btn-primary text-xs px-3 py-1.5"
+            >
+              + Add Slot
+            </button>
+          </div>
+
+          {fixedSlots.length === 0 ? (
+            <p className="text-sm text-gray-500">No fixed slots defined</p>
+          ) : (
+            <div className="space-y-3">
+              {fixedSlots.map((slot, index) => (
+                <div
+                  key={index}
+                  className="p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50"
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                    <select
+                      value={slot.subject_id}
+                      onChange={e => updateFixedSlot(index, 'subject_id', e.target.value)}
+                      className="input-field text-sm"
+                      aria-label="Select subject for fixed slot"
+                    >
+                      <option value="">Select Subject</option>
+                      {enrollmentSummary.map(subj => (
+                        <option key={subj.subject_id} value={subj.subject_id}>
+                          {subj.subject_code}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={slot.faculty_id}
+                      onChange={e => updateFixedSlot(index, 'faculty_id', e.target.value)}
+                      className="input-field text-sm"
+                      aria-label="Select faculty for fixed slot"
+                    >
+                      <option value="">Select Faculty</option>
+                      {faculty.map(fac => (
+                        <option key={fac.faculty_id} value={fac.faculty_id}>
+                          {fac.faculty_name}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={slot.day}
+                      onChange={e => updateFixedSlot(index, 'day', parseInt(e.target.value))}
+                      className="input-field text-sm"
+                      aria-label="Select day for fixed slot"
+                    >
+                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].map((day, i) => (
+                        <option key={i} value={i}>
+                          {day}
+                        </option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="time"
+                      value={slot.start_time}
+                      onChange={e => updateFixedSlot(index, 'start_time', e.target.value)}
+                      className="input-field text-sm"
+                      aria-label="Start time for fixed slot"
+                    />
+
+                    <div className="flex gap-2">
+                      <input
+                        type="time"
+                        value={slot.end_time}
+                        onChange={e => updateFixedSlot(index, 'end_time', e.target.value)}
+                        className="input-field text-sm flex-1"
+                        aria-label="End time for fixed slot"
+                      />
+                      <button
+                        onClick={() => removeFixedSlot(index)}
+                        className="btn-secondary text-xs px-2"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Generate Button */}
+      <div className="flex justify-end">
         <button
           onClick={handleGenerate}
-          disabled={
-            isGenerating ||
-            !formData.department ||
-            !formData.semester ||
-            classrooms.length === 0 ||
-            subjects.length === 0 ||
-            faculty.length === 0
-          }
-          className="btn-primary w-full sm:w-auto disabled:opacity-50"
+          disabled={isGenerating || isLoading || enrollmentSummary.length === 0}
+          className="btn-primary px-6 py-2"
         >
-          {isGenerating ? (
-            <>
-              <div className="loading-spinner w-4 h-4 mr-2"></div>
-              Generating Options...
-            </>
-          ) : (
-            <>
-              <span className="mr-2">🧠</span>
-              Generate Master Timetable
-            </>
-          )}
+          {isGenerating ? 'Generating...' : 'Generate Timetable'}
         </button>
-      </div>
-
-      {/* Basic Information */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="card-title">Basic Information</h3>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div className="form-group">
-            <label className="form-label">Department</label>
-            <select
-              className="input-primary"
-              value={formData.department}
-              onChange={e => setFormData({ ...formData, department: e.target.value })}
-            >
-              <option value="">Select Department</option>
-              <option value="cs">Computer Science</option>
-              <option value="math">Mathematics</option>
-              <option value="physics">Physics</option>
-              <option value="chemistry">Chemistry</option>
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Semester</label>
-            <select
-              className="input-primary"
-              value={formData.semester}
-              onChange={e => setFormData({ ...formData, semester: e.target.value })}
-            >
-              <option value="">Select Semester</option>
-              {[1, 2, 3, 4, 5, 6, 7, 8].map(sem => (
-                <option key={sem} value={sem}>
-                  Semester {sem}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Academic Year</label>
-            <input
-              type="text"
-              className="input-primary"
-              placeholder="2023-24"
-              value={formData.academicYear}
-              onChange={e => setFormData({ ...formData, academicYear: e.target.value })}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Section 1: Classrooms & Batches */}
-      <div className="card">
-        <div className="card-header">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <h3 className="card-title">Classrooms & Batches</h3>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <button onClick={addClassroom} className="btn-secondary w-full sm:w-auto">
-                <span className="mr-2">🏫</span>
-                Add Classroom
-              </button>
-              <button onClick={addBatch} className="btn-secondary w-full sm:w-auto">
-                <span className="mr-2">👥</span>
-                Add Batch
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Classrooms */}
-          <div>
-            <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
-              Classrooms
-            </h4>
-            <div className="space-y-3">
-              {classrooms.length === 0 ? (
-                <div className="text-center py-6 text-gray-500 dark:text-gray-400 text-sm">
-                  No classrooms added. Click "Add Classroom" to start.
-                </div>
-              ) : (
-                classrooms.map(room => (
-                  <div
-                    key={room.id}
-                    className="border border-gray-200 dark:border-[#3c4043] rounded-lg p-3"
-                  >
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-                      <div className="form-group">
-                        <label className="form-label text-xs">Room Number</label>
-                        <input
-                          type="text"
-                          className="input-primary text-sm"
-                          placeholder="Room 101"
-                          value={room.roomNumber}
-                          onChange={e => updateClassroom(room.id, 'roomNumber', e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label text-xs">Capacity</label>
-                        <input
-                          type="number"
-                          min="1"
-                          className="input-primary text-sm"
-                          value={room.capacity || ''}
-                          onChange={e =>
-                            updateClassroom(room.id, 'capacity', parseInt(e.target.value) || 0)
-                          }
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label text-xs">Type</label>
-                        <select
-                          className="input-primary text-sm"
-                          value={room.type}
-                          onChange={e => updateClassroom(room.id, 'type', e.target.value)}
-                        >
-                          <option value="lecture">Lecture Hall</option>
-                          <option value="lab">Lab</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => removeClassroom(room.id)}
-                        className="btn-danger text-xs px-2 py-1"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Batches */}
-          <div>
-            <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
-              Student Batches
-            </h4>
-            <div className="space-y-3">
-              {batches.length === 0 ? (
-                <div className="text-center py-6 text-gray-500 dark:text-gray-400 text-sm">
-                  No batches added. Click "Add Batch" to start.
-                </div>
-              ) : (
-                batches.map(batch => (
-                  <div
-                    key={batch.id}
-                    className="border border-gray-200 dark:border-[#3c4043] rounded-lg p-3"
-                  >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                      <div className="form-group">
-                        <label className="form-label text-xs">Batch Name</label>
-                        <input
-                          type="text"
-                          className="input-primary text-sm"
-                          placeholder="CS-A"
-                          value={batch.name}
-                          onChange={e => updateBatch(batch.id, 'name', e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label text-xs">Strength</label>
-                        <input
-                          type="number"
-                          min="1"
-                          className="input-primary text-sm"
-                          value={batch.strength || ''}
-                          onChange={e =>
-                            updateBatch(batch.id, 'strength', parseInt(e.target.value) || 0)
-                          }
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => removeBatch(batch.id)}
-                        className="btn-danger text-xs px-2 py-1"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Section 2: Subjects & Faculty */}
-      <div className="card">
-        <div className="card-header">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <h3 className="card-title">Subjects & Faculty</h3>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <button onClick={addSubject} className="btn-secondary w-full sm:w-auto">
-                <span className="mr-2">📚</span>
-                Add Subject
-              </button>
-              <button onClick={addFaculty} className="btn-secondary w-full sm:w-auto">
-                <span className="mr-2">👨🏫</span>
-                Add Faculty
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Subjects */}
-          <div>
-            <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">Subjects</h4>
-            <div className="space-y-3">
-              {subjects.length === 0 ? (
-                <div className="text-center py-6 text-gray-500 dark:text-gray-400 text-sm">
-                  No subjects added. Click "Add Subject" to start.
-                </div>
-              ) : (
-                subjects.map(subject => (
-                  <div
-                    key={subject.id}
-                    className="border border-gray-200 dark:border-[#3c4043] rounded-lg p-3"
-                  >
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-                      <div className="form-group">
-                        <label className="form-label text-xs">Subject Name</label>
-                        <input
-                          type="text"
-                          className="input-primary text-sm"
-                          placeholder="Data Structures"
-                          value={subject.name}
-                          onChange={e => updateSubject(subject.id, 'name', e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label text-xs">Subject Code</label>
-                        <input
-                          type="text"
-                          className="input-primary text-sm"
-                          placeholder="CS301"
-                          value={subject.code}
-                          onChange={e => updateSubject(subject.id, 'code', e.target.value)}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label className="form-label text-xs">Classes/Week</label>
-                        <input
-                          type="number"
-                          min="1"
-                          className="input-primary text-sm"
-                          value={subject.classesPerWeek || ''}
-                          onChange={e =>
-                            updateSubject(
-                              subject.id,
-                              'classesPerWeek',
-                              parseInt(e.target.value) || 0
-                            )
-                          }
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => removeSubject(subject.id)}
-                        className="btn-danger text-xs px-2 py-1"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Faculty */}
-          <div>
-            <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
-              Faculty Members
-            </h4>
-            <div className="space-y-3">
-              {faculty.length === 0 ? (
-                <div className="text-center py-6 text-gray-500 dark:text-gray-400 text-sm">
-                  No faculty added. Click "Add Faculty" to start.
-                </div>
-              ) : (
-                faculty.map(member => (
-                  <div
-                    key={member.id}
-                    className="border border-gray-200 dark:border-[#3c4043] rounded-lg p-3"
-                  >
-                    <div className="grid grid-cols-1 gap-3 mb-3">
-                      <div className="form-group">
-                        <label className="form-label text-xs">Faculty Name</label>
-                        <input
-                          type="text"
-                          className="input-primary text-sm"
-                          placeholder="Dr. John Doe"
-                          value={member.name}
-                          onChange={e => updateFaculty(member.id, 'name', e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => removeFaculty(member.id)}
-                        className="btn-danger text-xs px-2 py-1"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Section 3: Constraints */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="card-title">Constraints</h3>
-        </div>
-
-        <div className="space-y-6">
-          {/* General Constraints */}
-          <div>
-            <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
-              General Constraints
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div className="form-group">
-                <label className="form-label">Maximum Classes per Day</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  className="input-primary"
-                  value={formData.maxClassesPerDay || ''}
-                  onChange={e =>
-                    setFormData({ ...formData, maxClassesPerDay: parseInt(e.target.value) || 0 })
-                  }
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Fixed Slots */}
-          <div>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-3">
-              <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                Fixed Time Slots
-              </h4>
-              <button onClick={addFixedSlot} className="btn-secondary w-full sm:w-auto">
-                <span className="mr-2">📌</span>
-                Add Fixed Slot
-              </button>
-            </div>
-            <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
-              Define special classes that must be scheduled at specific times
-            </p>
-
-            <div className="space-y-3">
-              {fixedSlots.length === 0 ? (
-                <div className="text-center py-6 text-gray-500 dark:text-gray-400 text-sm">
-                  No fixed slots defined. Add slots for special classes.
-                </div>
-              ) : (
-                fixedSlots.map(slot => (
-                  <div
-                    key={slot.id}
-                    className="border border-gray-200 dark:border-[#3c4043] rounded-lg p-3"
-                  >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-                      <div className="form-group">
-                        <label className="form-label text-xs">Subject</label>
-                        <select
-                          className="input-primary text-sm"
-                          value={slot.subject}
-                          onChange={e => updateFixedSlot(slot.id, 'subject', e.target.value)}
-                        >
-                          <option value="">Select Subject</option>
-                          {subjects.map(subject => (
-                            <option key={subject.id} value={subject.name}>
-                              {subject.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label text-xs">Faculty</label>
-                        <select
-                          className="input-primary text-sm"
-                          value={slot.faculty}
-                          onChange={e => updateFixedSlot(slot.id, 'faculty', e.target.value)}
-                        >
-                          <option value="">Select Faculty</option>
-                          {faculty.map(member => (
-                            <option key={member.id} value={member.name}>
-                              {member.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label text-xs">Day</label>
-                        <select
-                          className="input-primary text-sm"
-                          value={slot.day}
-                          onChange={e => updateFixedSlot(slot.id, 'day', e.target.value)}
-                        >
-                          <option value="">Select Day</option>
-                          <option value="monday">Monday</option>
-                          <option value="tuesday">Tuesday</option>
-                          <option value="wednesday">Wednesday</option>
-                          <option value="thursday">Thursday</option>
-                          <option value="friday">Friday</option>
-                          <option value="saturday">Saturday</option>
-                        </select>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label text-xs">Time Slot</label>
-                        <select
-                          className="input-primary text-sm"
-                          value={slot.timeSlot}
-                          onChange={e => updateFixedSlot(slot.id, 'timeSlot', e.target.value)}
-                        >
-                          <option value="">Select Time</option>
-                          <option value="9:00-10:00">9:00 - 10:00 AM</option>
-                          <option value="10:00-11:00">10:00 - 11:00 AM</option>
-                          <option value="11:00-12:00">11:00 - 12:00 PM</option>
-                          <option value="12:00-13:00">12:00 - 1:00 PM</option>
-                          <option value="14:00-15:00">2:00 - 3:00 PM</option>
-                          <option value="15:00-16:00">3:00 - 4:00 PM</option>
-                          <option value="16:00-17:00">4:00 - 5:00 PM</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => removeFixedSlot(slot.id)}
-                        className="btn-danger text-xs px-2 py-1"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Generation Summary */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="card-title">Generation Summary</h3>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-sm">
-          <div className="flex flex-col items-center p-3 bg-gray-50 dark:bg-[#3c4043] rounded-lg">
-            <span className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-              {classrooms.length || 0}
-            </span>
-            <span className="text-xs text-gray-600 dark:text-gray-400">Classrooms</span>
-          </div>
-          <div className="flex flex-col items-center p-3 bg-gray-50 dark:bg-[#3c4043] rounded-lg">
-            <span className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-              {batches.length || 0}
-            </span>
-            <span className="text-xs text-gray-600 dark:text-gray-400">Batches</span>
-          </div>
-          <div className="flex flex-col items-center p-3 bg-gray-50 dark:bg-[#3c4043] rounded-lg">
-            <span className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-              {subjects.length || 0}
-            </span>
-            <span className="text-xs text-gray-600 dark:text-gray-400">Subjects</span>
-          </div>
-          <div className="flex flex-col items-center p-3 bg-gray-50 dark:bg-[#3c4043] rounded-lg">
-            <span className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-              {faculty.length || 0}
-            </span>
-            <span className="text-xs text-gray-600 dark:text-gray-400">Faculty</span>
-          </div>
-          <div className="flex flex-col items-center p-3 bg-gray-50 dark:bg-[#3c4043] rounded-lg">
-            <span className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-              {fixedSlots.length || 0}
-            </span>
-            <span className="text-xs text-gray-600 dark:text-gray-400">Fixed Slots</span>
-          </div>
-          <div className="flex flex-col items-center p-3 bg-gray-50 dark:bg-[#3c4043] rounded-lg">
-            <span className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-              {formData.maxClassesPerDay || 0}
-            </span>
-            <span className="text-xs text-gray-600 dark:text-gray-400">Max Classes/Day</span>
-          </div>
-        </div>
       </div>
     </div>
   )

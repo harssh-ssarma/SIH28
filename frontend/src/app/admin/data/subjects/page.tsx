@@ -88,8 +88,8 @@ export default function SubjectsPage() {
             (subject: Subject) =>
               subject.subject_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
               subject.subject_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              subject.course.course_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              subject.department.department_name.toLowerCase().includes(searchTerm.toLowerCase())
+              subject.course?.course_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              subject.department?.department_name?.toLowerCase().includes(searchTerm.toLowerCase())
           )
         }
 
@@ -108,8 +108,8 @@ export default function SubjectsPage() {
 
   const onSubmit = async (data: SubjectInput) => {
     const url = editingId
-      ? `http://localhost:8000/api/v1/subjects/${editingId}/`
-      : 'http://localhost:8000/api/v1/subjects/'
+      ? `http://localhost:8000/api/subjects/${editingId}/`
+      : 'http://localhost:8000/api/subjects/'
 
     try {
       const response = await fetch(url, {
@@ -150,7 +150,7 @@ export default function SubjectsPage() {
     if (!confirm('Delete this subject?')) return
 
     try {
-      const response = await fetch(`http://localhost:8000/api/v1/subjects/${id}/`, {
+      const response = await fetch(`http://localhost:8000/api/subjects/${id}/`, {
         method: 'DELETE',
       })
 
@@ -332,8 +332,8 @@ export default function SubjectsPage() {
                   <td className="table-cell">
                     <span className="badge badge-neutral">{subject.subject_id}</span>
                   </td>
-                  <td className="table-cell">{subject.course.course_name}</td>
-                  <td className="table-cell">{subject.department.department_name}</td>
+                  <td className="table-cell">{subject.course?.course_name || 'N/A'}</td>
+                  <td className="table-cell">{subject.department?.department_name || 'N/A'}</td>
                   <td className="table-cell">{subject.faculty_assigned}</td>
                   <td className="table-cell">{subject.credits}</td>
                   <td className="table-cell">

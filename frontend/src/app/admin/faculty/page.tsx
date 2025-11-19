@@ -10,6 +10,7 @@ import { useToast } from '@/components/Toast'
 interface Faculty {
   id: number
   faculty_id: string
+  employee_id?: string
   faculty_name: string
   designation: string
   specialization: string
@@ -35,7 +36,7 @@ export default function FacultyManagePage() {
   const [totalPages, setTotalPages] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [itemsPerPage, setItemsPerPage] = useState(25)
-  
+
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [selectedFaculty, setSelectedFaculty] = useState<Faculty | null>(null)
@@ -107,7 +108,7 @@ export default function FacultyManagePage() {
           email: facultyData.email,
           phone: facultyData.phone || '',
           department: facultyData.department,
-          status: facultyData.status
+          status: facultyData.status,
         })
 
         if (response.error) {
@@ -126,7 +127,7 @@ export default function FacultyManagePage() {
           email: facultyData.email,
           phone: facultyData.phone || '',
           department: facultyData.department,
-          status: facultyData.status
+          status: facultyData.status,
         })
 
         if (response.error) {
@@ -143,7 +144,11 @@ export default function FacultyManagePage() {
   }
 
   const handleDeleteFaculty = async (id: number, facultyName: string) => {
-    if (!confirm(`⚠️ Are you sure you want to delete ${facultyName}?\n\nThis will also delete their user account and cannot be undone.`)) {
+    if (
+      !confirm(
+        `⚠️ Are you sure you want to delete ${facultyName}?\n\nThis will also delete their user account and cannot be undone.`
+      )
+    ) {
       return
     }
 
@@ -191,230 +196,225 @@ export default function FacultyManagePage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200">
-              Faculty Management
-            </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Total: {filteredFaculty.length} faculty members
-            </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200">
+            Faculty Management
+          </h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+            Total: {filteredFaculty.length} faculty members
+          </p>
+        </div>
+        <button onClick={handleAddFaculty} className="btn-primary w-full sm:w-auto px-6 py-3">
+          <span className="mr-2 text-lg">➕</span>
+          Add Faculty
+        </button>
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">Faculty Members</h3>
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-4">
+            <div className="relative flex-1">
+              <label htmlFor="faculty-search" className="sr-only">
+                Search faculty
+              </label>
+              <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                🔍
+              </span>
+              <input
+                id="faculty-search"
+                placeholder="Search faculty..."
+                className="input-primary pl-10"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <label htmlFor="department-filter" className="sr-only">
+              Filter by department
+            </label>
+            <select
+              id="department-filter"
+              className="input-primary w-full sm:w-36"
+              value={selectedDepartment}
+              onChange={e => setSelectedDepartment(e.target.value)}
+            >
+              <option value="">All Departments</option>
+              {departments.map(dept => (
+                <option key={dept} value={dept}>
+                  {dept}
+                </option>
+              ))}
+            </select>
           </div>
-          <button 
-            onClick={handleAddFaculty}
-            className="btn-primary w-full sm:w-auto px-6 py-3"
-          >
-            <span className="mr-2 text-lg">➕</span>
-            Add Faculty
-          </button>
         </div>
 
-        <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">Faculty Members</h3>
-            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 mt-4">
-              <div className="relative flex-1">
-                <label htmlFor="faculty-search" className="sr-only">
-                  Search faculty
-                </label>
-                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
-                  🔍
-                </span>
-                <input
-                  id="faculty-search"
-                  placeholder="Search faculty..."
-                  className="input-primary pl-10"
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <label htmlFor="department-filter" className="sr-only">
-                Filter by department
-              </label>
-              <select
-                id="department-filter"
-                className="input-primary w-full sm:w-36"
-                value={selectedDepartment}
-                onChange={e => setSelectedDepartment(e.target.value)}
-              >
-                <option value="">All Departments</option>
-                {departments.map(dept => (
-                  <option key={dept} value={dept}>
-                    {dept}
-                  </option>
-                ))}
-              </select>
-            </div>
+        {/* Loading indicator */}
+        {isLoading && (
+          <div className="flex items-center justify-center py-8">
+            <div className="loading-spinner w-6 h-6 mr-2"></div>
+            <span className="text-gray-600 dark:text-gray-400">Loading faculty...</span>
           </div>
+        )}
 
-          {/* Loading indicator */}
-          {isLoading && (
-            <div className="flex items-center justify-center py-8">
-              <div className="loading-spinner w-6 h-6 mr-2"></div>
-              <span className="text-gray-600 dark:text-gray-400">Loading faculty...</span>
-            </div>
-          )}
-
-          {!isLoading && filteredFaculty.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="text-4xl sm:text-6xl mb-4">👨</div>
-              <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-2">
-                No Faculty Found
-              </h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                {faculty.length === 0
-                  ? 'No faculty data has been imported yet.'
-                  : 'No faculty match your search criteria.'}
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Mobile Card View */}
-              <div className="block lg:hidden space-y-3">
-                
-                {filteredFaculty.map(member => (
-                  <div
-                    key={member.id}
-                    className="interactive-element p-4 border border-gray-200 dark:border-[#3c4043]"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-gray-800 dark:text-gray-200 truncate">
-                          {member.faculty_name}
-                        </h4>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                          {member.faculty_id}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-500">
-                          {member.designation}
-                        </p>
-                      </div>
+        {!isLoading && filteredFaculty.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="text-4xl sm:text-6xl mb-4">👨</div>
+            <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-2">
+              No Faculty Found
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400">
+              {faculty.length === 0
+                ? 'No faculty data has been imported yet.'
+                : 'No faculty match your search criteria.'}
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Mobile Card View */}
+            <div className="block lg:hidden space-y-3">
+              {filteredFaculty.map(member => (
+                <div
+                  key={member.id}
+                  className="interactive-element p-4 border border-gray-200 dark:border-[#3c4043]"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-medium text-gray-800 dark:text-gray-200 truncate">
+                        {member.faculty_name}
+                      </h4>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        {member.employee_id || member.faculty_id}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-500">
+                        {member.designation}
+                      </p>
                     </div>
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <span className="badge badge-neutral text-xs">
-                          {member.department.department_name}
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <span className="badge badge-neutral text-xs">
+                        {member.department.department_name}
+                      </span>
+                      <span className="badge badge-info text-xs">{member.max_workload}h/week</span>
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400">
+                      <p>
+                        <strong>Specialization:</strong> {member.specialization}
+                      </p>
+                      <p>
+                        <strong>Status:</strong> {member.status}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                    <button
+                      onClick={() => handleEditFaculty(member)}
+                      className="btn-ghost text-xs px-2 py-1"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteFaculty(member.id, member.faculty_name)}
+                      disabled={isDeleting === member.id}
+                      className="btn-danger text-xs px-2 py-1"
+                    >
+                      {isDeleting === member.id ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table View */}
+            <div className="hidden lg:block">
+              <table className="table">
+                <thead className="table-header">
+                  <tr>
+                    <th className="table-header-cell">Faculty ID</th>
+                    <th className="table-header-cell">Name</th>
+                    <th className="table-header-cell">Designation</th>
+                    <th className="table-header-cell">Department</th>
+                    <th className="table-header-cell">Specialization</th>
+                    <th className="table-header-cell">Workload</th>
+                    <th className="table-header-cell">Status</th>
+                    <th className="table-header-cell">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredFaculty.map(member => (
+                    <tr key={member.id} className="table-row">
+                      <td className="table-cell">
+                        <span className="font-mono text-sm">
+                          {member.employee_id || member.faculty_id}
                         </span>
+                      </td>
+                      <td className="table-cell">
+                        <div className="font-medium text-gray-800 dark:text-gray-200">
+                          {member.faculty_name}
+                        </div>
+                      </td>
+                      <td className="table-cell">
+                        <span className="badge badge-neutral text-xs">{member.designation}</span>
+                      </td>
+                      <td className="table-cell">{member.department.department_name}</td>
+                      <td className="table-cell">{member.specialization}</td>
+                      <td className="table-cell">
                         <span className="badge badge-info text-xs">
                           {member.max_workload}h/week
                         </span>
-                      </div>
-                      <div className="text-xs text-gray-600 dark:text-gray-400">
-                        <p>
-                          <strong>Specialization:</strong> {member.specialization}
-                        </p>
-                        <p>
-                          <strong>Status:</strong> {member.status}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                      <button 
-                        onClick={() => handleEditFaculty(member)}
-                        className="btn-ghost text-xs px-2 py-1"
-                      >
-                        Edit
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteFaculty(member.id, member.faculty_name)}
-                        disabled={isDeleting === member.id}
-                        className="btn-danger text-xs px-2 py-1"
-                      >
-                        {isDeleting === member.id ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Desktop Table View */}
-              <div className="hidden lg:block">
-
-                <table className="table">
-                  <thead className="table-header">
-                    <tr>
-                      <th className="table-header-cell">Faculty ID</th>
-                      <th className="table-header-cell">Name</th>
-                      <th className="table-header-cell">Designation</th>
-                      <th className="table-header-cell">Department</th>
-                      <th className="table-header-cell">Specialization</th>
-                      <th className="table-header-cell">Workload</th>
-                      <th className="table-header-cell">Status</th>
-                      <th className="table-header-cell">Actions</th>
+                      </td>
+                      <td className="table-cell">
+                        <span className="badge badge-success text-xs">{member.status}</span>
+                      </td>
+                      <td className="table-cell">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleEditFaculty(member)}
+                            className="btn-ghost text-xs px-2 py-1"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteFaculty(member.id, member.faculty_name)}
+                            disabled={isDeleting === member.id}
+                            className="btn-danger text-xs px-2 py-1"
+                          >
+                            {isDeleting === member.id ? 'Deleting...' : 'Del'}
+                          </button>
+                        </div>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {filteredFaculty.map(member => (
-                      <tr key={member.id} className="table-row">
-                        <td className="table-cell">
-                          <span className="font-mono text-sm">{member.faculty_id}</span>
-                        </td>
-                        <td className="table-cell">
-                          <div className="font-medium text-gray-800 dark:text-gray-200">
-                            {member.faculty_name}
-                          </div>
-                        </td>
-                        <td className="table-cell">
-                          <span className="badge badge-neutral text-xs">{member.designation}</span>
-                        </td>
-                        <td className="table-cell">{member.department.department_name}</td>
-                        <td className="table-cell">{member.specialization}</td>
-                        <td className="table-cell">
-                          <span className="badge badge-info text-xs">
-                            {member.max_workload}h/week
-                          </span>
-                        </td>
-                        <td className="table-cell">
-                          <span className="badge badge-success text-xs">{member.status}</span>
-                        </td>
-                        <td className="table-cell">
-                          <div className="flex gap-2">
-                            <button 
-                              onClick={() => handleEditFaculty(member)}
-                              className="btn-ghost text-xs px-2 py-1"
-                            >
-                              Edit
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteFaculty(member.id, member.faculty_name)}
-                              disabled={isDeleting === member.id}
-                              className="btn-danger text-xs px-2 py-1"
-                            >
-                              {isDeleting === member.id ? 'Deleting...' : 'Del'}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="mt-6 pt-4 border-t border-gray-200 dark:border-[#3c4043]">
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalCount={totalCount}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={handlePageChange}
+                  onItemsPerPageChange={handleItemsPerPageChange}
+                  showItemsPerPage={true}
+                />
               </div>
+            )}
+          </>
+        )}
+      </div>
 
-              {/* Pagination Controls */}
-              {totalPages > 1 && (
-                <div className="mt-6 pt-4 border-t border-gray-200 dark:border-[#3c4043]">
-                  <Pagination
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    totalCount={totalCount}
-                    itemsPerPage={itemsPerPage}
-                    onPageChange={handlePageChange}
-                    onItemsPerPageChange={handleItemsPerPageChange}
-                    showItemsPerPage={true}
-                  />
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Add/Edit Faculty Modal */}
-        <AddEditFacultyModal
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          faculty={selectedFaculty}
-          onSave={handleSaveFaculty}
-        />
+      {/* Add/Edit Faculty Modal */}
+      <AddEditFacultyModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        faculty={selectedFaculty}
+        onSave={handleSaveFaculty}
+      />
     </div>
   )
 }

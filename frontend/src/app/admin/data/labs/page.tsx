@@ -83,7 +83,7 @@ export default function LabsPage() {
             (lab: Lab) =>
               lab.lab_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
               lab.lab_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              lab.department.department_name.toLowerCase().includes(searchTerm.toLowerCase())
+              lab.department?.department_name?.toLowerCase().includes(searchTerm.toLowerCase())
           )
         }
 
@@ -253,7 +253,7 @@ export default function LabsPage() {
                   <div className="space-y-2">
                     <div className="flex gap-2">
                       <span className="badge badge-neutral text-xs">
-                        {lab.department.department_name}
+                        {lab.department?.department_name || 'N/A'}
                       </span>
                       <span className="badge badge-info text-xs">Capacity: {lab.capacity}</span>
                     </div>
@@ -296,7 +296,7 @@ export default function LabsPage() {
                       </td>
                       <td className="table-cell">
                         <span className="badge badge-neutral text-xs">
-                          {lab.department.department_name}
+                          {lab.department?.department_name || 'N/A'}
                         </span>
                       </td>
                       <td className="table-cell">
