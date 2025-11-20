@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 
 interface DashboardLayoutProps {
@@ -17,29 +16,31 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
   return (
     <>
       <div
-        className={`min-h-screen bg-[#FFFFFF] dark:bg-[#121212] transition-colors duration-300 ${showSignOutDialog ? 'blur-sm' : ''}`}
+        className={`min-h-screen bg-[#FFFFFF] dark:bg-[#121212] transition-colors duration-300 ${
+          showSignOutDialog ? 'blur-sm' : ''
+        }`}
       >
-        <Header
-          sidebarOpen={sidebarOpen}
-          sidebarCollapsed={sidebarCollapsed}
-          setSidebarOpen={setSidebarOpen}
-          setSidebarCollapsed={setSidebarCollapsed}
-          setShowSignOutDialog={setShowSignOutDialog}
-        />
-
         <Sidebar
           sidebarOpen={sidebarOpen}
           sidebarCollapsed={sidebarCollapsed}
           setSidebarOpen={setSidebarOpen}
           role={role}
+          setShowSignOutDialog={setShowSignOutDialog}
         />
 
         {/* Main content */}
         <div
-          className={`transition-all duration-300 ease-out ${sidebarCollapsed ? 'md:ml-16' : 'md:ml-56'}`}
+          className={`transition-all duration-300 ease-out ${
+            sidebarCollapsed ? 'md:ml-16' : 'md:ml-56'
+          }`}
         >
+          {/* Centered Navbar Header */}
+          <div className="bg-white/80 dark:bg-[#0f0f0f]/80 backdrop-blur-md py-4 border-b border-gray-200 dark:border-gray-800">
+            <h1 className="text-2xl font-bold text-center text-[#0f0f0f] dark:text-white">SIH28</h1>
+          </div>
+
           <main
-            className={`min-h-[calc(100vh-4rem)] mt-16 ${sidebarCollapsed ? 'p-2 lg:p-4' : 'p-4 lg:p-6'}`}
+            className={`min-h-[calc(100vh-4rem)] ${sidebarCollapsed ? 'p-2 lg:p-4' : 'p-4 lg:p-6'}`}
           >
             <div className={`mx-auto ${sidebarCollapsed ? 'max-w-1xl px-1 lg:px-1' : 'max-w-7xl'}`}>
               {children}
