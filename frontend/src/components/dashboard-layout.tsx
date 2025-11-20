@@ -31,6 +31,7 @@ export default function DashboardLayout({
           sidebarOpen={sidebarOpen}
           sidebarCollapsed={sidebarCollapsed}
           setSidebarOpen={setSidebarOpen}
+          setSidebarCollapsed={setSidebarCollapsed}
           role={role}
           setShowSignOutDialog={setShowSignOutDialog}
         />
@@ -41,19 +42,7 @@ export default function DashboardLayout({
             sidebarCollapsed ? 'md:ml-16' : 'md:ml-56'
           }`}
         >
-          {/* Centered Navbar Header */}
-          <div className="bg-white/80 dark:bg-[#0f0f0f]/80 backdrop-blur-md py-4">
-            <div className="text-center">
-              <h1 className="text-2xl font-bold text-[#0f0f0f] dark:text-white">
-                {pageTitle || 'SIH28'}
-              </h1>
-              {pageDescription && (
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{pageDescription}</p>
-              )}
-            </div>
-          </div>
-
-          <main className="min-h-[calc(100vh-4rem)] p-4 lg:p-6">{children}</main>
+          <main className="min-h-screen p-4 lg:p-6">{children}</main>
         </div>
       </div>
 

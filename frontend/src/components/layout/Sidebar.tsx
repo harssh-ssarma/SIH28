@@ -8,6 +8,7 @@ interface SidebarProps {
   sidebarOpen: boolean
   sidebarCollapsed: boolean
   setSidebarOpen: (open: boolean) => void
+  setSidebarCollapsed: (collapsed: boolean) => void
   role: 'admin' | 'staff' | 'faculty' | 'student'
   setShowSignOutDialog: (show: boolean) => void
 }
@@ -67,6 +68,7 @@ export default function Sidebar({
   sidebarOpen,
   sidebarCollapsed,
   setSidebarOpen,
+  setSidebarCollapsed,
   role,
   setShowSignOutDialog,
 }: SidebarProps) {
@@ -122,27 +124,15 @@ export default function Sidebar({
         } ${sidebarCollapsed ? 'md:w-16' : 'md:w-56'} w-56`}
       >
         <div className="flex flex-col h-full">
-          {/* Logo & Toggle */}
-          <div className="p-3">
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                className="w-10 h-10 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center transition-colors"
-                title="Toggle menu"
-              >
-                <span className="text-lg">☰</span>
-              </button>
-              {!sidebarCollapsed && (
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#2196F3] to-[#1976D2] flex items-center justify-center text-white font-bold text-xs">
-                    <span>S</span>
-                  </div>
-                  <span className="text-sm font-semibold text-[#0f0f0f] dark:text-white">
-                    SIH28
-                  </span>
-                </div>
-              )}
-            </div>
+          {/* Toggle */}
+          <div className="p-3 hidden md:block">
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="w-10 h-10 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center transition-colors"
+              title="Toggle menu"
+            >
+              <span className="text-lg">☰</span>
+            </button>
           </div>
 
           {/* Navigation */}
