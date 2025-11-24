@@ -194,6 +194,22 @@ class BatchSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class BuildingSerializer(serializers.ModelSerializer):
+    """Serializer for Building model"""
+    
+    class Meta:
+        model = Building
+        fields = "__all__"
+
+
+class SchoolSerializer(serializers.ModelSerializer):
+    """Serializer for School model"""
+    
+    class Meta:
+        model = School
+        fields = "__all__"
+
+
 class RoomSerializer(serializers.ModelSerializer):
     """Serializer for Room model (rooms table)"""
     building = serializers.SerializerMethodField()
@@ -210,7 +226,7 @@ class RoomSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Room
-        fields = "__all__"
+        exclude = ["features", "specialized_software"]
 
 # Alias for backward compatibility
 ClassroomSerializer = RoomSerializer

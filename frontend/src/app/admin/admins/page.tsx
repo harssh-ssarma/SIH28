@@ -83,11 +83,13 @@ export default function AdminUsersPage() {
         const allUsers = response.data.results || []
 
         const adminUsers = allUsers.filter(
-          u =>
-            u.role === 'admin' ||
-            u.role === 'org_admin' ||
-            u.role === 'super_admin' ||
-            u.role === 'staff'
+          u => {
+            const role = u.role?.toLowerCase()
+            return role === 'admin' ||
+              role === 'org_admin' ||
+              role === 'super_admin' ||
+              role === 'staff'
+          }
         )
 
         setUsers(adminUsers)

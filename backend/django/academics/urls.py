@@ -10,12 +10,14 @@ from .timetable_views import (
 )
 from .views import (
     BatchViewSet,
+    BuildingViewSet,
     CourseViewSet,
     DepartmentViewSet,
     FacultyViewSet,
     LabViewSet,
     ProgramViewSet,
     RoomViewSet,
+    SchoolViewSet,
     StudentViewSet,
     TimetableSlotViewSet,
     TimetableViewSet,
@@ -39,6 +41,8 @@ router.register(r"batches", BatchViewSet, basename="batch")
 router.register(r"rooms", RoomViewSet, basename="room")
 router.register(r"classrooms", RoomViewSet, basename="classroom")  # Alias for rooms
 router.register(r"labs", LabViewSet, basename="lab")
+router.register(r"buildings", BuildingViewSet, basename="building")
+router.register(r"schools", SchoolViewSet, basename="school")
 router.register(r"timetables", TimetableViewSet)
 router.register(r"timetable-slots", TimetableSlotViewSet)
 router.register(r"generation-jobs", GenerationJobViewSet, basename="generation-job")

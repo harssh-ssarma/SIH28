@@ -129,16 +129,10 @@ export default function BatchesPage() {
     setShowForm(false)
   }
 
-  if (loading) {
-    return <div className="text-center py-8">Loading...</div>
-  }
-
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h2 className="text-lg sm:text-xl font-semibold text-gray-800 dark:text-gray-200">
-          Batches ({batches.length})
-        </h2>
+        <p className="text-sm text-gray-600 dark:text-gray-400">Total: {batches.length} batches</p>
         <button onClick={() => setShowForm(true)} className="btn-primary w-full sm:w-auto">
           Add Batch
         </button>
@@ -236,8 +230,30 @@ export default function BatchesPage() {
       )}
 
       <div className="card">
-        <div className="overflow-x-auto">
-          <table className="table">
+        {loading && (
+          <div className="flex items-center justify-center py-8">
+            <div className="loading-spinner w-6 h-6 mr-2"></div>
+            <span className="text-gray-600 dark:text-gray-400">Loading batches...</span>
+          </div>
+        )}
+
+        {!loading && batches.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-gray-600 dark:text-gray-400">No batches found</p>
+          </div>
+        )}
+
+        {!loading && batches.length > 0 && (
+          <div className="overflow-x-auto relative">
+            {isTableLoading && (
+              <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-center justify-center z-10 rounded-lg">
+                <div className="flex flex-col items-center">
+                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Loading...</span>
+                </div>
+              </div>
+            )}
+            <table className="table">
             <thead className="table-header">
               <tr>
                 <th className="table-header-cell">Batch ID</th>
@@ -281,6 +297,7 @@ export default function BatchesPage() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
     </div>
   )

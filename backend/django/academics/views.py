@@ -24,11 +24,13 @@ from .models import (
 from .serializers import (
     AttendanceSerializer,
     BatchSerializer,
+    BuildingSerializer,
     CourseSerializer,
     DepartmentSerializer,
     FacultySerializer,
     ProgramSerializer,
     RoomSerializer,
+    SchoolSerializer,
     StudentSerializer,
     TimetableSerializer,
     TimetableSlotSerializer,
@@ -93,24 +95,7 @@ class DepartmentViewSet(SmartCachedViewSet):
 class ProgramViewSet(SmartCachedViewSet):
     """ViewSet for Program model (formerly Course)"""
 
-    queryset = (
-        Program.objects.select_related("department", "organization")
-        .only(
-            "program_id",
-            "program_code",
-            "program_name",
-            "program_type",
-            "duration_years",
-            "total_semesters",
-            "intake_capacity",
-            "is_active",
-            "department__dept_id",
-            "department__dept_name",
-            "organization__org_id",
-            "organization__org_name",
-        )
-        .order_by("program_code")
-    )
+    queryset = Program.objects.select_related("department", "organization").all().order_by("program_code")
     serializer_class = ProgramSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["program_name", "program_code"]
@@ -248,7 +233,7 @@ class BatchViewSet(SmartCachedViewSet):
 
 class RoomViewSet(SmartCachedViewSet):
     """Room ViewSet (rooms table)"""
-    queryset = Room.objects.select_related("organization", "building", "department").all().order_by("room_code")
+    queryset = Room.objects.select_related("organization", "building", "department").defer("features", "specialized_software").all().order_by("room_code")
     serializer_class = RoomSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["room_code", "room_name", "room_number"]
@@ -266,6 +251,26 @@ class LabViewSet(SmartCachedViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["room_code", "room_name", "room_number"]
     ordering_fields = ["room_code", "seating_capacity"]
+    cache_timeout = 900
+
+
+class BuildingViewSet(SmartCachedViewSet):
+    """Building ViewSet"""
+    queryset = Building.objects.select_related("organization").all().order_by("building_code")
+    serializer_class = BuildingSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["building_code", "building_name"]
+    ordering_fields = ["building_code", "building_name"]
+    cache_timeout = 900
+
+
+class SchoolViewSet(SmartCachedViewSet):
+    """School ViewSet"""
+    queryset = School.objects.select_related("organization").all().order_by("school_code")
+    serializer_class = SchoolSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["school_code", "school_name"]
+    ordering_fields = ["school_code", "school_name"]
     cache_timeout = 900
 
 
