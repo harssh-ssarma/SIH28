@@ -53,7 +53,18 @@ class ApiClient {
         }
       }
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        // If response is not JSON (e.g., HTML error page), handle it
+        const text = await response.text();
+        return {
+          data: undefined,
+          error: response.ok ? undefined : `Server error (${response.status}): ${response.statusText}`,
+          status: response.status,
+        };
+      }
 
       return {
         data: response.ok ? data : undefined,
@@ -103,41 +114,7 @@ class ApiClient {
 
   // Users
   async getUsers(page = 1) {
-    const response = await this.request<any>(`/users/?page=${page}`);
-    
-    // Fallback to mock data if API is not available
-    if (response.error && response.status === 0) {
-      return {
-        data: {
-          results: [
-            {
-              id: 1,
-              username: 'admin',
-              first_name: 'Admin',
-              last_name: 'User',
-              email: 'admin@sih28.edu',
-              role: 'admin',
-              department: 'IT',
-              is_active: true
-            },
-            {
-              id: 2,
-              username: 'faculty1',
-              first_name: 'Dr. Rajesh',
-              last_name: 'Kumar',
-              email: 'rajesh.kumar@sih28.edu',
-              role: 'faculty',
-              department: 'Computer Science',
-              is_active: true
-            }
-          ],
-          count: 2
-        },
-        status: 200
-      };
-    }
-    
-    return response;
+    return this.request<any>(`/users/?page=${page}`);
   }
 
   async getUser(id: string) {
@@ -145,59 +122,23 @@ class ApiClient {
   }
 
   async createUser(userData: any) {
-    const response = await this.request<any>('/users/', {
+    return this.request<any>('/users/', {
       method: 'POST',
       body: JSON.stringify(userData),
     });
-    
-    // Mock success response if API is not available
-    if (response.error && response.status === 0) {
-      return {
-        data: {
-          id: Date.now(),
-          ...userData
-        },
-        status: 201
-      };
-    }
-    
-    return response;
   }
 
   async updateUser(id: string, userData: any) {
-    const response = await this.request<any>(`/users/${id}/`, {
+    return this.request<any>(`/users/${id}/`, {
       method: 'PUT',
       body: JSON.stringify(userData),
     });
-    
-    // Mock success response if API is not available
-    if (response.error && response.status === 0) {
-      return {
-        data: {
-          id: parseInt(id),
-          ...userData
-        },
-        status: 200
-      };
-    }
-    
-    return response;
   }
 
   async deleteUser(id: string) {
-    const response = await this.request<any>(`/users/${id}/`, {
+    return this.request<any>(`/users/${id}/`, {
       method: 'DELETE',
     });
-    
-    // Mock success response if API is not available
-    if (response.error && response.status === 0) {
-      return {
-        data: { message: 'User deleted successfully' },
-        status: 204
-      };
-    }
-    
-    return response;
   }
 
   // Departments
@@ -211,21 +152,7 @@ class ApiClient {
 
   // Courses
   async getCourses() {
-    const response = await this.request<any>('/courses/');
-    
-    // Fallback to mock data if API is not available
-    if (response.error && response.status === 0) {
-      return {
-        data: [
-          { course_id: 'BTECH-CS', course_name: 'B.Tech Computer Science', level: 'UG' },
-          { course_id: 'BTECH-IT', course_name: 'B.Tech Information Technology', level: 'UG' },
-          { course_id: 'MCA', course_name: 'Master of Computer Applications', level: 'PG' }
-        ],
-        status: 200
-      };
-    }
-    
-    return response;
+    return this.request<any>('/courses/');
   }
 
   async getCourse(id: string) {
@@ -243,39 +170,7 @@ class ApiClient {
 
   // Faculty
   async getFaculty(page = 1) {
-    const response = await this.request<any>(`/faculty/?page=${page}`);
-    
-    // Fallback to mock data if API is not available
-    if (response.error && response.status === 0) {
-      return {
-        data: {
-          results: [
-            {
-              faculty_id: 'FAC001',
-              faculty_name: 'Dr. Rajesh Kumar',
-              department: { department_name: 'Computer Science' },
-              designation: 'Professor'
-            },
-            {
-              faculty_id: 'FAC002',
-              faculty_name: 'Dr. Priya Sharma',
-              department: { department_name: 'Computer Science' },
-              designation: 'Associate Professor'
-            },
-            {
-              faculty_id: 'FAC003',
-              faculty_name: 'Prof. Amit Singh',
-              department: { department_name: 'Mathematics' },
-              designation: 'Assistant Professor'
-            }
-          ],
-          count: 3
-        },
-        status: 200
-      };
-    }
-    
-    return response;
+    return this.request<any>(`/faculty/?page=${page}`);
   }
 
   async getFacultyMember(id: string) {

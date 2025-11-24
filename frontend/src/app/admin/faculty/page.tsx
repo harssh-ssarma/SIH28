@@ -171,14 +171,14 @@ export default function FacultyManagePage() {
 
   const filteredFaculty = faculty.filter(member => {
     const matchesSearch =
-      member.faculty_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      member.faculty_id.toLowerCase().includes(searchTerm.toLowerCase())
+      member.faculty_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      member.faculty_id?.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesDepartment =
-      !selectedDepartment || member.department.department_name === selectedDepartment
+      !selectedDepartment || member.department?.department_name === selectedDepartment
     return matchesSearch && matchesDepartment
   })
 
-  const departments = [...new Set(faculty.map(f => f.department.department_name))].filter(Boolean)
+  const departments = [...new Set(faculty.map(f => f.department?.department_name).filter(Boolean))].filter(Boolean)
 
   if (error) {
     return (

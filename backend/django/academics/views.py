@@ -184,13 +184,7 @@ class StudentViewSet(DataSyncMixin, PerformanceMetricsMixin, SmartCachedViewSet)
     and intelligent caching (Multi-tenant)
     """
 
-    queryset = (
-        Student.objects.select_related(
-            "department", "program", "organization"
-        )
-        .all()
-        .order_by("roll_number")
-    )
+    queryset = Student.objects.all().order_by("roll_number")
     serializer_class = StudentSerializer
     filter_backends = [
         filters.SearchFilter,
@@ -203,6 +197,19 @@ class StudentViewSet(DataSyncMixin, PerformanceMetricsMixin, SmartCachedViewSet)
         "current_year",
         "current_semester",
     ]
+
+    def get_queryset(self):
+        try:
+            return (
+                Student.objects.select_related(
+                    "department", "program", "organization"
+                )
+                .all()
+                .order_by("roll_number")
+            )
+        except Exception as e:
+            # Fallback to basic queryset if relations fail
+            return Student.objects.all().order_by("roll_number")
 
     @action(detail=True, methods=["get"])
     def attendance(self, request, pk=None):

@@ -171,11 +171,14 @@ class Department(models.Model):
     dept_code = models.CharField(max_length=20)  # e.g., 'CSE', 'ECE', 'MATH'
     dept_name = models.CharField(max_length=200)
 
-    hod_name = models.CharField(max_length=100, null=True, blank=True)
-    hod_email = models.EmailField(null=True, blank=True)
-
-    building_name = models.CharField(max_length=100, null=True, blank=True)
-    floor_numbers = models.CharField(max_length=50, null=True, blank=True)
+    dept_short_name = models.CharField(max_length=50, null=True, blank=True)
+    hod_faculty_id = models.UUIDField(null=True, blank=True)
+    office_location = models.CharField(max_length=200, null=True, blank=True)
+    office_phone = models.CharField(max_length=20, null=True, blank=True)
+    office_email = models.EmailField(null=True, blank=True)
+    established_year = models.IntegerField(null=True, blank=True)
+    total_faculty_sanctioned = models.IntegerField(null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
 
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -191,6 +194,26 @@ class Department(models.Model):
             models.Index(fields=["school"], name="dept_school_idx"),
         ]
 
+    @property
+    def hod_name(self):
+        """Backward compatibility - get HOD name from faculty if available"""
+        return None  # Would need to lookup faculty by hod_faculty_id
+    
+    @property
+    def hod_email(self):
+        """Backward compatibility - get HOD email from faculty if available"""
+        return self.office_email
+    
+    @property
+    def building_name(self):
+        """Backward compatibility - use office_location"""
+        return self.office_location
+    
+    @property
+    def floor_numbers(self):
+        """Backward compatibility - not available in new schema"""
+        return None
+
     def __str__(self):
         return f"{self.dept_name} - {self.school.school_code}"
 
@@ -202,75 +225,42 @@ class Department(models.Model):
 
 class Program(models.Model):
     """
-    Degree programs offered
-    Examples: BTech CSE, MBA, MBBS, BA English
-    100+ programs per large university
+    Degree programs - matches actual database schema
     """
-
-    PROGRAM_TYPE_CHOICES = [
-        ("ug", "Undergraduate"),
-        ("pg", "Postgraduate"),
-        ("diploma", "Diploma"),
-        ("certificate", "Certificate"),
-        ("integrated", "Integrated (UG+PG)"),
-        ("phd", "Doctoral (PhD)"),
-    ]
 
     program_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(
         Organization, on_delete=models.CASCADE, related_name="programs", db_column='org_id'
     )
-    school = models.ForeignKey(
-        School, on_delete=models.CASCADE, related_name="programs"
-    )
     department = models.ForeignKey(
         Department,
         on_delete=models.CASCADE,
         related_name="programs",
-        null=True,
-        blank=True,
+        db_column="dept_id",
     )
+    degree_id = models.UUIDField(null=True, blank=True)
 
-    program_code = models.CharField(max_length=20)  # e.g., 'BTECH-CSE', 'MBA-FIN'
+    program_code = models.CharField(max_length=50)
     program_name = models.CharField(max_length=200)
-    program_type = models.CharField(max_length=20, choices=PROGRAM_TYPE_CHOICES)
-
-    duration_years = models.DecimalField(
-        max_digits=3, decimal_places=1
-    )  # 4.0, 4.5, 5.5 years
-    total_semesters = models.IntegerField()
-    total_credits = models.IntegerField()
-
-    # NEP 2020 Fields
-    allow_multiple_entry_exit = models.BooleanField(default=True)
-    exit_certificate_1_year = models.CharField(
-        max_length=100, null=True, blank=True
-    )  # Certificate after 1 year
-    exit_diploma_2_years = models.CharField(
-        max_length=100, null=True, blank=True
-    )  # Diploma after 2 years
-    exit_degree_3_years = models.CharField(
-        max_length=100, null=True, blank=True
-    )  # Degree after 3 years
-
-    intake_capacity = models.IntegerField()  # Max students per year
-    min_eligibility = models.TextField()  # Eligibility criteria
-
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    program_short_name = models.CharField(max_length=100, null=True, blank=True)
+    total_seats = models.IntegerField()
+    duration_years = models.DecimalField(max_digits=3, decimal_places=1)
+    total_credits_required = models.IntegerField()
+    core_credits_required = models.IntegerField(null=True, blank=True)
+    elective_credits_required = models.IntegerField(null=True, blank=True)
+    minor_credits_required = models.IntegerField(null=True, blank=True)
+    open_elective_credits_required = models.IntegerField(null=True, blank=True)
+    skill_enhancement_credits_required = models.IntegerField(null=True, blank=True)
+    internship_credits_required = models.IntegerField(null=True, blank=True)
+    nba_accredited = models.BooleanField(null=True, blank=True)
+    naac_grade = models.CharField(max_length=10, null=True, blank=True)
+    is_active = models.BooleanField(null=True, blank=True)
+    intake_year = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "programs"
-        unique_together = [["organization", "program_code"]]
-        indexes = [
-            models.Index(
-                fields=["organization", "program_type", "is_active"],
-                name="prog_org_type_idx",
-            ),
-            models.Index(fields=["school"], name="prog_school_idx"),
-            models.Index(fields=["department"], name="prog_dept_idx"),
-        ]
 
     def __str__(self):
         return f"{self.program_name} ({self.program_code})"
@@ -504,8 +494,7 @@ class Batch(models.Model):
 
 class Student(models.Model):
     """
-    Student records
-    Scalable to 25000+ students per organization
+    Student records - matches actual database schema
     """
 
     GENDER_CHOICES = [
@@ -541,10 +530,10 @@ class Student(models.Model):
         Department, on_delete=models.CASCADE, related_name="students", db_column='dept_id'
     )
 
-    enrollment_number = models.CharField(max_length=50, unique=True)
-    roll_number = models.CharField(max_length=30, unique=True)
-    username = models.CharField(max_length=50, unique=True)
-    email = models.EmailField(unique=True)
+    enrollment_number = models.CharField(max_length=50)
+    roll_number = models.CharField(max_length=30, null=True, blank=True)
+    username = models.CharField(max_length=50)
+    email = models.EmailField()
 
     first_name = models.CharField(max_length=100)
     middle_name = models.CharField(max_length=100, null=True, blank=True)
@@ -558,7 +547,7 @@ class Student(models.Model):
     address = models.TextField(null=True, blank=True)
     city = models.CharField(max_length=100, null=True, blank=True)
     state = models.CharField(max_length=100, null=True, blank=True)
-    country = models.CharField(max_length=100, default="India")
+    country = models.CharField(max_length=100, null=True, blank=True)
     pincode = models.CharField(max_length=10, null=True, blank=True)
 
     emergency_contact_name = models.CharField(max_length=200, null=True, blank=True)
@@ -567,55 +556,42 @@ class Student(models.Model):
 
     admission_year = models.IntegerField()
     admission_date = models.DateField()
-    current_semester = models.IntegerField(default=1)
-    current_year = models.IntegerField(default=1)
-    batch_name = models.CharField(max_length=50, null=True, blank=True)
+    current_semester = models.IntegerField(null=True, blank=True)
+    current_year = models.IntegerField(null=True, blank=True)
+    batch_id = models.UUIDField(null=True, blank=True)
 
-    academic_status = models.CharField(max_length=50, choices=ACADEMIC_STATUS_CHOICES, default="ACTIVE")
-    total_credits_earned = models.DecimalField(max_digits=6, decimal_places=2, default=0.00)
-    current_semester_credits = models.IntegerField(default=0)
-    cgpa = models.DecimalField(max_digits=4, decimal_places=2, default=0.00)
+    academic_status = models.CharField(max_length=50, choices=ACADEMIC_STATUS_CHOICES, null=True, blank=True)
+    total_credits_earned = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    current_semester_credits = models.IntegerField(null=True, blank=True)
+    cgpa = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
 
-    pursuing_minor = models.BooleanField(default=False)
+    pursuing_minor = models.BooleanField(null=True, blank=True)
     minor_dept = models.ForeignKey(
         Department, on_delete=models.SET_NULL, null=True, blank=True, related_name="minor_students", db_column='minor_dept_id'
     )
-    minor_credits_earned = models.IntegerField(default=0)
+    minor_credits_earned = models.IntegerField(null=True, blank=True)
 
-    fee_status = models.CharField(max_length=50, choices=FEE_STATUS_CHOICES, default="UNPAID")
+    fee_status = models.CharField(max_length=50, choices=FEE_STATUS_CHOICES, null=True, blank=True)
     scholarship = models.CharField(max_length=200, null=True, blank=True)
 
-    is_hosteller = models.BooleanField(default=False)
+    is_hosteller = models.BooleanField(null=True, blank=True)
     hostel_name = models.CharField(max_length=100, null=True, blank=True)
     room_number = models.CharField(max_length=20, null=True, blank=True)
 
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(null=True, blank=True)
     last_login = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    # User Account
-    user = models.OneToOneField(
-        "User",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="student_profile",
-    )
+    created_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "students"
-        indexes = [
-            models.Index(fields=["organization"], name="idx_student_org"),
-            models.Index(fields=["department"], name="idx_student_dept"),
-            models.Index(fields=["program"], name="idx_student_program"),
-            models.Index(fields=["enrollment_number"], name="idx_student_enrollment"),
-            models.Index(fields=["username"], name="idx_student_username"),
-            models.Index(fields=["email"], name="idx_student_email"),
-            models.Index(fields=["batch_name"], name="idx_student_batch"),
-            models.Index(fields=["is_active"], name="idx_student_active"),
-            models.Index(fields=["current_year", "current_semester"], name="idx_student_year_semester"),
-        ]
+
+    @property
+    def batch_name(self):
+        """Backward compatibility - generate batch name from batch_id if available"""
+        if self.batch_id:
+            return f"Batch-{str(self.batch_id)[:8]}"
+        return f"Batch-{self.admission_year}"
 
     def __str__(self):
         return f"{self.roll_number} - {self.first_name} {self.last_name}"

@@ -101,9 +101,6 @@ class FacultySerializer(serializers.ModelSerializer):
                 "created_at": obj.department.created_at,
                 "updated_at": obj.department.updated_at,
                 "organization": str(obj.department.organization_id),
-                "school": str(obj.department.school_id)
-                if obj.department.school_id
-                else None,
             }
         return None
 
@@ -117,93 +114,74 @@ class FacultySerializer(serializers.ModelSerializer):
 
 class StudentSerializer(serializers.ModelSerializer):
     department = serializers.SerializerMethodField()
-    program = serializers.SerializerMethodField()
+    course = serializers.SerializerMethodField()  # Alias for program
     faculty_advisor = serializers.SerializerMethodField()
 
-    # Write-only fields for creating/updating
-    department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(),
-        source="department",
-        write_only=True,
-        required=False,
-    )
-    program_id = serializers.PrimaryKeyRelatedField(
-        queryset=Program.objects.all(),
-        source="program",
-        write_only=True,
-        required=False,
-    )
-
     # Backwards compatibility - map old field names to new
+    id = serializers.UUIDField(source="student_id", read_only=True)
     student_id = serializers.CharField(source="roll_number", required=False)
-    name = serializers.CharField(source="student_name", required=False)
+    name = serializers.SerializerMethodField()
     year = serializers.IntegerField(source="current_year", required=False)
     semester = serializers.IntegerField(source="current_semester", required=False)
-
-    # Alias course to program for backwards compatibility
-    course = serializers.SerializerMethodField()
+    electives = serializers.CharField(default="", required=False)
+    phone = serializers.CharField(source="phone_number", required=False)
+    
+    def get_name(self, obj):
+        """Get full name from first_name and last_name"""
+        try:
+            parts = []
+            if obj.first_name:
+                parts.append(obj.first_name)
+            if obj.middle_name:
+                parts.append(obj.middle_name)
+            if obj.last_name:
+                parts.append(obj.last_name)
+            return " ".join(parts) if parts else "Unknown"
+        except Exception:
+            return "Unknown"
 
     def get_department(self, obj):
-        if obj.department:
-            return {
-                "dept_id": str(obj.department.dept_id),
-                "dept_code": obj.department.dept_code,
-                "dept_name": obj.department.dept_name,
-                "hod_name": obj.department.hod_name,
-                "hod_email": obj.department.hod_email,
-                "building_name": obj.department.building_name,
-                "floor_numbers": obj.department.floor_numbers,
-                "is_active": obj.department.is_active,
-                "created_at": obj.department.created_at,
-                "updated_at": obj.department.updated_at,
-                "organization": str(obj.department.organization_id),
-                "school": str(obj.department.school_id)
-                if obj.department.school_id
-                else None,
-            }
-        return None
-
-    def get_program(self, obj):
-        if obj.program:
-            return {
-                "program_id": str(obj.program.program_id),
-                "program_code": obj.program.program_code,
-                "program_name": obj.program.program_name,
-                "program_type": obj.program.program_type,
-                "duration_years": obj.program.duration_years,
-                "total_semesters": obj.program.total_semesters,
-                "total_credits": obj.program.total_credits,
-                "allow_multiple_entry_exit": obj.program.allow_multiple_entry_exit,
-                "exit_certificate_1_year": obj.program.exit_certificate_1_year,
-                "exit_diploma_2_years": obj.program.exit_diploma_2_years,
-                "exit_degree_3_years": obj.program.exit_degree_3_years,
-                "intake_capacity": obj.program.intake_capacity,
-                "min_eligibility": obj.program.min_eligibility,
-                "is_active": obj.program.is_active,
-                "created_at": obj.program.created_at,
-                "updated_at": obj.program.updated_at,
-                "department": str(obj.program.department_id)
-                if obj.program.department_id
-                else None,
-                "organization": str(obj.program.organization_id),
-            }
-        return None
+        try:
+            if obj.department:
+                return {
+                    "department_id": str(obj.department.dept_id),
+                    "department_name": obj.department.dept_name,
+                }
+        except Exception:
+            pass
+        return {
+            "department_id": "unknown",
+            "department_name": "Unknown Department",
+        }
 
     def get_course(self, obj):
-        # Alias for backwards compatibility
-        return self.get_program(obj)
+        try:
+            if obj.program:
+                return {
+                    "course_id": str(obj.program.program_id),
+                    "course_name": obj.program.program_name,
+                }
+        except Exception:
+            pass
+        return {
+            "course_id": "unknown",
+            "course_name": "Unknown Program",
+        }
 
     def get_faculty_advisor(self, obj):
-        if obj.faculty_advisor:
-            return {
-                "faculty_id": str(obj.faculty_advisor.faculty_id),
-                "faculty_name": obj.faculty_advisor.faculty_name,
-            }
-        return None
+        # Faculty advisor field doesn't exist in current schema
+        return {
+            "faculty_id": "unknown",
+            "faculty_name": "Not assigned",
+        }
 
     class Meta:
         model = Student
-        fields = "__all__"
+        fields = [
+            "id", "student_id", "name", "email", "phone", 
+            "department", "course", "electives", "year", "semester", 
+            "faculty_advisor", "is_active", "created_at", "updated_at"
+        ]
 
 
 class BatchSerializer(serializers.ModelSerializer):

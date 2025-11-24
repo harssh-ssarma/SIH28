@@ -177,12 +177,12 @@ export default function StudentsPage() {
       student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       student.student_id.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesDepartment =
-      !selectedDepartment || student.department.department_name === selectedDepartment
+      !selectedDepartment || student.department?.department_name === selectedDepartment
     const matchesYear = !selectedYear || student.year.toString() === selectedYear
     return matchesSearch && matchesDepartment && matchesYear
   })
 
-  const departments = [...new Set(students.map(s => s.department.department_name))].filter(Boolean)
+  const departments = [...new Set(students.map(s => s.department?.department_name).filter(Boolean))].filter(Boolean)
   const years = [...new Set(students.map(s => s.year))].sort((a, b) => a - b)
 
   if (error) {
@@ -314,14 +314,14 @@ export default function StudentsPage() {
                           {student.student_id}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-gray-500">
-                          {student.course.course_name}
+                          {student.course?.course_name || 'No course assigned'}
                         </p>
                       </div>
                     </div>
                     <div className="space-y-2">
                       <div className="flex gap-2">
                         <span className="badge badge-neutral text-xs">
-                          {student.department.department_name}
+                          {student.department?.department_name || 'No department'}
                         </span>
                         <span className="badge badge-info text-xs">Year {student.year}</span>
                         <span className="badge badge-success text-xs">Sem {student.semester}</span>
@@ -386,10 +386,10 @@ export default function StudentsPage() {
                         </td>
                         <td className="table-cell">
                           <span className="badge badge-neutral text-xs">
-                            {student.department.department_name}
+                            {student.department?.department_name || 'No department'}
                           </span>
                         </td>
-                        <td className="table-cell">{student.course.course_name}</td>
+                        <td className="table-cell">{student.course?.course_name || 'No course assigned'}</td>
                         <td className="table-cell">
                           <span className="badge badge-info text-xs">Year {student.year}</span>
                         </td>
