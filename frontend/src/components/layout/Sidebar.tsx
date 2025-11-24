@@ -20,14 +20,13 @@ const getNavigationItems = (role: string) => {
     case 'admin':
       return [
         ...baseItems,
-        { name: 'Admin', href: '/admin/admin', icon: '👨‍💼' },
+        { name: 'Admins', href: '/admin/admins', icon: '👨‍💼' },
         { name: 'Faculty', href: '/admin/faculty', icon: '👨‍🏫' },
         { name: 'Students', href: '/admin/students', icon: '🎓' },
         { name: 'Attendance', href: '/admin/attendance', icon: '📝' },
         { name: 'academic', href: '/admin/academic/rooms', icon: '🗂️' },
         { name: 'Timetables', href: '/admin/timetables', icon: '📅' },
         { name: 'Approvals', href: '/admin/approvals', icon: '✅' },
-        { name: 'Settings', href: '/admin/settings', icon: '⚙️' },
         { name: 'Logs', href: '/admin/logs', icon: '📋' },
       ]
     case 'staff':
@@ -76,11 +75,8 @@ export default function Sidebar({
   const items = getNavigationItems(role)
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
-  const [showSettings, setShowSettings] = useState(false)
-  const settingsRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // Get user info from localStorage
     const userStr = localStorage.getItem('user')
     if (userStr) {
       try {
@@ -92,20 +88,6 @@ export default function Sidebar({
       }
     }
   }, [])
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
-        setShowSettings(false)
-      }
-    }
-    if (showSettings) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [showSettings])
 
   return (
     <>
@@ -163,69 +145,7 @@ export default function Sidebar({
               )
             })}
 
-            {/* Notifications */}
-            <Link
-              href={`/${role}/notifications`}
-              className={`nav-link ${
-                sidebarCollapsed ? 'md:justify-start md:w-10' : ''
-              } pl-2 h-10 text-xs sm:text-sm relative`}
-              title={sidebarCollapsed ? 'Notifications' : ''}
-              onClick={() => setSidebarOpen(false)}
-            >
-              <div className="w-10 h-10 flex items-center justify-center relative">
-                <span className="text-lg">🔔</span>
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-              </div>
-              <span
-                className={`${
-                  sidebarCollapsed ? 'md:hidden md:opacity-0' : 'md:opacity-100'
-                } truncate transition-all duration-300`}
-              >
-                Notifications
-              </span>
-            </Link>
 
-            {/* Settings Dropdown */}
-            <div className="relative" ref={settingsRef}>
-              <button
-                onClick={() => setShowSettings(!showSettings)}
-                className={`nav-link w-full ${
-                  sidebarCollapsed ? 'md:justify-start md:w-10' : ''
-                } pl-2 h-10 text-xs sm:text-sm`}
-                title={sidebarCollapsed ? 'Settings' : ''}
-              >
-                <div className="w-10 h-10 flex items-center justify-center">
-                  <span className="text-lg">⚙️</span>
-                </div>
-                <span
-                  className={`${
-                    sidebarCollapsed ? 'md:hidden md:opacity-0' : 'md:opacity-100'
-                  } truncate transition-all duration-300`}
-                >
-                  Settings
-                </span>
-              </button>
-              {showSettings && !sidebarCollapsed && (
-                <div className="ml-12 mt-1 bg-gray-50 dark:bg-[#1a1a1a] rounded-lg border border-gray-200 dark:border-gray-700">
-                  <button className="w-full px-3 py-2 text-left text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg flex items-center gap-2">
-                    <span>👤</span> My Profile
-                  </button>
-                  <button className="w-full px-3 py-2 text-left text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg flex items-center gap-2">
-                    <span>⚙️</span> Preferences
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowSignOutDialog(true)
-                      setShowSettings(false)
-                      setSidebarOpen(false)
-                    }}
-                    className="w-full px-3 py-2 text-left text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg flex items-center gap-2"
-                  >
-                    <span>🚪</span> Sign Out
-                  </button>
-                </div>
-              )}
-            </div>
           </nav>
 
           {/* User info */}

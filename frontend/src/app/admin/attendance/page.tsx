@@ -248,16 +248,10 @@ export default function AdminAttendancePage() {
   return (
     <DashboardLayout role="admin">
       <div className="space-y-4 sm:space-y-6">
-        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200">
-              Attendance Administration
-            </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Monitor and manage university-wide attendance
-            </p>
-          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Monitor and manage university-wide attendance
+          </p>
           <button
             onClick={() => window.open('http://localhost:8000/api/attendance/admin/generate-report/?type=daily', '_blank')}
             className="btn-primary"

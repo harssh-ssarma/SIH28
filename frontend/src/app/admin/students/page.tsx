@@ -202,14 +202,9 @@ export default function StudentsPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-xl sm:text-2xl lg:text-3xl font-semibold text-gray-800 dark:text-gray-200">
-              Student Management
-            </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Total: {totalCount} students | Page {currentPage} of {totalPages}
-            </p>
-          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Total: {totalCount} students | Page {currentPage} of {totalPages}
+          </p>
           <button 
             onClick={handleAddStudent}
             className="btn-primary w-full sm:w-auto px-6 py-3"

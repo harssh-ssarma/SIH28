@@ -207,14 +207,9 @@ export default function AdminUsersPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-gray-800 dark:text-gray-200">
-            Admin Users Management
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            Manage admin and staff accounts | Total: {totalCount} users
-          </p>
-        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Manage admin and staff accounts | Total: {totalCount} users
+        </p>
         <button onClick={handleAddUser} className="btn-primary w-full sm:w-auto px-6 py-3">
           <span className="mr-2 text-lg">➕</span>
           Add Admin User
