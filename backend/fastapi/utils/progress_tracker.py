@@ -5,7 +5,7 @@ ENTERPRISE PATTERN: Real-time progress reporting with percentage + ETA
 import redis
 import json
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from collections import deque
 from models.progress_models import ProgressUpdate, GenerationStage

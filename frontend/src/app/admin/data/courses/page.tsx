@@ -8,23 +8,20 @@ import { subjectSchema, type SubjectInput } from '@/lib/validations'
 import { FormField, SelectField } from '@/components/FormFields'
 import { useToast } from '@/components/Toast'
 
-interface Subject {
-  subject_id: string
-  subject_name: string
-  course: {
-    course_id: string
-    course_name: string
-  }
+interface Course {
+  course_id: string
+  course_code: string
+  course_name: string
   department: {
-    department_id: string
-    department_name: string
+    dept_id: string
+    dept_name: string
   }
-  faculty_assigned: string
   credits: number
+  course_type?: string
 }
 
 export default function SubjectsPage() {
-  const [subjects, setSubjects] = useState<Subject[]>([])
+  const [courses, setCourses] = useState<Course[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isTableLoading, setIsTableLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -75,28 +72,25 @@ export default function SubjectsPage() {
     setError(null)
 
     try {
-      const response = await apiClient.getSubjects()
+      const response = await apiClient.getCourses()
       if (response.error) {
         setError(response.error)
       } else if (response.data) {
-        // Handle both paginated and non-paginated responses
-        let subjectData = Array.isArray(response.data) ? response.data : response.data.results || []
+        let courseData = Array.isArray(response.data) ? response.data : response.data.results || []
 
-        // Filter by search term
         if (searchTerm) {
-          subjectData = subjectData.filter(
-            (subject: Subject) =>
-              subject.subject_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              subject.subject_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              subject.course?.course_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-              subject.department?.department_name?.toLowerCase().includes(searchTerm.toLowerCase())
+          courseData = courseData.filter(
+            (course: Course) =>
+              course.course_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              course.course_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              course.department?.dept_name?.toLowerCase().includes(searchTerm.toLowerCase())
           )
         }
 
-        setSubjects(subjectData)
+        setCourses(courseData)
       }
     } catch (err) {
-      setError('Failed to load subjects')
+      setError('Failed to load courses')
     } finally {
       if (isRefresh) {
         setIsTableLoading(false)
@@ -134,15 +128,15 @@ export default function SubjectsPage() {
     }
   }
 
-  const handleEdit = (subject: Subject) => {
-    setValue('subject_name', subject.subject_name)
-    setValue('subject_id', subject.subject_id)
-    setValue('department_id', subject.department.department_id)
-    setValue('course_id', subject.course.course_id)
-    setValue('credits', subject.credits)
+  const handleEdit = (course: Course) => {
+    setValue('subject_name', course.course_name)
+    setValue('subject_id', course.course_code)
+    setValue('department_id', course.department.dept_id)
+    setValue('course_id', course.course_id)
+    setValue('credits', course.credits)
     setValue('lecture_hours', 3)
     setValue('lab_hours', 0)
-    setEditingId(subject.subject_id)
+    setEditingId(course.course_id)
     setShowForm(true)
   }
 
@@ -180,10 +174,10 @@ export default function SubjectsPage() {
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <h2 className="text-lg sm:text-xl font-semibold text-gray-800 dark:text-gray-200">
-          Subjects ({subjects.length})
+          Courses ({courses.length})
         </h2>
         <button onClick={() => setShowForm(true)} className="btn-primary w-full sm:w-auto">
-          Add Subject
+          Add Course
         </button>
       </div>
 
@@ -194,7 +188,7 @@ export default function SubjectsPage() {
             <div className="flex-1">
               <input
                 type="text"
-                placeholder="Search by subject name, ID, course, or department..."
+                placeholder="Search by course name, code, or department..."
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
                 className="input-primary w-full"
@@ -207,12 +201,12 @@ export default function SubjectsPage() {
       {showForm && (
         <div className="card">
           <div className="card-header">
-            <h3 className="card-title">{editingId ? 'Edit' : 'Add'} Subject</h3>
+            <h3 className="card-title">{editingId ? 'Edit' : 'Add'} Course</h3>
           </div>
           <form onSubmit={handleFormSubmit(onSubmit)} className="p-4 sm:p-6 space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormField
-                label="Subject Name"
+                label="Course Name"
                 name="subject_name"
                 register={register}
                 error={errors.subject_name}
@@ -221,7 +215,7 @@ export default function SubjectsPage() {
               />
 
               <FormField
-                label="Subject ID"
+                label="Course Code"
                 name="subject_id"
                 register={register}
                 error={errors.subject_id}
@@ -286,7 +280,7 @@ export default function SubjectsPage() {
                 className="btn-primary w-full sm:w-auto"
                 disabled={isSubmitting}
               >
-                {isSubmitting ? 'Saving...' : editingId ? 'Update Subject' : 'Create Subject'}
+                {isSubmitting ? 'Saving...' : editingId ? 'Update Course' : 'Create Course'}
               </button>
               <button
                 type="button"
@@ -317,41 +311,25 @@ export default function SubjectsPage() {
             <thead className="table-header">
               <tr>
                 <th className="table-header-cell">Name</th>
-                <th className="table-header-cell">Subject ID</th>
-                <th className="table-header-cell">Course</th>
+                <th className="table-header-cell">Code</th>
+                <th className="table-header-cell">Type</th>
                 <th className="table-header-cell">Department</th>
-                <th className="table-header-cell">Faculty</th>
                 <th className="table-header-cell">Credits</th>
                 <th className="table-header-cell">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {subjects.map(subject => (
-                <tr key={subject.subject_id} className="table-row">
-                  <td className="table-cell font-medium">{subject.subject_name}</td>
-                  <td className="table-cell">
-                    <span className="badge badge-neutral">{subject.subject_id}</span>
-                  </td>
-                  <td className="table-cell">{subject.course?.course_name || 'N/A'}</td>
-                  <td className="table-cell">{subject.department?.department_name || 'N/A'}</td>
-                  <td className="table-cell">{subject.faculty_assigned}</td>
-                  <td className="table-cell">{subject.credits}</td>
+              {courses.map(course => (
+                <tr key={course.course_id} className="table-row">
+                  <td className="table-cell font-medium">{course.course_name}</td>
+                  <td className="table-cell"><span className="badge badge-neutral">{course.course_code}</span></td>
+                  <td className="table-cell">{course.course_type || '-'}</td>
+                  <td className="table-cell">{course.department?.dept_name || 'N/A'}</td>
+                  <td className="table-cell">{course.credits}</td>
                   <td className="table-cell">
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => handleEdit(subject)}
-                        className="btn-ghost text-xs px-2 py-1"
-                        disabled={isTableLoading}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(subject.subject_id)}
-                        className="btn-danger text-xs px-2 py-1"
-                        disabled={isTableLoading}
-                      >
-                        Delete
-                      </button>
+                      <button onClick={() => handleEdit(course)} className="btn-ghost text-xs px-2 py-1" disabled={isTableLoading}>Edit</button>
+                      <button onClick={() => handleDelete(course.course_id)} className="btn-danger text-xs px-2 py-1" disabled={isTableLoading}>Delete</button>
                     </div>
                   </td>
                 </tr>

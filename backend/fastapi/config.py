@@ -46,16 +46,16 @@ class Settings:
     MAX_CLUSTER_SIZE: int = 15  # Maximum courses per cluster
     MIN_CLUSTER_SIZE: int = 3  # Minimum courses per cluster
 
-    # Stage 2A: CP-SAT Solver (OPTIMIZED for speed)
-    CPSAT_TIMEOUT_SECONDS: int = 60  # 1 minute per cluster (reduced from 5min)
-    CPSAT_NUM_WORKERS: int = 8  # Parallel workers
+    # Stage 2A: CP-SAT Solver (OPTIMIZED for base hardware)
+    CPSAT_TIMEOUT_SECONDS: int = 30  # Reduced from 60s (50% faster)
+    CPSAT_NUM_WORKERS: int = 1  # Auto-adjusted by hardware detector
 
-    # Stage 2B: Genetic Algorithm (OPTIMIZED for speed)
-    GA_POPULATION_SIZE: int = 30  # Reduced from 50
-    GA_GENERATIONS: int = 50  # Reduced from 100 (50% faster)
-    GA_MUTATION_RATE: float = 0.15  # Slightly higher for faster exploration
+    # Stage 2B: Genetic Algorithm (OPTIMIZED for base hardware)
+    GA_POPULATION_SIZE: int = 15  # Reduced from 30 (50% faster)
+    GA_GENERATIONS: int = 25  # Reduced from 50 (50% faster)
+    GA_MUTATION_RATE: float = 0.20  # Increased for faster exploration
     GA_CROSSOVER_RATE: float = 0.8
-    GA_ELITISM_RATE: float = 0.15  # Keep more good solutions
+    GA_ELITISM_RATE: float = 0.20  # Keep more good solutions
     GA_TOURNAMENT_SIZE: int = 3  # Smaller tournament for speed
 
     # Soft Constraint Weights (must sum to 1.0)
@@ -66,13 +66,24 @@ class Settings:
     WEIGHT_PEAK_SPREADING: float = 0.10  # Avoid peak hour clustering
     WEIGHT_CONTINUITY: float = 0.10  # Same course sessions on same days
 
-    # Stage 3: Q-Learning (OPTIMIZED for speed)
+    # Stage 3: Q-Learning (OPTIMIZED for base hardware)
     RL_LEARNING_RATE: float = 0.15  # α - faster learning
     RL_DISCOUNT_FACTOR: float = 0.85  # γ - slightly reduced for speed
-    RL_EPSILON: float = 0.15  # Less exploration, more exploitation
-    RL_MAX_ITERATIONS: int = 500  # Reduced from 1000 (50% faster)
-    RL_CONVERGENCE_THRESHOLD: float = 0.02  # Less strict convergence
+    RL_EPSILON: float = 0.10  # More exploitation, less exploration
+    RL_MAX_ITERATIONS: int = 250  # Reduced from 500 (50% faster)
+    RL_CONVERGENCE_THRESHOLD: float = 0.05  # Less strict convergence (faster)
     Q_TABLE_PATH: str = str(backend_dir / "fastapi" / "q_table.pkl")
+    
+    # Optimization Features (NEW)
+    ENABLE_EARLY_TERMINATION: bool = True
+    QUALITY_THRESHOLD: float = 0.80  # Stop at 80% optimal
+    NO_IMPROVEMENT_LIMIT: int = 8  # Stop after 8 generations without improvement
+    ENABLE_CONSTRAINT_CACHE: bool = True
+    CACHE_SIZE: int = 1000  # LRU cache size
+    USE_GREEDY_INITIAL: bool = True
+    GREEDY_TIMEOUT: int = 10  # 10 seconds for greedy solution
+    LAZY_LOAD_STUDENTS: bool = True
+    PARALLEL_DATA_LOADING: bool = True
 
     # Multi-Dimensional Context Engine
     CONTEXT_ENGINE_ENABLED: bool = True

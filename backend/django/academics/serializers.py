@@ -1,15 +1,17 @@
 from rest_framework import serializers
 
-from .models import Program  # Changed from Course
-from .models import (  # Lab removed - not in multi-tenant models
+from .models import (
     Attendance,
     Batch,
-    Classroom,
+    Building,
+    Course,
     Department,
     Faculty,
     GenerationJob,
+    Program,
+    Room,
+    School,
     Student,
-    Subject,
     Timetable,
     TimetableSlot,
     User,
@@ -55,15 +57,9 @@ class ProgramSerializer(serializers.ModelSerializer):
 CourseSerializer = ProgramSerializer
 
 
-class SubjectSerializer(serializers.ModelSerializer):
-    program = ProgramSerializer(read_only=True)
+class CourseSerializer(serializers.ModelSerializer):
+    """Serializer for Course model (courses table)"""
     department = DepartmentSerializer(read_only=True)
-    program_id = serializers.PrimaryKeyRelatedField(
-        queryset=Program.objects.all(),
-        source="program",
-        write_only=True,
-        required=False,
-    )
     department_id = serializers.PrimaryKeyRelatedField(
         queryset=Department.objects.all(),
         source="department",
@@ -71,17 +67,12 @@ class SubjectSerializer(serializers.ModelSerializer):
         required=False,
     )
 
-    # Backwards compatibility
-    course = serializers.SerializerMethodField()
-
-    def get_course(self, obj):
-        if hasattr(obj, "program") and obj.program:
-            return ProgramSerializer(obj.program).data
-        return None
-
     class Meta:
-        model = Subject
+        model = Course
         fields = "__all__"
+
+# Alias for backward compatibility
+SubjectSerializer = CourseSerializer
 
 
 class FacultySerializer(serializers.ModelSerializer):
@@ -216,54 +207,41 @@ class StudentSerializer(serializers.ModelSerializer):
 
 
 class BatchSerializer(serializers.ModelSerializer):
+    """Serializer for Batch model"""
     program = ProgramSerializer(read_only=True)
     department = DepartmentSerializer(read_only=True)
-    program_id = serializers.PrimaryKeyRelatedField(
-        queryset=Program.objects.all(),
-        source="program",
-        write_only=True,
-        required=False,
-    )
-    department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(),
-        source="department",
-        write_only=True,
-        required=False,
-    )
-
-    # Backwards compatibility
-    course = serializers.SerializerMethodField()
-    year = serializers.IntegerField(source="year_of_admission", required=False)
-    semester = serializers.IntegerField(source="current_semester", required=False)
-
-    def get_course(self, obj):
-        if hasattr(obj, "program") and obj.program:
-            return ProgramSerializer(obj.program).data
-        return None
-
+    
     class Meta:
         model = Batch
         fields = "__all__"
 
 
-class ClassroomSerializer(serializers.ModelSerializer):
-    # Multi-tenant Classroom model doesn't have department FK
-    # It has organization FK instead
+class RoomSerializer(serializers.ModelSerializer):
+    """Serializer for Room model (rooms table)"""
+    building = serializers.SerializerMethodField()
+    department = DepartmentSerializer(read_only=True)
+    
+    def get_building(self, obj):
+        if obj.building:
+            return {
+                "building_id": str(obj.building.building_id),
+                "building_code": obj.building.building_code,
+                "building_name": obj.building.building_name,
+            }
+        return None
+    
     class Meta:
-        model = Classroom
+        model = Room
         fields = "__all__"
 
-
-# Lab model removed in multi-tenant architecture
-# Labs are now handled as Classroom with room_type='lab'
+# Alias for backward compatibility
+ClassroomSerializer = RoomSerializer
 
 
 class TimetableSlotSerializer(serializers.ModelSerializer):
-    subject_name = serializers.CharField(source="subject.subject_name", read_only=True)
+    subject_name = serializers.CharField(source="subject.course_name", read_only=True)
     faculty_name = serializers.CharField(source="faculty.faculty_name", read_only=True)
-    classroom_number = serializers.CharField(
-        source="classroom.room_number", read_only=True
-    )
+    classroom_number = serializers.CharField(source="classroom.room_number", read_only=True)
 
     class Meta:
         model = TimetableSlot
@@ -317,10 +295,7 @@ class GenerationJobCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("Department does not exist")
         return value
 
-    def validate_batch_id(self, value):
-        if not Batch.objects.filter(batch_id=value).exists():
-            raise serializers.ValidationError("Batch does not exist")
-        return value
+    # Batch validation removed - batches don't exist
 
 
 class UniversityTimetableGenerationSerializer(serializers.Serializer):

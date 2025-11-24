@@ -51,12 +51,28 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
         Body: {
             "academic_year": "2024-2025",
             "semester": "odd",
-            "university_id": 1
+            "university_id": 1,
+            "priority": "normal"  # optional: high, normal, low
         }
         """
+        # Check tenant limits and hardware resources
+        from core.tenant_limits import TenantLimits
+        
+        can_start, error_msg = TenantLimits.can_start_generation(str(university_id))
+        if not can_start:
+            return Response(
+                {
+                    "success": False,
+                    "error": error_msg,
+                    "retry_after": 60
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        
         # Validate required fields
         academic_year = request.data.get("academic_year")
         semester = request.data.get("semester")
+        priority = request.data.get("priority", "normal")  # high, normal, low
         university_id = request.data.get("university_id") or getattr(
             request.user, "organization", None
         )
@@ -75,6 +91,16 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
 
         # Create generation job
         try:
+            # Increment concurrent count
+            from core.tenant_limits import TenantLimits
+            TenantLimits.increment_concurrent(str(university_id))
+            
+            # Get priority from tenant tier if not specified
+            if priority == "normal":
+                priority_value = TenantLimits.get_priority(str(university_id))
+            else:
+                priority_value = {'high': 9, 'normal': 5, 'low': 1}.get(priority, 5)
+            
             # Create job entry for university-wide generation
             job = GenerationJob.objects.create(
                 department=None,  # University-wide
@@ -84,10 +110,11 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
                 status="queued",
                 progress=0,
                 created_by=request.user,
+                metadata={'priority': priority_value, 'org_id': str(university_id)}
             )
 
-            # Push job to FastAPI for processing
-            self._queue_generation_job(job, university_id)
+            # Push job to FastAPI for processing with priority
+            self._queue_generation_job(job, university_id, priority)
 
             # Return job details
             job_serializer = GenerationJobSerializer(job)
@@ -170,6 +197,16 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+    def _decrement_concurrent_on_complete(self, job):
+        """Decrement concurrent count when job completes"""
+        try:
+            from core.tenant_limits import TenantLimits
+            org_id = job.metadata.get('org_id') if job.metadata else None
+            if org_id:
+                TenantLimits.decrement_concurrent(org_id)
+        except Exception as e:
+            logger.error(f"Error decrementing concurrent count: {e}")
+    
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, pk=None):
         """
@@ -212,6 +249,9 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
 
             job.completed_at = timezone.now()
             job.save()
+            
+            # Decrement concurrent count
+            self._decrement_concurrent_on_complete(job)
 
             serializer = GenerationJobSerializer(job)
             return Response(
@@ -265,9 +305,10 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    def _queue_generation_job(self, job, university_id):
+    def _queue_generation_job(self, job, university_id, priority="normal"):
         """
-        Queue job in Redis for FastAPI worker to pick up
+        Queue job in Redis/Celery with priority support
+        Priority: high (9), normal (5), low (1)
         """
         try:
             # Store job data in Redis queue
@@ -279,25 +320,44 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
                 "academic_year": job.academic_year,
                 "generation_type": "full",
                 "scope": "university",
+                "priority": priority,
                 "created_at": job.created_at.isoformat(),
             }
             cache.set(cache_key, job_data, timeout=7200)  # 2 hours
 
-            # Trigger FastAPI service
-            fastapi_url = os.getenv("FASTAPI_AI_SERVICE_URL", "http://localhost:8001")
+            # Use Celery for queuing (hardware-adaptive)
             try:
+                from academics.celery_tasks import generate_timetable_task
+                
+                # Map priority to Celery priority (0-9)
+                celery_priority = {
+                    'high': 9,
+                    'normal': 5,
+                    'low': 1
+                }.get(priority, 5)
+                
+                # Queue with priority
+                generate_timetable_task.apply_async(
+                    args=[str(job.job_id), university_id, job.academic_year, job.semester],
+                    priority=celery_priority
+                )
+                logger.info(f"Queued job {job.job_id} with priority {priority} (Celery)")
+                
+            except ImportError:
+                # Fallback to direct FastAPI call if Celery not available
+                fastapi_url = os.getenv("FASTAPI_AI_SERVICE_URL", "http://localhost:8001")
                 requests.post(
                     f"{fastapi_url}/api/v1/optimize",
                     json=job_data,
                     timeout=10,
                 )
-                logger.info(
-                    f"Triggered FastAPI generation for job {job.job_id} (university-wide)"
-                )
-            except requests.exceptions.RequestException as e:
-                logger.warning(
-                    f"Could not trigger FastAPI service: {e}. Job queued in Redis."
-                )
+                logger.info(f"Triggered FastAPI generation for job {job.job_id} (direct)")
+                
+        except Exception as e:
+            logger.error(f"Error queuing job: {str(e)}")
+            job.status = "failed"
+            job.error_message = str(e)
+            job.save()
 
         except Exception as e:
             logger.error(f"Error queuing job: {str(e)}")

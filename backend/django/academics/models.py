@@ -35,124 +35,87 @@ class Organization(models.Model):
     Examples: BHU, IIT Delhi, DU, Amity University
     """
 
-    INSTITUTE_TYPE_CHOICES = [
-        ("iit", "Indian Institute of Technology"),
-        ("nit", "National Institute of Technology"),
-        ("iiit", "Indian Institute of Information Technology"),
-        ("central_university", "Central University"),
-        ("state_university", "State University"),
-        ("deemed_university", "Deemed University"),
-        ("private_university", "Private University"),
-        ("autonomous_college", "Autonomous College"),
-        ("affiliated_college", "Affiliated College"),
-        ("polytechnic", "Polytechnic Institute"),
-        ("research_institute", "Research Institute"),
+    ORG_TYPE_CHOICES = [
+        ("CENTRAL_UNIVERSITY", "Central University"),
+        ("STATE_UNIVERSITY", "State University"),
+        ("DEEMED", "Deemed University"),
+        ("PRIVATE", "Private University"),
     ]
 
-    STATUS_CHOICES = [
-        ("trial", "Trial Period"),
-        ("active", "Active"),
-        ("suspended", "Suspended"),
-        ("cancelled", "Cancelled"),
+    SEMESTER_SYSTEM_CHOICES = [
+        ("SEMESTER", "Semester"),
+        ("ANNUAL", "Annual"),
+        ("TRIMESTER", "Trimester"),
     ]
 
     org_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    org_code = models.CharField(
-        max_length=20, unique=True, db_index=True
-    )  # e.g., 'BHU', 'IITD'
-    org_name = models.CharField(max_length=200)  # Full name
-    short_name = models.CharField(max_length=100)  # Display name
-
-    institute_type = models.CharField(max_length=30, choices=INSTITUTE_TYPE_CHOICES)
-    established_year = models.IntegerField(null=True, blank=True)
+    org_code = models.CharField(max_length=20, unique=True, db_index=True)
+    org_name = models.CharField(max_length=200)
+    org_type = models.CharField(max_length=50, choices=ORG_TYPE_CHOICES, null=True, blank=True)
 
     # Contact Information
-    address = models.TextField()
-    city = models.CharField(max_length=100)
-    state = models.CharField(max_length=100)
-    pincode = models.CharField(max_length=10)
+    address = models.TextField(null=True, blank=True)
+    city = models.CharField(max_length=100, null=True, blank=True)
+    state = models.CharField(max_length=100, null=True, blank=True)
     country = models.CharField(max_length=100, default="India")
+    pincode = models.CharField(max_length=10, null=True, blank=True)
+    phone = models.CharField(max_length=20, null=True, blank=True)
+    website = models.CharField(max_length=255, null=True, blank=True)
 
-    contact_email = models.EmailField()
-    contact_phone = models.CharField(max_length=20)
-    website = models.URLField(null=True, blank=True)
+    # Email domains
+    student_email_domain = models.CharField(max_length=100)
+    faculty_email_domain = models.CharField(max_length=100)
 
-    # Subscription & Billing
-    subscription_status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default="trial"
-    )
-    subscription_start_date = models.DateField()
-    subscription_end_date = models.DateField()
-    max_students = models.IntegerField(default=5000)  # License limit
-    max_faculty = models.IntegerField(default=500)
-
-    # Configuration
-    academic_year_format = models.CharField(
-        max_length=20, default="2024-25"
-    )  # How they display years
-    current_academic_year = models.CharField(max_length=20)
-    timezone = models.CharField(max_length=50, default="Asia/Kolkata")
-
-    # Branding
-    logo_url = models.URLField(null=True, blank=True)
-    primary_color = models.CharField(max_length=7, default="#0066CC")  # Hex color
+    # Academic configuration
+    nep2020_enabled = models.BooleanField(default=True)
+    academic_year_start_month = models.IntegerField(default=7)
+    semester_system = models.CharField(max_length=20, choices=SEMESTER_SYSTEM_CHOICES, default="SEMESTER")
 
     # Metadata
-    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = "organizations"
         indexes = [
-            models.Index(fields=["org_code"], name="org_code_idx"),
-            models.Index(
-                fields=["subscription_status", "is_active"], name="org_status_idx"
-            ),
-            models.Index(fields=["institute_type"], name="org_type_idx"),
+            models.Index(fields=["org_code"], name="idx_org_code"),
+            models.Index(fields=["is_active"], name="idx_org_active"),
         ]
 
     def __str__(self):
-        return f"{self.org_code} - {self.short_name}"
+        return f"{self.org_code} - {self.org_name}"
 
 
-class Campus(models.Model):
-    """
-    Multiple campuses for an organization
-    Example: BHU has Main Campus, IIT-BHU Campus, Medical Campus
-    """
-
-    campus_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="campuses"
-    )
-
-    campus_code = models.CharField(max_length=20)  # e.g., 'MAIN', 'IIT', 'MED'
-    campus_name = models.CharField(max_length=200)
-
-    address = models.TextField()
-    city = models.CharField(max_length=100)
-    area_in_acres = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True
-    )
-
-    is_main_campus = models.BooleanField(default=False)
+class Building(models.Model):
+    """Buildings table (renamed from Campus)"""
+    
+    building_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="buildings", db_column='org_id')
+    
+    building_code = models.CharField(max_length=50)
+    building_name = models.CharField(max_length=200)
+    building_type = models.CharField(max_length=50, null=True, blank=True)
+    address = models.TextField(null=True, blank=True)
+    total_floors = models.IntegerField(null=True, blank=True)
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    
     is_active = models.BooleanField(default=True)
-
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
+    
     class Meta:
-        db_table = "campuses"
-        unique_together = [["organization", "campus_code"]]
+        db_table = "buildings"
         indexes = [
-            models.Index(
-                fields=["organization", "is_active"], name="campus_org_active_idx"
-            ),
+            models.Index(fields=["organization"], name="idx_building_org"),
+            models.Index(fields=["building_code"], name="idx_building_code"),
         ]
-
+    
     def __str__(self):
-        return f"{self.campus_name} - {self.organization.org_code}"
+        return f"{self.building_code} - {self.building_name}"
+
+# Alias for backward compatibility
+Campus = Building
 
 
 # ============================================
@@ -161,45 +124,34 @@ class Campus(models.Model):
 
 
 class School(models.Model):
-    """
-    Schools/Faculties/Institutes within an organization
-    Examples: IIT-BHU, Faculty of Arts, Institute of Medical Sciences
-    Harvard-style: 12+ schools per university
-    """
-
+    """Schools table"""
+    
     school_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="schools"
-    )
-    campus = models.ForeignKey(Campus, on_delete=models.CASCADE, related_name="schools")
-
-    school_code = models.CharField(max_length=20)  # e.g., 'IIT-BHU', 'FMS', 'IOS'
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="schools", db_column='org_id')
+    
+    school_code = models.CharField(max_length=50)
     school_name = models.CharField(max_length=200)
-
-    dean_name = models.CharField(max_length=100, null=True, blank=True)
-    dean_email = models.EmailField(null=True, blank=True)
-    dean_phone = models.CharField(max_length=20, null=True, blank=True)
-
-    building_names = models.TextField(
-        null=True, blank=True
-    )  # JSON list or comma-separated
-
+    school_type = models.CharField(max_length=50, null=True, blank=True)
+    dean_faculty_id = models.UUIDField(null=True, blank=True)
+    office_location = models.CharField(max_length=200, null=True, blank=True)
+    office_phone = models.CharField(max_length=20, null=True, blank=True)
+    office_email = models.CharField(max_length=200, null=True, blank=True)
+    established_year = models.IntegerField(null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
+    
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    
     class Meta:
         db_table = "schools"
-        unique_together = [["organization", "school_code"]]
         indexes = [
-            models.Index(
-                fields=["organization", "is_active"], name="school_org_active_idx"
-            ),
-            models.Index(fields=["campus"], name="school_campus_idx"),
+            models.Index(fields=["organization"], name="idx_school_org"),
+            models.Index(fields=["school_code"], name="idx_school_code"),
         ]
-
+    
     def __str__(self):
-        return f"{self.school_name} ({self.organization.org_code})"
+        return f"{self.school_code} - {self.school_name}"
 
 
 class Department(models.Model):
@@ -210,7 +162,7 @@ class Department(models.Model):
 
     dept_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="departments"
+        Organization, on_delete=models.CASCADE, related_name="departments", db_column='org_id'
     )
     school = models.ForeignKey(
         School, on_delete=models.CASCADE, related_name="departments"
@@ -266,7 +218,7 @@ class Program(models.Model):
 
     program_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="programs"
+        Organization, on_delete=models.CASCADE, related_name="programs", db_column='org_id'
     )
     school = models.ForeignKey(
         School, on_delete=models.CASCADE, related_name="programs"
@@ -324,93 +276,62 @@ class Program(models.Model):
         return f"{self.program_name} ({self.program_code})"
 
 
-class Subject(models.Model):
-    """
-    Individual subjects/courses offered
-    200+ subjects per large university
-    """
-
-    SUBJECT_TYPE_CHOICES = [
-        ("core", "Core/Mandatory"),
-        ("elective", "Elective"),
-        ("open_elective", "Open Elective"),
-        ("minor", "Minor"),
-        ("audit", "Audit Course"),
-        ("value_added", "Value Added Course"),
-        ("skill_course", "Skill Enhancement Course"),
-        ("ability_enhancement", "Ability Enhancement Compulsory Course (AECC)"),
-        ("interdisciplinary", "Interdisciplinary"),
-    ]
-
-    subject_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="subjects"
-    )
-    department = models.ForeignKey(
-        Department, on_delete=models.CASCADE, related_name="subjects"
-    )
-    program = models.ForeignKey(
-        Program,
-        on_delete=models.CASCADE,
-        related_name="subjects",
-        null=True,
-        blank=True,
-    )
-
-    subject_code = models.CharField(max_length=20)  # e.g., 'CSE101', 'MATH201'
-    subject_name = models.CharField(max_length=200)
-    subject_type = models.CharField(
-        max_length=30, choices=SUBJECT_TYPE_CHOICES, default="core"
-    )
-
-    credits = models.IntegerField(
-        validators=[MinValueValidator(1), MaxValueValidator(10)]
-    )
-    lecture_hours_per_week = models.IntegerField(default=3)
-    tutorial_hours_per_week = models.IntegerField(default=0)
-    practical_hours_per_week = models.IntegerField(default=0)
-
-    semester = models.IntegerField(
-        validators=[MinValueValidator(1), MaxValueValidator(12)]
-    )
-
-    # Lab Requirements
-    requires_lab = models.BooleanField(default=False)
-    lab_batch_size = models.IntegerField(
-        null=True, blank=True
-    )  # Max students in lab session
-
-    # Classroom Requirements
-    max_students_per_class = models.IntegerField(default=60)
-    min_classroom_capacity = models.IntegerField(default=60)
-
-    # Prerequisites
-    prerequisite_subjects = models.ManyToManyField(
-        "self", symmetrical=False, blank=True, related_name="prerequisite_for"
-    )
-
-    # Syllabus
-    syllabus_url = models.URLField(null=True, blank=True)
-    description = models.TextField(null=True, blank=True)
-
+class Course(models.Model):
+    """Courses table (renamed from Subject)"""
+    
+    course_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="courses", db_column='org_id')
+    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name="courses", db_column='dept_id')
+    
+    course_code = models.CharField(max_length=50)
+    course_name = models.CharField(max_length=200)
+    course_short_name = models.CharField(max_length=100, null=True, blank=True)
+    course_type = models.CharField(max_length=50, null=True, blank=True)
+    course_level = models.CharField(max_length=50, null=True, blank=True)
+    
+    credits = models.IntegerField()
+    theory_credits = models.IntegerField(null=True, blank=True)
+    practical_credits = models.IntegerField(null=True, blank=True)
+    lecture_hours_per_week = models.IntegerField(null=True, blank=True)
+    tutorial_hours_per_week = models.IntegerField(null=True, blank=True)
+    practical_hours_per_week = models.IntegerField(null=True, blank=True)
+    
+    session_pattern = models.CharField(max_length=50, null=True, blank=True)
+    room_type_required = models.CharField(max_length=50, null=True, blank=True)
+    min_room_capacity = models.IntegerField(null=True, blank=True)
+    room_features_required = models.JSONField(null=True, blank=True)
+    corequisite_course_ids = models.JSONField(null=True, blank=True)
+    
+    max_enrollment = models.IntegerField(null=True, blank=True)
+    min_enrollment = models.IntegerField(null=True, blank=True)
+    allow_cross_department_enrollment = models.BooleanField(null=True, blank=True)
+    
+    offered_in_odd_semester = models.BooleanField(null=True, blank=True)
+    offered_in_even_semester = models.BooleanField(null=True, blank=True)
+    offered_in_summer_term = models.BooleanField(null=True, blank=True)
+    
+    syllabus_file_url = models.TextField(null=True, blank=True)
+    course_objectives = models.TextField(null=True, blank=True)
+    course_outcomes = models.TextField(null=True, blank=True)
+    
     is_active = models.BooleanField(default=True)
+    last_offered_semester = models.CharField(max_length=50, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    
     class Meta:
-        db_table = "subjects"
-        unique_together = [["organization", "subject_code"]]
+        db_table = "courses"
         indexes = [
-            models.Index(
-                fields=["organization", "department", "is_active"],
-                name="subj_org_dept_idx",
-            ),
-            models.Index(fields=["program", "semester"], name="subj_prog_sem_idx"),
-            models.Index(fields=["subject_type"], name="subj_type_idx"),
+            models.Index(fields=["organization"], name="idx_course_org"),
+            models.Index(fields=["department"], name="idx_course_dept"),
+            models.Index(fields=["course_code"], name="idx_course_code"),
         ]
-
+    
     def __str__(self):
-        return f"{self.subject_code} - {self.subject_name}"
+        return f"{self.course_code} - {self.course_name}"
+
+# Alias for backward compatibility
+Subject = Course
 
 
 # ============================================
@@ -437,10 +358,10 @@ class Faculty(models.Model):
 
     faculty_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="faculty_members"
+        Organization, on_delete=models.CASCADE, related_name="faculty_members", db_column='org_id'
     )
     department = models.ForeignKey(
-        Department, on_delete=models.CASCADE, related_name="faculty_members"
+        Department, on_delete=models.CASCADE, related_name="faculty_members", db_column='dept_id'
     )
 
     employee_id = models.CharField(max_length=30)  # Unique within organization
@@ -492,47 +413,7 @@ class Faculty(models.Model):
         return f"{self.faculty_name} ({self.employee_id})"
 
 
-class FacultySubject(models.Model):
-    """
-    Faculty-Subject mapping with preference levels
-    Faculty can teach multiple subjects
-    """
-
-    mapping_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
-    faculty = models.ForeignKey(
-        Faculty, on_delete=models.CASCADE, related_name="subject_mappings"
-    )
-    subject = models.ForeignKey(
-        Subject, on_delete=models.CASCADE, related_name="faculty_mappings"
-    )
-
-    preference_level = models.IntegerField(
-        default=1,
-        validators=[MinValueValidator(1), MaxValueValidator(3)],
-        help_text="1=Most Preferred, 2=Moderate, 3=Can Teach",
-    )
-
-    can_handle_lab = models.BooleanField(default=True)
-    years_of_experience_teaching = models.IntegerField(default=0)
-
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "faculty_subjects"
-        unique_together = [["faculty", "subject"]]
-        indexes = [
-            models.Index(
-                fields=["organization", "subject"], name="facsubj_org_subj_idx"
-            ),
-            models.Index(
-                fields=["faculty", "preference_level"], name="facsubj_fac_pref_idx"
-            ),
-        ]
-
-    def __str__(self):
-        return f"{self.faculty.faculty_name} → {self.subject.subject_code}"
+# FacultySubject removed - not in database
 
 
 # ============================================
@@ -541,48 +422,35 @@ class FacultySubject(models.Model):
 
 
 class Batch(models.Model):
-    """
-    Student batches/sections
-    Example: BTech CSE 2024 Batch A, MBA 2024
-    """
-
+    """Student batches - synthetic from student data"""
+    
     batch_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="batches"
-    )
-    program = models.ForeignKey(
-        Program, on_delete=models.CASCADE, related_name="batches"
-    )
-    department = models.ForeignKey(
-        Department, on_delete=models.CASCADE, related_name="batches"
-    )
-
-    batch_name = models.CharField(max_length=100)  # e.g., "BTech CSE 2024 Batch"
-    batch_code = models.CharField(max_length=20)  # e.g., "24CSEА"
-
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="batches", db_column='org_id')
+    program = models.ForeignKey(Program, on_delete=models.CASCADE, related_name="batches", db_column='program_id', null=True, blank=True)
+    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name="batches", db_column='dept_id')
+    
+    batch_name = models.CharField(max_length=100)
+    batch_code = models.CharField(max_length=20)
     year_of_admission = models.IntegerField()
-    current_semester = models.IntegerField()
-    section = models.CharField(max_length=5, default="A")  # A, B, C sections
-
-    total_students = models.IntegerField()
-
+    current_semester = models.IntegerField(default=1)
+    section = models.CharField(max_length=5, default='A')
+    total_students = models.IntegerField(default=0)
+    
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    
     class Meta:
         db_table = "batches"
-        unique_together = [["organization", "program", "year_of_admission", "section"]]
+        unique_together = [["organization", "batch_code"]]
         indexes = [
-            models.Index(
-                fields=["organization", "current_semester", "is_active"],
-                name="batch_org_sem_idx",
-            ),
-            models.Index(fields=["program"], name="batch_prog_idx"),
+            models.Index(fields=["organization"], name="idx_batch_org"),
+            models.Index(fields=["department"], name="idx_batch_dept"),
+            models.Index(fields=["program"], name="idx_batch_program"),
         ]
-
+    
     def __str__(self):
-        return f"{self.batch_name} - Section {self.section}"
+        return f"{self.batch_code} - {self.batch_name}"
 
 
 class Student(models.Model):
@@ -591,54 +459,91 @@ class Student(models.Model):
     Scalable to 25000+ students per organization
     """
 
+    GENDER_CHOICES = [
+        ("MALE", "Male"),
+        ("FEMALE", "Female"),
+        ("OTHER", "Other"),
+    ]
+
+    ACADEMIC_STATUS_CHOICES = [
+        ("ACTIVE", "Active"),
+        ("ON_LEAVE", "On Leave"),
+        ("GRADUATED", "Graduated"),
+        ("DROPPED_OUT", "Dropped Out"),
+        ("RUSTICATED", "Rusticated"),
+        ("TRANSFERRED", "Transferred"),
+    ]
+
+    FEE_STATUS_CHOICES = [
+        ("PAID", "Paid"),
+        ("UNPAID", "Unpaid"),
+        ("PARTIAL", "Partial"),
+        ("WAIVED", "Waived"),
+    ]
+
     student_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="students"
+        Organization, on_delete=models.CASCADE, related_name="students", db_column='org_id'
     )
     program = models.ForeignKey(
-        Program, on_delete=models.CASCADE, related_name="students"
+        Program, on_delete=models.CASCADE, related_name="students", db_column='program_id'
     )
     department = models.ForeignKey(
-        Department, on_delete=models.CASCADE, related_name="students"
-    )
-    batch = models.ForeignKey(Batch, on_delete=models.CASCADE, related_name="students")
-
-    roll_number = models.CharField(max_length=30)  # Unique within organization
-    student_name = models.CharField(max_length=100)
-
-    email = models.EmailField()
-    phone = models.CharField(max_length=20, null=True, blank=True)
-
-    current_semester = models.IntegerField()
-    current_year = models.IntegerField()
-
-    cgpa = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
-
-    date_of_admission = models.DateField()
-    expected_graduation_year = models.IntegerField()
-
-    # Advisor
-    faculty_advisor = models.ForeignKey(
-        Faculty,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="advised_students",
+        Department, on_delete=models.CASCADE, related_name="students", db_column='dept_id'
     )
 
-    # Status
+    enrollment_number = models.CharField(max_length=50, unique=True)
+    roll_number = models.CharField(max_length=30, unique=True)
+    username = models.CharField(max_length=50, unique=True)
+    email = models.EmailField(unique=True)
+
+    first_name = models.CharField(max_length=100)
+    middle_name = models.CharField(max_length=100, null=True, blank=True)
+    last_name = models.CharField(max_length=100)
+    gender = models.CharField(max_length=10, choices=GENDER_CHOICES, null=True, blank=True)
+    date_of_birth = models.DateField()
+    blood_group = models.CharField(max_length=5, null=True, blank=True)
+
+    phone_number = models.CharField(max_length=20, null=True, blank=True)
+    parent_phone = models.CharField(max_length=20, null=True, blank=True)
+    address = models.TextField(null=True, blank=True)
+    city = models.CharField(max_length=100, null=True, blank=True)
+    state = models.CharField(max_length=100, null=True, blank=True)
+    country = models.CharField(max_length=100, default="India")
+    pincode = models.CharField(max_length=10, null=True, blank=True)
+
+    emergency_contact_name = models.CharField(max_length=200, null=True, blank=True)
+    emergency_contact_phone = models.CharField(max_length=20, null=True, blank=True)
+    emergency_contact_relation = models.CharField(max_length=50, null=True, blank=True)
+
+    admission_year = models.IntegerField()
+    admission_date = models.DateField()
+    current_semester = models.IntegerField(default=1)
+    current_year = models.IntegerField(default=1)
+    batch_name = models.CharField(max_length=50, null=True, blank=True)
+
+    academic_status = models.CharField(max_length=50, choices=ACADEMIC_STATUS_CHOICES, default="ACTIVE")
+    total_credits_earned = models.DecimalField(max_digits=6, decimal_places=2, default=0.00)
+    current_semester_credits = models.IntegerField(default=0)
+    cgpa = models.DecimalField(max_digits=4, decimal_places=2, default=0.00)
+
+    pursuing_minor = models.BooleanField(default=False)
+    minor_dept = models.ForeignKey(
+        Department, on_delete=models.SET_NULL, null=True, blank=True, related_name="minor_students", db_column='minor_dept_id'
+    )
+    minor_credits_earned = models.IntegerField(default=0)
+
+    fee_status = models.CharField(max_length=50, choices=FEE_STATUS_CHOICES, default="UNPAID")
+    scholarship = models.CharField(max_length=200, null=True, blank=True)
+
+    is_hosteller = models.BooleanField(default=False)
+    hostel_name = models.CharField(max_length=100, null=True, blank=True)
+    room_number = models.CharField(max_length=20, null=True, blank=True)
+
     is_active = models.BooleanField(default=True)
-    status = models.CharField(
-        max_length=20,
-        choices=[
-            ("enrolled", "Enrolled"),
-            ("on_leave", "On Leave"),
-            ("suspended", "Suspended"),
-            ("graduated", "Graduated"),
-            ("dropout", "Dropout"),
-        ],
-        default="enrolled",
-    )
+    last_login = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     # User Account
     user = models.OneToOneField(
@@ -649,23 +554,22 @@ class Student(models.Model):
         related_name="student_profile",
     )
 
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
     class Meta:
         db_table = "students"
-        unique_together = [["organization", "roll_number"]]
         indexes = [
-            models.Index(
-                fields=["organization", "current_semester", "is_active"],
-                name="stu_org_sem_idx",
-            ),
-            models.Index(fields=["batch"], name="stu_batch_idx"),
-            models.Index(fields=["user"], name="stu_user_idx"),
+            models.Index(fields=["organization"], name="idx_student_org"),
+            models.Index(fields=["department"], name="idx_student_dept"),
+            models.Index(fields=["program"], name="idx_student_program"),
+            models.Index(fields=["enrollment_number"], name="idx_student_enrollment"),
+            models.Index(fields=["username"], name="idx_student_username"),
+            models.Index(fields=["email"], name="idx_student_email"),
+            models.Index(fields=["batch_name"], name="idx_student_batch"),
+            models.Index(fields=["is_active"], name="idx_student_active"),
+            models.Index(fields=["current_year", "current_semester"], name="idx_student_year_semester"),
         ]
 
     def __str__(self):
-        return f"{self.roll_number} - {self.student_name}"
+        return f"{self.roll_number} - {self.first_name} {self.last_name}"
 
 
 # ============================================
@@ -688,25 +592,17 @@ class User(AbstractUser):
         ("staff", "Administrative Staff"),
     ]
 
-    user_id = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_column='user_id')
     organization = models.ForeignKey(
         Organization,
         on_delete=models.CASCADE,
         related_name="users",
         null=True,
         blank=True,
+        db_column='org_id',
     )
 
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="student")
-
-    # Allow multiple organizations for super admins
-    can_access_multiple_orgs = models.BooleanField(default=False)
-
-    phone = models.CharField(max_length=20, null=True, blank=True)
-    profile_picture = models.URLField(null=True, blank=True)
-
-    last_login_ip = models.GenericIPAddressField(null=True, blank=True)
-    login_count = models.IntegerField(default=0)
 
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -732,71 +628,55 @@ class User(AbstractUser):
 # ============================================
 
 
-class Classroom(models.Model):
-    """
-    Classrooms and Labs
-    70+ venues per large campus
-    """
-
-    ROOM_TYPE_CHOICES = [
-        ("lecture_hall", "Lecture Hall"),
-        ("seminar_hall", "Seminar Hall"),
-        ("tutorial_room", "Tutorial Room"),
-        ("laboratory", "Laboratory"),
-        ("auditorium", "Auditorium"),
-        ("smart_classroom", "Smart Classroom"),
-    ]
-
-    classroom_id = models.UUIDField(
-        primary_key=True, default=uuid.uuid4, editable=False
-    )
-    organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="classrooms"
-    )
-    campus = models.ForeignKey(
-        Campus, on_delete=models.CASCADE, related_name="classrooms"
-    )
-    department = models.ForeignKey(
-        Department,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="classrooms",
-    )
-
-    classroom_code = models.CharField(max_length=20)  # e.g., 'LH-101', 'CSL-201'
-    building_name = models.CharField(max_length=100)
-    floor_number = models.IntegerField()
-
-    room_type = models.CharField(max_length=20, choices=ROOM_TYPE_CHOICES)
+class Room(models.Model):
+    """Rooms table (renamed from Classroom)"""
+    
+    room_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="rooms", db_column='org_id')
+    building = models.ForeignKey(Building, on_delete=models.CASCADE, related_name="rooms", db_column='building_id')
+    department = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True, related_name="rooms", db_column='dept_id')
+    
+    room_code = models.CharField(max_length=50)
+    room_number = models.CharField(max_length=50)
+    room_name = models.CharField(max_length=200, null=True, blank=True)
+    floor_number = models.IntegerField(null=True, blank=True)
+    room_type = models.CharField(max_length=50)
     seating_capacity = models.IntegerField()
-
-    # Facilities
-    has_projector = models.BooleanField(default=False)
-    has_ac = models.BooleanField(default=False)
-    has_smart_board = models.BooleanField(default=False)
-    has_lab_equipment = models.BooleanField(default=False)
-    has_computers = models.BooleanField(default=False)
-    computer_count = models.IntegerField(null=True, blank=True)
-
-    is_available = models.BooleanField(default=True)
-
+    exam_capacity = models.IntegerField(null=True, blank=True)
+    
+    features = models.JSONField(null=True, blank=True)
+    equipment_description = models.TextField(null=True, blank=True)
+    number_of_computers = models.IntegerField(null=True, blank=True)
+    specialized_software = models.JSONField(null=True, blank=True)
+    
+    is_accessible_for_disabled = models.BooleanField(null=True, blank=True)
+    has_lift_access = models.BooleanField(null=True, blank=True)
+    allow_cross_department_usage = models.BooleanField(null=True, blank=True)
+    priority_department_id = models.UUIDField(null=True, blank=True)
+    is_bookable = models.BooleanField(null=True, blank=True)
+    
+    maintenance_schedule = models.TextField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    last_maintenance_date = models.DateField(null=True, blank=True)
+    next_maintenance_date = models.DateField(null=True, blank=True)
+    room_status = models.CharField(max_length=50, null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    
     class Meta:
-        db_table = "classrooms"
-        unique_together = [["organization", "classroom_code"]]
+        db_table = "rooms"
         indexes = [
-            models.Index(
-                fields=["organization", "room_type", "is_available"],
-                name="room_org_type_avail_idx",
-            ),
-            models.Index(fields=["campus"], name="room_campus_idx"),
+            models.Index(fields=["organization"], name="idx_room_org"),
+            models.Index(fields=["building"], name="idx_room_building"),
+            models.Index(fields=["room_code"], name="idx_room_code"),
         ]
-
+    
     def __str__(self):
-        return f"{self.classroom_code} - {self.building_name}"
+        return f"{self.room_code} - {self.room_name or self.room_number}"
+
+# Alias for backward compatibility
+Classroom = Room
 
 
 # ============================================
@@ -821,7 +701,7 @@ class TimeSlot(models.Model):
 
     timeslot_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(
-        Organization, on_delete=models.CASCADE, related_name="timeslots"
+        Organization, on_delete=models.CASCADE, related_name="timeslots", db_column='org_id'
     )
 
     day_of_week = models.CharField(max_length=10, choices=DAY_CHOICES)
@@ -859,79 +739,10 @@ class TimeSlot(models.Model):
 # ============================================
 
 
-class BatchSubjectEnrollment(models.Model):
-    """
-    Maps batches to subjects they must study
-    """
-
-    enrollment_id = models.UUIDField(
-        primary_key=True, default=uuid.uuid4, editable=False
-    )
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
-    batch = models.ForeignKey(
-        Batch, on_delete=models.CASCADE, related_name="subject_enrollments"
-    )
-    subject = models.ForeignKey(
-        Subject, on_delete=models.CASCADE, related_name="batch_enrollments"
-    )
-
-    is_mandatory = models.BooleanField(default=True)
-    enrolled_students = models.IntegerField()  # Count of students enrolled
-
-    academic_year = models.CharField(max_length=20)
-    semester = models.IntegerField()
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "batch_subject_enrollments"
-        unique_together = [["batch", "subject", "academic_year", "semester"]]
-        indexes = [
-            models.Index(fields=["organization", "semester"], name="bse_org_sem_idx"),
-            models.Index(fields=["batch"], name="bse_batch_idx"),
-        ]
-
-    def __str__(self):
-        return f"{self.batch.batch_name} → {self.subject.subject_code}"
+# BatchSubjectEnrollment removed - not in database
 
 
-class StudentElectiveChoice(models.Model):
-    """
-    Student elective subject choices
-    """
-
-    choice_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
-    student = models.ForeignKey(
-        Student, on_delete=models.CASCADE, related_name="elective_choices"
-    )
-    subject = models.ForeignKey(
-        Subject, on_delete=models.CASCADE, related_name="student_choices"
-    )
-
-    semester = models.IntegerField()
-    choice_priority = models.IntegerField(default=1)  # 1st choice, 2nd choice, etc.
-
-    is_approved = models.BooleanField(default=False)
-    approved_by = models.ForeignKey(
-        Faculty, on_delete=models.SET_NULL, null=True, blank=True
-    )
-    approved_at = models.DateTimeField(null=True, blank=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        db_table = "student_elective_choices"
-        unique_together = [["student", "subject", "semester"]]
-        indexes = [
-            models.Index(
-                fields=["organization", "semester", "is_approved"],
-                name="elec_org_sem_appr_idx",
-            ),
-        ]
-
-    def __str__(self):
-        return f"{self.student.roll_number} → {self.subject.subject_code}"
+# StudentElectiveChoice removed - not in database
 
 
 # ============================================
@@ -939,47 +750,13 @@ class StudentElectiveChoice(models.Model):
 # ============================================
 
 
-class TimetablePreferences(models.Model):
-    """
-    Organization-specific timetable generation preferences
-    """
-
-    pref_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    organization = models.OneToOneField(
-        Organization, on_delete=models.CASCADE, related_name="timetable_preferences"
-    )
-
-    max_classes_per_day = models.IntegerField(default=6)
-    max_consecutive_classes = models.IntegerField(default=3)
-    min_break_duration_minutes = models.IntegerField(default=15)
-
-    lunch_break_start = models.TimeField()
-    lunch_break_end = models.TimeField()
-
-    working_days_per_week = models.IntegerField(default=6)
-    class_duration_minutes = models.IntegerField(default=60)
-
-    allow_saturday_classes = models.BooleanField(default=True)
-    allow_back_to_back_labs = models.BooleanField(default=False)
-
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "timetable_preferences"
-
-    def __str__(self):
-        return f"Preferences - {self.organization.org_code}"
+# TimetablePreferences removed - not in database
 
 
 # ============================================
 # BACKWARD COMPATIBILITY ALIASES
 # ============================================
-# These aliases allow old code to continue working
-# while we migrate to the new multi-tenant architecture
-
-# Create aliases for commonly used model names
-Course = Program  # Old 'Course' is now 'Program'
-Lab = Classroom  # Old 'Lab' is part of 'Classroom' (room_type='lab')
+Lab = Room  # Labs are rooms with room_type='laboratory'
 
 
 # ============================================
@@ -1039,16 +816,13 @@ class TimetableSlot(models.Model):
     """Individual timetable slots (legacy)"""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    timetable = models.ForeignKey(
-        Timetable, on_delete=models.CASCADE, related_name="slots"
-    )
+    timetable = models.ForeignKey(Timetable, on_delete=models.CASCADE, related_name="slots")
     day = models.CharField(max_length=10)
     start_time = models.TimeField()
     end_time = models.TimeField()
-    subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
+    subject = models.ForeignKey(Course, on_delete=models.CASCADE)
     faculty = models.ForeignKey(Faculty, on_delete=models.CASCADE)
-    batch = models.ForeignKey(Batch, on_delete=models.CASCADE)
-    classroom = models.ForeignKey(Classroom, on_delete=models.CASCADE)
+    classroom = models.ForeignKey(Room, on_delete=models.CASCADE)
 
     class Meta:
         db_table = "timetable_slots"

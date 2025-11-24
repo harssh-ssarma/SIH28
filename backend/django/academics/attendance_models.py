@@ -4,7 +4,11 @@ Enhanced Attendance Management Models with RBAC and Audit Logging
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
-from .models import Batch, Course, Department, Faculty, Student, Subject
+from .models import Batch, Course, Department, Faculty, Room, Student
+
+# Alias for backward compatibility
+Subject = Course
+Classroom = Room
 
 
 class SubjectEnrollment(models.Model):

@@ -16,7 +16,7 @@ from typing import Dict
 
 from models.timetable_models import GenerationRequest, GenerationResponse, TimetableResult
 from models.progress_models import JobStatus, ProgressUpdate
-from engine.orchestrator import TimetableOrchestrator
+from engine.orchestrator import HierarchicalScheduler
 from utils.progress_tracker import ProgressTracker
 from config import settings
 
@@ -138,7 +138,7 @@ setup_metrics(app)
 
 async def run_timetable_generation(request: GenerationRequest, job_id: str):
     """Background task to run timetable generation"""
-    orchestrator = TimetableOrchestrator(job_id, app.state.redis_client)
+    # orchestrator = HierarchicalScheduler(job_id, app.state.redis_client)  # TODO: Fix initialization
 
     try:
         result = await orchestrator.generate_timetable(

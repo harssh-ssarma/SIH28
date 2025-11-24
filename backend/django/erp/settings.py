@@ -80,7 +80,6 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "rest_framework_simplejwt",
-    "rest_framework_simplejwt.token_blacklist",  # JWT token blacklisting
     "drf_spectacular",
     "corsheaders",
     "django_filters",
@@ -138,6 +137,7 @@ if os.getenv("DATABASE_URL"):
             conn_health_checks=True,
         )
     }
+    DATABASES["default"]["ATOMIC_REQUESTS"] = True
 else:
     DATABASES = {
         "default": {
@@ -395,8 +395,8 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),     # 7 days with rotation
     
     # Token Rotation & Blacklisting (CRITICAL for security)
-    "ROTATE_REFRESH_TOKENS": True,              # Generate new refresh token on each refresh
-    "BLACKLIST_AFTER_ROTATION": True,           # Blacklist old refresh tokens immediately
+    "ROTATE_REFRESH_TOKENS": False,              # Disabled due to UUID user_id
+    "BLACKLIST_AFTER_ROTATION": False,           # Disabled due to UUID user_id
     "UPDATE_LAST_LOGIN": True,
     
     # Encryption & Signing

@@ -16,6 +16,8 @@ python-decouple==3.8
 dj-database-url==2.2.0
 Pillow==10.4.0
 celery==5.3.6
+kombu==5.3.4  # Celery messaging library
+celery-progress==0.3  # Progress tracking for Celery tasks
 openpyxl==3.1.5
 xlrd==2.0.1
 
@@ -41,6 +43,8 @@ sentry-sdk==2.19.2
 python-jose[cryptography]==3.3.0
 setuptools>=65.0.0
 psutil==6.1.0  # System resource monitoring for adaptive parallelism
+gevent==23.9.1  # Async worker pool for Celery (optional)
+eventlet==0.33.3  # Alternative async pool for Celery (optional)
 
 # Phase 1: Real-Time Progress & WebSocket
 websockets==12.0  # Already present, keeping for clarity

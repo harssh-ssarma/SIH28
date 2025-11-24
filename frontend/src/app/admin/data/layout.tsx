@@ -6,10 +6,8 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const tabs = [
-  { id: 'classrooms', label: 'Classrooms', href: '/admin/data/classrooms' },
-  { id: 'labs', label: 'Labs', href: '/admin/data/labs' },
-  { id: 'subjects', label: 'Subjects', href: '/admin/data/subjects' },
-  { id: 'batches', label: 'Batches', href: '/admin/data/batches' },
+  { id: 'rooms', label: 'Rooms', href: '/admin/data/rooms' },
+  { id: 'courses', label: 'Courses', href: '/admin/data/courses' },
 ]
 
 export default function DataLayout({ children }: { children: React.ReactNode }) {

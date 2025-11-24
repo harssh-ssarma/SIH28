@@ -13,8 +13,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     if (!isLoading) {
       if (!user) {
         router.push('/login')
-      } else if (user.role !== 'admin' && user.role !== 'org_admin') {
-        router.push('/unauthorized')
+      } else {
+        const role = user.role.toLowerCase()
+        if (role !== 'admin' && role !== 'org_admin') {
+          router.push('/unauthorized')
+        }
       }
     }
   }, [user, isLoading, router])
@@ -27,7 +30,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     )
   }
 
-  if (!user || (user.role !== 'admin' && user.role !== 'org_admin')) {
+  if (!user) {
+    return null
+  }
+
+  const role = user.role.toLowerCase()
+  if (role !== 'admin' && role !== 'org_admin') {
     return null
   }
 

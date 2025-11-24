@@ -36,8 +36,9 @@ export default function LoginPage() {
       if (userData) {
         const user = JSON.parse(userData)
 
-        // Redirect based on user role
-        switch (user.role) {
+        // Redirect based on user role (case-insensitive)
+        const role = user.role.toLowerCase()
+        switch (role) {
           case 'admin':
           case 'org_admin':
             router.push('/admin/dashboard')

@@ -331,43 +331,41 @@ class ApiClient {
     });
   }
 
-  // Batches
-  async getBatches() {
-    return this.request<any>('/batches/');
+  // Rooms (renamed from Classrooms)
+  async getRooms() {
+    return this.request<any>('/rooms/');
   }
 
-  async getBatch(id: string) {
-    return this.request<any>(`/batches/${id}/`);
+  async getRoom(id: string) {
+    return this.request<any>(`/rooms/${id}/`);
   }
 
-  // Classrooms
-  async getClassrooms() {
-    return this.request<any>('/classrooms/');
-  }
-
-  async getClassroom(id: string) {
-    return this.request<any>(`/classrooms/${id}/`);
-  }
-
-  async createClassroom(classroomData: any) {
-    return this.request<any>('/classrooms/', {
+  async createRoom(roomData: any) {
+    return this.request<any>('/rooms/', {
       method: 'POST',
-      body: JSON.stringify(classroomData),
+      body: JSON.stringify(roomData),
     });
   }
 
-  async updateClassroom(id: string, classroomData: any) {
-    return this.request<any>(`/classrooms/${id}/`, {
+  async updateRoom(id: string, roomData: any) {
+    return this.request<any>(`/rooms/${id}/`, {
       method: 'PUT',
-      body: JSON.stringify(classroomData),
+      body: JSON.stringify(roomData),
     });
   }
 
-  async deleteClassroom(id: string) {
-    return this.request<any>(`/classrooms/${id}/`, {
+  async deleteRoom(id: string) {
+    return this.request<any>(`/rooms/${id}/`, {
       method: 'DELETE',
     });
   }
+
+  // Backward compatibility aliases
+  async getClassrooms() { return this.getRooms(); }
+  async getClassroom(id: string) { return this.getRoom(id); }
+  async createClassroom(data: any) { return this.createRoom(data); }
+  async updateClassroom(id: string, data: any) { return this.updateRoom(id, data); }
+  async deleteClassroom(id: string) { return this.deleteRoom(id); }
 
   // Labs
   async getLabs() {
