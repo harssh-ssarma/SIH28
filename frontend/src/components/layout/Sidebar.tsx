@@ -20,11 +20,11 @@ const getNavigationItems = (role: string) => {
     case 'admin':
       return [
         ...baseItems,
-        { name: 'Admin Users', href: '/admin/users', icon: '👨‍💼' },
+        { name: 'Admin', href: '/admin/admin', icon: '👨‍💼' },
         { name: 'Faculty', href: '/admin/faculty', icon: '👨‍🏫' },
         { name: 'Students', href: '/admin/students', icon: '🎓' },
         { name: 'Attendance', href: '/admin/attendance', icon: '📝' },
-        { name: 'Master Data', href: '/admin/data/classrooms', icon: '🗂️' },
+        { name: 'academic', href: '/admin/academic/rooms', icon: '🗂️' },
         { name: 'Timetables', href: '/admin/timetables', icon: '📅' },
         { name: 'Approvals', href: '/admin/approvals', icon: '✅' },
         { name: 'Settings', href: '/admin/settings', icon: '⚙️' },
