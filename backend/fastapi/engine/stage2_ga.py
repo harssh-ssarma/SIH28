@@ -74,8 +74,24 @@ class GeneticAlgorithmOptimizer:
         self.faculty = faculty
         self.students = students
         self.initial_solution = initial_solution
-        self.population_size = population_size
-        self.generations = generations
+        # Limit population size to prevent RAM exhaustion
+        import psutil
+        mem = psutil.virtual_memory()
+        available_gb = mem.available / (1024**3)
+        
+        # Adaptive population size based on available RAM
+        if available_gb < 3.0:
+            self.population_size = min(population_size, 10)
+            self.generations = min(generations, 15)
+            logger.warning(f"Low RAM ({available_gb:.1f}GB), reducing pop={self.population_size}, gen={self.generations}")
+        elif available_gb < 5.0:
+            self.population_size = min(population_size, 15)
+            self.generations = min(generations, 20)
+            logger.info(f"Medium RAM ({available_gb:.1f}GB), pop={self.population_size}, gen={self.generations}")
+        else:
+            self.population_size = population_size
+            self.generations = generations
+            logger.info(f"Good RAM ({available_gb:.1f}GB), pop={self.population_size}, gen={self.generations}")
         self.mutation_rate = mutation_rate
         self.crossover_rate = crossover_rate
         self.elitism_rate = elitism_rate
@@ -84,15 +100,11 @@ class GeneticAlgorithmOptimizer:
         self.fitness_cache = {}  # Fitness caching
         self.max_cache_size = 500  # Limit cache to prevent memory explosion
         
-        # Hardware-adaptive configuration with FORCED GPU usage
-        # GPU threshold: population * courses >= 200 (batching benefit)
-        gpu_threshold = population_size * len(courses) >= 200
-        
-        # FORCE GPU if available and threshold met, otherwise CPU
-        if TORCH_AVAILABLE and gpu_threshold:
+        # Hardware-adaptive configuration - ALWAYS use GPU if available
+        if TORCH_AVAILABLE:
             self.use_gpu = True
             self.use_multicore = False
-            logger.info(f"🚀 FORCING GPU acceleration (pop={population_size}, courses={len(courses)})")
+            logger.info(f"🚀 GPU acceleration ENABLED (pop={population_size}, courses={len(courses)})")
             try:
                 self._init_gpu_tensors()
             except Exception as e:
@@ -102,10 +114,7 @@ class GeneticAlgorithmOptimizer:
         else:
             self.use_gpu = False
             self.use_multicore = len(courses) > 50
-            if not TORCH_AVAILABLE:
-                logger.info(f"GPU not available, using CPU")
-            else:
-                logger.info(f"GPU threshold not met (pop*courses={population_size * len(courses)} < 200), using CPU")
+            logger.info(f"GPU not available, using CPU (multicore={self.use_multicore})")
         
         self.use_island_model = False  # Set externally
         

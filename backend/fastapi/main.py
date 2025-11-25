@@ -162,7 +162,8 @@ class TimetableGenerationSaga:
         global hardware_profile, adaptive_executor
         logger.info("[HARDWARE] Detecting current system state...")
         hardware_profile = get_hardware_profile(force_refresh=True)
-        adaptive_executor = await get_adaptive_executor()
+        # Don't call get_adaptive_executor() - it will detect hardware again
+        # adaptive_executor is already initialized or will be created when needed
         logger.info(f"[HARDWARE] Available RAM: {hardware_profile.available_ram_gb:.1f}GB")
         if hardware_profile.has_nvidia_gpu:
             logger.info(f"[HARDWARE] ✅ GPU: {hardware_profile.gpu_memory_gb:.1f}GB VRAM")
