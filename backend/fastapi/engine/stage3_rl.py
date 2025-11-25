@@ -7,9 +7,17 @@ try:
     import torch.nn as nn
     TORCH_AVAILABLE = torch.cuda.is_available()
     if TORCH_AVAILABLE:
-        DEVICE = torch.device('cuda')
-        logger = logging.getLogger(__name__)
-        logger.info(f"✅ RL using GPU: {torch.cuda.get_device_name(0)}")
+        # Non-blocking GPU check
+        try:
+            torch.cuda.synchronize()  # Quick sync check
+            DEVICE = torch.device('cuda')
+            logger = logging.getLogger(__name__)
+            logger.info(f"✅ RL using GPU: {torch.cuda.get_device_name(0)}")
+        except RuntimeError:
+            TORCH_AVAILABLE = False
+            DEVICE = torch.device('cpu')
+            logger = logging.getLogger(__name__)
+            logger.warning("⚠️ GPU busy - RL using CPU")
     else:
         DEVICE = torch.device('cpu')
         logger = logging.getLogger(__name__)

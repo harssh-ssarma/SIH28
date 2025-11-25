@@ -35,9 +35,9 @@ websockets==12.0
 torch>=2.6.0
 
 # Hardware-Adaptive System Extensions
-scipy==1.11.4
-deap==1.4.1  # Genetic Algorithm
-aiohttp==3.9.1  # Async HTTP client
+scipy>=1.11.0  # Use prebuilt wheel (no compiler needed)
+deap>=1.4.0  # Genetic Algorithm (prebuilt wheel)
+aiohttp>=3.9.0  # Async HTTP client (prebuilt wheel)
 py-cpuinfo==9.0.0  # CPU detection
 joblib==1.3.2  # Parallel processing
 multiprocess==0.70.15  # Process isolation
@@ -62,7 +62,7 @@ tqdm==4.66.1  # Progress bars
 pulp>=2.7.0  # Linear programming
 
 # Time series
-pandas==2.1.4
+pandas>=2.1.0  # Use prebuilt wheel
 pytz==2023.3
 
 # Shared Dependencies

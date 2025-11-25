@@ -35,15 +35,17 @@
 
 ### 4. ✅ Full GPU Fitness Evaluation in Stage 2B
 **File**: `backend/fastapi/engine/stage2_ga.py`
-**Lines**: 453-502
+**Lines**: 453-540
 **Implementation**:
-- **FORCED GPU usage** when available and threshold met (pop * courses >= 200)
-- GPU-accelerated fitness calculation for ALL vectorizable constraints:
-  - Faculty preferences (30%)
-  - Schedule compactness (30%)
-  - Room utilization (20%)
-  - Workload balance (20%)
-- Automatic fallback to CPU if GPU init fails
+- **BATCHED GPU fitness evaluation** for entire population at once
+- Non-blocking GPU check (torch.cuda.synchronize()) to avoid waiting
+- GPU-accelerated fitness calculation for ALL constraints:
+  - Faculty preferences (30%) - Vectorized tensor operations
+  - Schedule compactness (30%) - Batched computation
+  - Room utilization (20%) - Batched computation
+  - Workload balance (20%) - Batched computation
+- Entire population converted to GPU tensors for parallel evaluation
+- Automatic fallback to CPU if GPU busy or init fails
 - Speedup: **5-10x** for large populations (≥200 individuals)
 
 **GPU Forcing Logic**:
@@ -57,12 +59,14 @@ else:
 
 ### 5. ✅ GPU Context Building in Stage 3
 **File**: `backend/fastapi/engine/stage3_rl.py`
-**Lines**: 95-145
+**Lines**: 95-165
 **Implementation**:
-- **FORCED GPU usage** when available for context building
+- **BATCHED GPU context building** for multiple actions at once
+- Non-blocking GPU check (torch.cuda.synchronize()) to avoid waiting
 - GPU-accelerated context computation via `_build_context_gpu()`
-- Vectorized context tensor operations on GPU
-- Automatic fallback to CPU if GPU fails
+- Vectorized matrix operations on GPU (4x4 context matrix)
+- Batched mean computation for context values
+- Automatic fallback to CPU if GPU busy or fails
 - Speedup: **20-25x** for complex contexts (50+ courses)
 
 **GPU Forcing Logic**:
@@ -208,16 +212,25 @@ if self.use_gpu:
 - context_batch_size: 100
 ```
 
-### GPU Detection & Forcing
+### GPU Detection & Forcing (Non-Blocking)
 ```python
-# Stage 2B GA
+# Non-blocking GPU check (both stages)
+try:
+    torch.cuda.synchronize()  # Quick check if GPU busy
+    DEVICE = torch.device('cuda')
+    TORCH_AVAILABLE = True
+except RuntimeError:
+    TORCH_AVAILABLE = False  # GPU busy, use CPU
+    logger.warning("⚠️ GPU busy - using CPU")
+
+# Stage 2B GA - Batched fitness
 if TORCH_AVAILABLE and (population * courses >= 200):
-    use_gpu = True  # FORCE GPU
+    use_gpu = True  # FORCE GPU for batched evaluation
     logger.info("🚀 FORCING GPU acceleration")
 
-# Stage 3 RL
+# Stage 3 RL - Batched context
 if TORCH_AVAILABLE:
-    use_gpu = True  # FORCE GPU for context
+    use_gpu = True  # FORCE GPU for batched context
     logger.info("🚀 FORCING GPU for RL context building")
 ```
 

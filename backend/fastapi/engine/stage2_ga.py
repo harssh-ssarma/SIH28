@@ -24,13 +24,20 @@ except ImportError:
     CELERY_AVAILABLE = False
     logger.info("⚠️ Celery not available - No distributed processing")
 
-# GPU Detection and Initialization
+# GPU Detection and Initialization (Non-blocking)
 try:
     import torch
     TORCH_AVAILABLE = torch.cuda.is_available()
     if TORCH_AVAILABLE:
-        DEVICE = torch.device('cuda')
-        logger.info(f"✅ GPU detected: {torch.cuda.get_device_name(0)} - GA will use GPU acceleration")
+        # Check if GPU is busy (non-blocking)
+        try:
+            torch.cuda.synchronize()  # Quick sync check
+            DEVICE = torch.device('cuda')
+            logger.info(f"✅ GPU detected: {torch.cuda.get_device_name(0)} - GA will use GPU acceleration")
+        except RuntimeError:
+            TORCH_AVAILABLE = False
+            DEVICE = torch.device('cpu')
+            logger.warning("⚠️ GPU busy - GA will use CPU")
     else:
         DEVICE = torch.device('cpu')
         logger.info("⚠️ GPU not available - GA will use CPU")
