@@ -225,14 +225,25 @@ def get_progress(request, job_id):
         from .models import GenerationJob
         import json
         
-        # Try Redis first
-        progress_key = f"progress:job:{job_id}"
-        progress_data = cache.get(progress_key)
+        # Try Redis first - use raw Redis client to bypass Django's key prefix
+        import redis
+        from django.conf import settings
+        
+        try:
+            redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+            progress_key = f"progress:job:{job_id}"
+            progress_data = redis_client.get(progress_key)
+        except Exception as e:
+            logger.error(f"Redis direct access failed: {e}")
+            progress_data = None
         
         if progress_data:
-            if isinstance(progress_data, str):
-                progress_data = json.loads(progress_data)
-            return Response(progress_data)
+            try:
+                parsed_data = json.loads(progress_data) if isinstance(progress_data, str) else progress_data
+                logger.info(f"Progress from Redis for {job_id}: {parsed_data}")
+                return Response(parsed_data)
+            except Exception as e:
+                logger.error(f"Error parsing Redis progress data: {e}")
         
         # Fallback to database
         try:
@@ -242,17 +253,22 @@ def get_progress(request, job_id):
                 'progress': job.progress,
                 'status': job.status,
                 'message': job.error_message or f'Status: {job.status}',
-                'stage': job.status
+                'stage': job.status,
+                'time_remaining_seconds': None,
+                'eta': None
             })
         except GenerationJob.DoesNotExist:
             return Response(
                 {
                     'job_id': job_id,
                     'progress': 0,
-                    'status': 'not_found',
-                    'message': 'Job not found'
+                    'status': 'queued',
+                    'message': 'Job queued, waiting for FastAPI...',
+                    'stage': 'queued',
+                    'time_remaining_seconds': None,
+                    'eta': None
                 },
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_200_OK
             )
         
     except Exception as e:

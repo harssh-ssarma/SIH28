@@ -335,4 +335,18 @@
   .animate-slide-in {
     animation: slide-in 0.3s ease-out;
   }
+
+  /* Windows-style Progress Bar Shimmer */
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  .animate-shimmer {
+    animation: shimmer 2s ease-in-out infinite;
+  }
 }

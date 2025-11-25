@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import {
   fetchTimetableWorkflows,
@@ -10,18 +12,33 @@ import {
 } from '@/lib/api/timetable'
 import type { TimetableListItem, FacultyAvailability } from '@/types/timetable'
 
+interface RunningJob {
+  job_id: string
+  progress: number
+  status: string
+  message: string
+  time_remaining_seconds?: number | null
+}
+
 export default function AdminTimetablesPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [timetables, setTimetables] = useState<TimetableListItem[]>([])
   const [facultyAvailability, setFacultyAvailability] = useState<FacultyAvailability[]>([])
+  const [runningJobs, setRunningJobs] = useState<RunningJob[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const { user } = useAuth()
+  const router = useRouter()
+  const API_BASE = process.env.NEXT_PUBLIC_DJANGO_API_URL || 'http://localhost:8000/api'
 
   useEffect(() => {
     loadTimetableData()
     loadFacultyData()
+    loadRunningJobs()
+    
+    const interval = setInterval(loadRunningJobs, 3000)
+    return () => clearInterval(interval)
   }, [])
 
   const loadTimetableData = async () => {
@@ -46,7 +63,6 @@ export default function AdminTimetablesPage() {
 
   const loadFacultyData = async () => {
     try {
-      // Get department_id and organization_id from authenticated user
       const faculty = await fetchFacultyAvailability({
         department_id: user?.department,
         organization_id: user?.organization,
@@ -54,8 +70,49 @@ export default function AdminTimetablesPage() {
       setFacultyAvailability(faculty)
     } catch (err) {
       console.error('Failed to load faculty:', err)
-      // Don't set error state for faculty - it's not critical
       setFacultyAvailability([])
+    }
+  }
+
+  const loadRunningJobs = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/generation-jobs/?status=running,queued`, {
+        credentials: 'include',
+      })
+      if (response.ok) {
+        const jobs = await response.json()
+        const jobsWithProgress = await Promise.all(
+          jobs.map(async (job: any) => {
+            try {
+              const progressRes = await fetch(`${API_BASE}/progress/${job.id}/`, {
+                credentials: 'include',
+              })
+              if (progressRes.ok) {
+                const progressData = await progressRes.json()
+                return {
+                  job_id: job.id,
+                  progress: progressData.progress || 0,
+                  status: progressData.status || 'running',
+                  message: progressData.message || 'Processing...',
+                  time_remaining_seconds: progressData.time_remaining_seconds,
+                }
+              }
+            } catch (e) {
+              console.error('Failed to fetch progress:', e)
+            }
+            return {
+              job_id: job.id,
+              progress: 0,
+              status: 'running',
+              message: 'Processing...',
+              time_remaining_seconds: null,
+            }
+          })
+        )
+        setRunningJobs(jobsWithProgress.filter(j => j.status === 'running' || j.status === 'queued'))
+      }
+    } catch (err) {
+      console.error('Failed to load running jobs:', err)
     }
   }
 
@@ -175,9 +232,62 @@ export default function AdminTimetablesPage() {
 
   return (
       <div className="space-y-6">
+        {/* Running Jobs Banner */}
+        {runningJobs.length > 0 && (
+          <div className="card bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+            <div className="card-header">
+              <h3 className="font-semibold text-blue-900 dark:text-blue-100">🔄 Generation in Progress</h3>
+            </div>
+            <div className="space-y-3">
+              {runningJobs.map((job) => (
+                <div key={job.job_id} className="p-4 bg-white dark:bg-gray-800 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                      {job.message}
+                    </span>
+                    <button
+                      onClick={() => router.push(`/admin/timetables/status/${job.job_id}`)}
+                      className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                    >
+                      View Details →
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
+                      <span>{job.progress}%</span>
+                      {job.time_remaining_seconds && job.time_remaining_seconds > 0 && (
+                        <span>
+                          {Math.floor(job.time_remaining_seconds / 60)}m {job.time_remaining_seconds % 60}s remaining
+                        </span>
+                      )}
+                    </div>
+                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden relative">
+                      <div
+                        className="h-2 rounded-full transition-all duration-500 relative overflow-hidden"
+                        style={{ 
+                          width: `${job.progress}%`,
+                          background: 'linear-gradient(90deg, #1976D2 0%, #2196F3 50%, #42A5F5 100%)'
+                        }}
+                      >
+                        <div
+                          className="absolute inset-0 animate-shimmer"
+                          style={{
+                            background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%)',
+                            backgroundSize: '200% 100%',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-end">
           <div className="flex flex-col sm:flex-row gap-3 ml-auto">
-            <a
+            <Link
               href="/admin/timetables/new"
               className="btn-primary flex items-center justify-center gap-2"
             >
@@ -191,7 +301,7 @@ export default function AdminTimetablesPage() {
               </svg>
               <span className="hidden sm:inline">Generate New Timetable</span>
               <span className="sm:hidden">Generate</span>
-            </a>
+            </Link>
           </div>
         </div>
 
@@ -242,9 +352,9 @@ export default function AdminTimetablesPage() {
                 <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mb-4 sm:mb-6 px-4">
                   No timetables have been created yet.
                 </p>
-                <a href="/admin/timetables/new" className="btn-primary">
+                <Link href="/admin/timetables/new" className="btn-primary">
                   Create First Timetable
-                </a>
+                </Link>
               </div>
             </div>
           ) : (
@@ -272,9 +382,9 @@ export default function AdminTimetablesPage() {
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 sm:gap-4">
                       {semesterTimetables
-                        .sort((a, b) => a.department.localeCompare(b.department))
+                        .sort((a, b) => (a.department || '').localeCompare(b.department || ''))
                         .map(timetable => (
-                          <a
+                          <Link
                             key={timetable.id}
                             href={`/admin/timetables/${timetable.id}/review`}
                             className="block p-3 sm:p-4 bg-white dark:bg-[#1E1E1E] border border-[#E0E0E0] dark:border-[#2A2A2A] rounded-lg hover:border-[#2196F3] dark:hover:border-[#2196F3] transition-colors"
@@ -333,12 +443,13 @@ export default function AdminTimetablesPage() {
                                 👁️ View Details →
                               </span>
                             </div>
-                          </a>
+                          </Link>
                         ))}
                     </div>
                   </div>
                 )
               })
+          )}
             </div>
           </div>
 

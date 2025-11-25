@@ -210,7 +210,7 @@ export default function AdminDashboard() {
 
         <div
           className="card clickable-card"
-          onClick={() => (window.location.href = '/admin/approvals')}
+          onClick={() => router.push('/admin/approvals')}
         >
           <div className="flex items-center justify-between">
             <div className="flex-1 min-w-0">

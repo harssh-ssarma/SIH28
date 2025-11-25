@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 
 interface ProgressTrackerProps {
   jobId: string
@@ -12,11 +13,12 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState('queued')
   const [phase, setPhase] = useState('Initializing...')
-  const [eta, setEta] = useState<number | null>(null)
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const router = useRouter()
 
   const API_BASE = process.env.NEXT_PUBLIC_DJANGO_API_URL || 'http://localhost:8000/api'
   const reconnectAttemptsRef = useRef(0)
@@ -36,6 +38,7 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
           setProgress(data.progress || 0)
           setStatus(data.status || 'running')
           setPhase(data.stage || data.message || 'Processing...')
+          setTimeRemaining(data.time_remaining_seconds || null)
 
           if (data.status === 'completed') {
             if (pollInterval) clearInterval(pollInterval)
@@ -103,12 +106,12 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
             <div className="text-red-600 text-6xl">⚠️</div>
             <h3 className="text-xl font-semibold text-red-600">Generation Failed</h3>
             <p className="text-sm text-gray-700 bg-red-50 p-4 rounded border border-red-200">{error}</p>
-            <a
-              href="/admin/timetables"
+            <button
+              onClick={() => router.push('/admin/timetables')}
               className="inline-block px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
             >
               Back to Timetables
-            </a>
+            </button>
           </div>
         ) : (
           <>
@@ -122,17 +125,28 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
             <span className="font-medium">{status}</span>
             <span className="text-gray-600">{progress}%</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden relative">
             <div
-              className="bg-blue-600 h-full transition-all duration-500 ease-out"
-              style={{ width: `${progress}%` }}
-            />
+              className="h-full transition-all duration-500 ease-out relative overflow-hidden"
+              style={{ 
+                width: `${progress}%`,
+                background: 'linear-gradient(90deg, #1976D2 0%, #2196F3 50%, #42A5F5 100%)'
+              }}
+            >
+              <div
+                className="absolute inset-0 animate-shimmer"
+                style={{
+                  background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%)',
+                  backgroundSize: '200% 100%',
+                }}
+              />
+            </div>
           </div>
         </div>
 
-        {eta && (
+        {timeRemaining && timeRemaining > 0 && (
           <p className="text-center text-sm text-gray-500">
-            Estimated time remaining: {Math.ceil(eta / 60)} minutes
+            Estimated time remaining: {Math.floor(timeRemaining / 60)}m {timeRemaining % 60}s
           </p>
         )}
 
@@ -141,12 +155,12 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
         </div>
 
             <div className="flex justify-center gap-4">
-              <a
-                href="/admin/timetables"
+              <button
+                onClick={() => router.push('/admin/timetables')}
                 className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
               >
                 Back to Timetables
-              </a>
+              </button>
               
               {status !== 'completed' && status !== 'failed' && status !== 'cancelled' && (
                 <button

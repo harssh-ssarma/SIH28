@@ -198,7 +198,7 @@ export default function AdminUsersPage() {
         <div className="text-center">
           <div className="text-4xl mb-4">⚠️</div>
           <p className="text-red-600 dark:text-red-400">{error}</p>
-          <button onClick={() => window.location.reload()} className="btn-primary mt-4">
+          <button onClick={() => fetchUsers()} className="btn-primary mt-4">
             Try Again
           </button>
         </div>

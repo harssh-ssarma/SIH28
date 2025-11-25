@@ -1,1 +1,1 @@
-from .timetable_config_models import TimetableConfiguration
+# Import models in apps.py ready() method to avoid circular imports

@@ -1,8 +1,11 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
 import DashboardLayout from '@/components/dashboard-layout'
 
 export default function StaffDashboard() {
+  const router = useRouter()
+  
   return (
     <DashboardLayout role="staff">
       <div className="space-y-4 md:space-y-6">
@@ -53,7 +56,7 @@ export default function StaffDashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-6">
           <div
             className="card hover:shadow-lg transition-shadow duration-300 cursor-pointer"
-            onClick={() => (window.location.href = '/staff/approvals')}
+            onClick={() => router.push('/staff/approvals')}
           >
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0">

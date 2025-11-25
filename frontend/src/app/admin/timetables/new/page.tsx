@@ -37,7 +37,7 @@ export default function CreateTimetablePage() {
 
   const loadLastConfig = async () => {
     try {
-      const response = await fetch(`${API_BASE}/academics/timetable-configs/last_used/`, {
+      const response = await fetch(`${API_BASE}/timetable-configs/last_used/`, {
         credentials: 'include',
       })
       if (response.ok) {
@@ -78,12 +78,32 @@ export default function CreateTimetablePage() {
       setIsGenerating(true)
       setError(null)
 
-      // Save configuration
-      await fetch(`${API_BASE}/academics/timetable-configs/`, {
+      // Save configuration - transform to Django format
+      const configPayload = {
+        config_name: `${formData.academic_year} - ${formData.semester}`,
+        academic_year: formData.academic_year,
+        semester: formData.semester === 'odd' ? 1 : 2,
+        working_days: formData.working_days,
+        slots_per_day: formData.slots_per_day,
+        start_time: formData.start_time,
+        end_time: formData.end_time,
+        slot_duration_minutes: 60,
+        lunch_break_enabled: formData.lunch_break_enabled,
+        lunch_break_start: formData.lunch_break_start,
+        lunch_break_end: formData.lunch_break_end,
+        max_classes_per_day: formData.max_classes_per_day,
+        faculty_max_continuous: formData.faculty_max_continuous,
+        optimization_priority: formData.optimization_priority,
+        minimize_faculty_travel: formData.minimize_travel,
+        number_of_variants: formData.number_of_variants,
+        timeout_minutes: Math.ceil(formData.timeout_seconds / 60),
+      }
+      
+      await fetch(`${API_BASE}/timetable-configs/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(formData),
+        body: JSON.stringify(configPayload),
       })
 
       // Start generation

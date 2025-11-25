@@ -19,7 +19,7 @@ import json
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import traceback
 from pydantic import BaseModel
 from typing import Optional, List
@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 # Global hardware profile and executor
 hardware_profile: Optional[HardwareProfile] = None
 adaptive_executor: Optional[AdaptiveExecutor] = None
+redis_client_global = None
 
 # Enterprise Patterns
 class CircuitBreaker:
@@ -305,7 +306,7 @@ class TimetableGenerationSaga:
         return weight
     
     def _optimize_cluster_sizes(self, partition, courses):
-        """Optimize cluster sizes for parallel processing"""
+        """Optimize cluster sizes for CP-SAT feasibility"""
         raw_clusters = {}
         for course_id, cluster_id in partition.items():
             if cluster_id not in raw_clusters:
@@ -314,28 +315,29 @@ class TimetableGenerationSaga:
             if course:
                 raw_clusters[cluster_id].append(course)
         
-        # Split large clusters and merge small ones
+        # CRITICAL: Smaller clusters for CP-SAT feasibility
         final_clusters = {}
         final_id = 0
         small_clusters = []
         
         for cluster_courses in raw_clusters.values():
-            if len(cluster_courses) > 100:  # Split large clusters
-                for i in range(0, len(cluster_courses), 80):
-                    final_clusters[final_id] = cluster_courses[i:i+80]
+            if len(cluster_courses) > 12:  # Split to max 12 courses (CP-SAT optimal)
+                for i in range(0, len(cluster_courses), 12):
+                    final_clusters[final_id] = cluster_courses[i:i+12]
                     final_id += 1
-            elif len(cluster_courses) < 10:  # Collect small clusters
+            elif len(cluster_courses) < 5:  # Collect very small clusters
                 small_clusters.extend(cluster_courses)
             else:
                 final_clusters[final_id] = cluster_courses
                 final_id += 1
         
-        # Merge small clusters
+        # Merge small clusters to 8-12 courses
         if small_clusters:
-            for i in range(0, len(small_clusters), 50):
-                final_clusters[final_id] = small_clusters[i:i+50]
+            for i in range(0, len(small_clusters), 10):
+                final_clusters[final_id] = small_clusters[i:i+10]
                 final_id += 1
         
+        logger.info(f"Optimized to {len(final_clusters)} clusters (target: 8-12 courses each)")
         return final_clusters
     
     async def _stage2_cpsat_solving(self, job_id: str, request_data: dict):
@@ -378,9 +380,9 @@ class TimetableGenerationSaga:
             # Sequential processing for low memory
             for idx, (cluster_id, cluster_courses) in enumerate(cluster_items):
                 try:
-                    # Limit cluster size
-                    if len(cluster_courses) > max_courses_per_cluster:
-                        cluster_courses = cluster_courses[:max_courses_per_cluster]
+                    # Limit cluster size for CP-SAT feasibility
+                    if len(cluster_courses) > 12:
+                        cluster_courses = cluster_courses[:12]
                     
                     solution = self._solve_cluster_safe(
                         cluster_id, cluster_courses,
@@ -448,23 +450,87 @@ class TimetableGenerationSaga:
         return {'schedule': all_solutions, 'quality_score': 0, 'conflicts': [], 'execution_time': 0}
     
     def _solve_cluster_safe(self, cluster_id, courses, rooms, time_slots, faculty):
-        """Solve single cluster with full resources"""
+        """Solve single cluster - use greedy for large datasets"""
         try:
+            # CRITICAL: Skip CP-SAT for large datasets (student constraints make it infeasible)
+            if len(courses) > 15:
+                logger.info(f"Cluster {cluster_id}: Using greedy (too many courses for CP-SAT)")
+                return self._greedy_schedule(cluster_id, courses, rooms, time_slots, faculty)
+            
+            # Try CP-SAT only for small clusters
             from engine.stage2_hybrid import CPSATSolver
             
-            # Use ALL resources for complete timetable
             solver = CPSATSolver(
-                courses=courses,  # ALL courses in cluster
-                rooms=rooms,  # ALL available rooms
-                time_slots=time_slots,  # ALL time slots (40-50)
+                courses=courses,
+                rooms=rooms,
+                time_slots=time_slots,
                 faculty=faculty,
-                timeout_seconds=30  # Longer timeout for complex solving
+                timeout_seconds=10
             )
             
-            return solver.solve()
+            solution = solver.solve()
+            if solution and len(solution) > 0:
+                logger.info(f"Cluster {cluster_id}: CP-SAT success ({len(solution)} assignments)")
+                return solution
+            
+            logger.warning(f"Cluster {cluster_id}: CP-SAT failed, using greedy fallback")
+            return self._greedy_schedule(cluster_id, courses, rooms, time_slots, faculty)
+            
         except Exception as e:
-            logger.error(f"Cluster {cluster_id} solve error: {e}")
-            return None
+            logger.error(f"Cluster {cluster_id} error: {e}")
+            return self._greedy_schedule(cluster_id, courses, rooms, time_slots, faculty)
+    
+    def _greedy_schedule(self, cluster_id, courses, rooms, time_slots, faculty):
+        """Greedy scheduling fallback - ALWAYS returns something"""
+        schedule = {}
+        
+        sorted_courses = sorted(
+            courses,
+            key=lambda c: len(getattr(c, 'student_ids', [])) * len(getattr(c, 'required_features', [])),
+            reverse=True
+        )
+        
+        used_slots = set()
+        faculty_schedule = {}
+        room_schedule = {}
+        
+        for course in sorted_courses:
+            assigned = False
+            
+            for time_slot in time_slots:
+                if assigned:
+                    break
+                    
+                faculty_id = getattr(course, 'faculty_id', None)
+                if faculty_id and (faculty_id, time_slot.slot_id) in faculty_schedule:
+                    continue
+                
+                for room in rooms:
+                    if (room.room_id, time_slot.slot_id) in room_schedule:
+                        continue
+                    
+                    required_features = set(getattr(course, 'required_features', []))
+                    room_features = set(getattr(room, 'features', []))
+                    if required_features and not required_features.issubset(room_features):
+                        continue
+                    
+                    key = (course.course_id, 0)
+                    value = (time_slot.slot_id, room.room_id)
+                    schedule[key] = value
+                    
+                    used_slots.add((time_slot.slot_id, room.room_id))
+                    if faculty_id:
+                        faculty_schedule[(faculty_id, time_slot.slot_id)] = course.course_id
+                    room_schedule[(room.room_id, time_slot.slot_id)] = course.course_id
+                    
+                    assigned = True
+                    break
+            
+            if not assigned:
+                logger.warning(f"Could not assign course {course.course_id} in cluster {cluster_id}")
+        
+        logger.info(f"Cluster {cluster_id}: Greedy assigned {len(schedule)}/{len(courses)} courses")
+        return schedule
     
     def _generate_mock_timetable(self, courses, rooms, time_slots):
         """Generate complete mock timetable for ALL courses when CP-SAT fails"""
@@ -561,25 +627,46 @@ class TimetableGenerationSaga:
         pass  # RL cleanup if needed
     
     async def _update_progress(self, job_id: str, progress: int, message: str):
-        """Update job progress with better error handling"""
+        """Update job progress with time remaining"""
+        global redis_client_global
+        from datetime import timedelta
         try:
-            if hasattr(app.state, 'redis_client') and app.state.redis_client:
+            if redis_client_global:
+                start_time_key = f"start_time:job:{job_id}"
+                start_time_str = redis_client_global.get(start_time_key)
+                
+                time_remaining_seconds = None
+                eta = None
+                
+                if start_time_str and progress > 0:
+                    start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
+                    elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                    total_estimated = (elapsed / progress) * 100
+                    time_remaining_seconds = int(total_estimated - elapsed)
+                    eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
+                
                 progress_data = {
                     'job_id': job_id,
                     'progress': progress,
                     'status': 'running',
                     'stage': message,
                     'message': message,
+                    'time_remaining_seconds': time_remaining_seconds,
+                    'eta': eta,
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }
-                app.state.redis_client.setex(
+                redis_client_global.setex(
                     f"progress:job:{job_id}",
                     3600,
                     json.dumps(progress_data)
                 )
-                logger.info(f"[PROGRESS] Job {job_id}: {progress}% - {message}")
+                logger.info(f"[PROGRESS] ✅ Redis updated: {job_id} -> {progress}% - {message} (ETA: {time_remaining_seconds}s)")
+            else:
+                logger.error(f"[PROGRESS] ❌ Redis client not available")
         except Exception as e:
-            logger.error(f"Failed to update progress: {e}")
+            logger.error(f"[PROGRESS] ❌ Failed to update Redis: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
 
 
@@ -601,6 +688,7 @@ class GenerationResponse(BaseModel):
 # Initialize FastAPI app
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global redis_client_global
     logger.info("Starting Enterprise FastAPI Timetable Service...")
     
     # Initialize Redis
@@ -626,12 +714,14 @@ async def lifespan(app: FastAPI):
         else:
             app.state.redis_client = redis.from_url(redis_url, decode_responses=True)
         
+        redis_client_global = app.state.redis_client
         app.state.redis_client.ping()
-        logger.info("Redis connection successful")
+        logger.info("✅ Redis connection successful")
         
     except Exception as e:
-        logger.error(f"Redis initialization failed: {e}")
+        logger.error(f"❌ Redis initialization failed: {e}")
         app.state.redis_client = None
+        redis_client_global = None
     
     # Initialize enterprise components with safety limits
     app.state.saga = TimetableGenerationSaga()
@@ -727,7 +817,8 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
         }
         
         # Update final progress
-        if app.state.redis_client:
+        global redis_client_global
+        if redis_client_global:
             progress_data = {
                 'job_id': job_id,
                 'progress': 100,
@@ -736,7 +827,8 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
                 'message': f'Generated timetable with {len(timetable_entries)} classes',
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
-            app.state.redis_client.setex(f"progress:job:{job_id}", 3600, json.dumps(progress_data))
+            redis_client_global.setex(f"progress:job:{job_id}", 3600, json.dumps(progress_data))
+            logger.info(f"✅ Final progress (100%) set in Redis for job {job_id}")
         
         # Call Django callback
         await call_django_callback(job_id, 'completed', [variant])
@@ -747,7 +839,7 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
         logger.error(f"[ENTERPRISE] Job {job_id} timed out after 10 minutes")
         
         # Update timeout progress
-        if app.state.redis_client:
+        if redis_client_global:
             timeout_data = {
                 'job_id': job_id,
                 'progress': 0,
@@ -756,7 +848,7 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
                 'message': 'Generation timed out after 10 minutes',
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
-            app.state.redis_client.setex(f"progress:job:{job_id}", 3600, json.dumps(timeout_data))
+            redis_client_global.setex(f"progress:job:{job_id}", 3600, json.dumps(timeout_data))
         
         await call_django_callback(job_id, 'failed', error='Generation timed out')
         
@@ -766,7 +858,7 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
         logger.error(traceback.format_exc())
         
         # Update error progress
-        if app.state.redis_client:
+        if redis_client_global:
             error_data = {
                 'job_id': job_id,
                 'progress': 0,
@@ -775,7 +867,7 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
                 'message': f'Generation failed: {str(e)}',
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
-            app.state.redis_client.setex(f"progress:job:{job_id}", 3600, json.dumps(error_data))
+            redis_client_global.setex(f"progress:job:{job_id}", 3600, json.dumps(error_data))
         
         await call_django_callback(job_id, 'failed', error=str(e))
 
@@ -864,31 +956,40 @@ async def health_check():
 @app.post("/api/generate_variants", response_model=GenerationResponse)
 async def generate_variants_enterprise(request: GenerationRequest, background_tasks: BackgroundTasks):
     """Enterprise generation endpoint with saga pattern"""
+    global redis_client_global
     try:
         job_id = request.job_id or f"enterprise_{int(datetime.now(timezone.utc).timestamp())}"
         
-        # Initialize progress
-        if app.state.redis_client:
+        # Initialize progress and start time
+        if redis_client_global:
+            start_time = datetime.now(timezone.utc).isoformat()
+            redis_client_global.setex(f"start_time:job:{job_id}", 3600, start_time)
+            
             progress_data = {
                 'job_id': job_id,
                 'progress': 0,
                 'status': 'queued',
                 'stage': 'Queued',
                 'message': 'Job queued for enterprise processing',
-                'timestamp': datetime.now(timezone.utc).isoformat()
+                'time_remaining_seconds': 600,
+                'eta': (datetime.now(timezone.utc) + timedelta(seconds=600)).isoformat(),
+                'timestamp': start_time
             }
-            app.state.redis_client.setex(f"progress:job:{job_id}", 3600, json.dumps(progress_data))
+            redis_client_global.setex(f"progress:job:{job_id}", 3600, json.dumps(progress_data))
+            logger.info(f"✅ Initial progress set in Redis for job {job_id}")
+        else:
+            logger.error(f"❌ Redis not available for job {job_id}")
         
         # Start enterprise generation
         background_tasks.add_task(run_enterprise_generation, job_id, request)
         
-        logger.info(f"[ENTERPRISE] Generation queued for job {job_id}")
+        logger.info(f"[ENTERPRISE] ✅ Generation queued for job {job_id}")
         
         return GenerationResponse(
             job_id=job_id,
             status="queued",
             message="Safe parallel timetable generation started",
-            estimated_time_seconds=300  # Conservative estimate with safety
+            estimated_time_seconds=300
         )
         
     except Exception as e:
