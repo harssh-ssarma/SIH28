@@ -215,10 +215,12 @@ def get_student_timetable(request):
 
 
 @api_view(["GET"])
+@permission_classes([])  # NO AUTHENTICATION REQUIRED - Public progress endpoint
 def get_progress(request, job_id):
     """
     Get generation progress from Redis or Database
     GET /api/progress/{job_id}/
+    PUBLIC ENDPOINT - No authentication required for progress polling
     """
     try:
         from django.core.cache import cache

@@ -336,7 +336,7 @@
     animation: slide-in 0.3s ease-out;
   }
 
-  /* Windows-style Progress Bar Shimmer */
+  /* Windows-style Progress Bar Shimmer - Forward direction */
   @keyframes shimmer {
     0% {
       background-position: -200% 0;
@@ -348,5 +348,15 @@
 
   .animate-shimmer {
     animation: shimmer 2s ease-in-out infinite;
+  }
+
+  /* Reverse Shimmer - Right to Left */
+  @keyframes shimmer-reverse {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
   }
 }

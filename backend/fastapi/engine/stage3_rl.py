@@ -1,7 +1,28 @@
 import numpy as np
+import logging
 from collections import defaultdict
-import torch
-import torch.nn as nn
+from typing import List, Dict, Optional
+try:
+    import torch
+    import torch.nn as nn
+    TORCH_AVAILABLE = torch.cuda.is_available()
+    if TORCH_AVAILABLE:
+        DEVICE = torch.device('cuda')
+        logger = logging.getLogger(__name__)
+        logger.info(f"✅ RL using GPU: {torch.cuda.get_device_name(0)}")
+    else:
+        DEVICE = torch.device('cpu')
+        logger = logging.getLogger(__name__)
+        logger.info("⚠️ RL using CPU (GPU not available)")
+except ImportError:
+    TORCH_AVAILABLE = False
+    DEVICE = None
+    logger = logging.getLogger(__name__)
+    logger.info("⚠️ RL using CPU (PyTorch not installed)")
+
+from models.timetable_models import Course, Room, TimeSlot, Faculty
+
+logger = logging.getLogger(__name__)
 
 class MultidimensionalContextEncoder:
     """Encodes timetable state into multidimensional context vector"""
@@ -97,7 +118,7 @@ class MultidimensionalContextEncoder:
 
 
 class DeepQNetwork(nn.Module):
-    """Deep Q-Network for timetable optimization"""
+    """Deep Q-Network for timetable optimization with GPU support"""
     
     def __init__(self, state_dim=33, action_dim=48, hidden_dims=[128, 256, 128]):
         super().__init__()
@@ -117,8 +138,14 @@ class DeepQNetwork(nn.Module):
         layers.append(nn.Linear(prev_dim, action_dim))
         
         self.network = nn.Sequential(*layers)
+        
+        # Move to GPU if available
+        if TORCH_AVAILABLE and DEVICE:
+            self.network = self.network.to(DEVICE)
     
     def forward(self, state):
+        if TORCH_AVAILABLE and DEVICE:
+            state = state.to(DEVICE)
         return self.network(state)
 
 
@@ -127,9 +154,10 @@ class ContextAwareRLAgent:
     
     def __init__(self, q_table_path="q_table.pkl"):
         self.q_table_path = q_table_path
-        self.q_table = self._load_q_table()
+        self.q_table = {}  # Don't load Q-table to save memory
         self.context_cache = {}  # Lazy context storage
-        self.epsilon = 0.1 if self.q_table else 0.3  # Higher exploration for cold start
+        self.max_cache_size = 50  # Reduced from 100
+        self.epsilon = 0.3
         self.alpha = 0.1
         self.gamma = 0.9
         self.conflicts_resolved = 0
@@ -169,6 +197,9 @@ class ContextAwareRLAgent:
         quality_reward = 0
         if conflicts == 0:  # Only check quality if no conflicts
             if action not in self.context_cache:
+                # Clear cache if too large (before adding)
+                if len(self.context_cache) >= self.max_cache_size:
+                    self.context_cache.clear()
                 self.context_cache[action] = self.build_local_context(action)
             
             local_context = self.context_cache[action]
@@ -179,7 +210,7 @@ class ContextAwareRLAgent:
     def build_local_context(self, action):
         """Build minimal context for affected courses only"""
         return {
-            'prereq_satisfaction': 0.8,  # Simplified
+            'prereq_satisfaction': 0.8,
             'student_load_balance': 0.7,
             'resource_conflicts': 0.9,
             'time_preferences': 0.6
@@ -213,28 +244,12 @@ class ContextAwareRLAgent:
         return f"load_{int(avg_time_load)}_{int(avg_room_load)}"
     
     def _load_q_table(self):
-        """Load Q-table from previous semesters"""
-        try:
-            import pickle
-            import os
-            if os.path.exists(self.q_table_path):
-                with open(self.q_table_path, 'rb') as f:
-                    q_table = pickle.load(f)
-                logger.info(f"Loaded Q-table with {len(q_table)} states")
-                return q_table
-        except Exception as e:
-            logger.warning(f"Failed to load Q-table: {e}")
+        """Skip loading Q-table to save memory"""
         return {}
     
     def _save_q_table(self):
-        """Save Q-table for next semester"""
-        try:
-            import pickle
-            with open(self.q_table_path, 'wb') as f:
-                pickle.dump(self.q_table, f)
-            logger.info(f"Saved Q-table with {len(self.q_table)} states")
-        except Exception as e:
-            logger.error(f"Failed to save Q-table: {e}")
+        """Skip saving Q-table to save memory"""
+        pass
 
 
 def get_available_slots(conflict, timetable_data):
@@ -294,15 +309,105 @@ def build_state_after_swap(swap_result):
         'session': swap_result.get('session', 0)
     }
 
+class RLConflictResolver:
+    """RL-based conflict resolver for timetable optimization"""
+    
+    def __init__(
+        self,
+        courses: List[Course],
+        faculty: Dict[str, Faculty],
+        rooms: List[Room],
+        time_slots: List[TimeSlot],
+        learning_rate: float = 0.15,
+        discount_factor: float = 0.85,
+        epsilon: float = 0.10,
+        max_iterations: int = 100,
+        use_gpu: bool = False,
+        gpu_device=None
+    ):
+        self.courses = courses
+        self.faculty = faculty
+        self.rooms = rooms
+        self.time_slots = time_slots
+        self.learning_rate = learning_rate
+        self.discount_factor = discount_factor
+        self.epsilon = epsilon
+        self.max_iterations = max_iterations
+        self.use_gpu = use_gpu and TORCH_AVAILABLE
+        self.gpu_device = gpu_device
+        
+        # Initialize RL agent
+        self.rl_agent = ContextAwareRLAgent()
+        self.rl_agent.alpha = learning_rate
+        self.rl_agent.gamma = discount_factor
+        self.rl_agent.epsilon = epsilon
+    
+    def resolve_conflicts(self, schedule: Dict) -> Dict:
+        """Resolve conflicts in schedule using RL"""
+        logger.info(f"Starting RL conflict resolution with {len(schedule)} assignments")
+        
+        # Prepare timetable data
+        timetable_data = {
+            'current_solution': schedule.copy(),
+            'courses': self.courses,
+            'faculty': self.faculty,
+            'rooms': self.rooms,
+            'time_slots': self.time_slots
+        }
+        
+        # Detect initial conflicts
+        conflicts = self._detect_conflicts(schedule)
+        
+        if not conflicts:
+            logger.info("No conflicts detected")
+            return schedule
+        
+        logger.info(f"Detected {len(conflicts)} conflicts, resolving...")
+        
+        # Resolve conflicts with RL
+        resolved = resolve_conflicts_with_enhanced_rl(conflicts, timetable_data)
+        
+        logger.info(f"RL resolved {len(resolved)} conflicts")
+        
+        return timetable_data['current_solution']
+    
+    def _detect_conflicts(self, schedule: Dict) -> List[Dict]:
+        """Detect conflicts in schedule"""
+        conflicts = []
+        student_schedule = {}
+        
+        for (course_id, session), (time_slot, room_id) in schedule.items():
+            course = next((c for c in self.courses if c.course_id == course_id), None)
+            if not course:
+                continue
+            
+            # Check student conflicts
+            for student_id in getattr(course, 'student_ids', []):
+                key = (student_id, time_slot)
+                if key in student_schedule:
+                    conflicts.append({
+                        'type': 'student_conflict',
+                        'student_id': student_id,
+                        'time_slot': time_slot,
+                        'course_id': course_id,
+                        'conflicting_course': student_schedule[key],
+                        'session': session
+                    })
+                else:
+                    student_schedule[key] = course_id
+        
+        return conflicts
+
+
 def resolve_conflicts_with_enhanced_rl(conflicts, timetable_data):
-    """Context-aware RL conflict resolution with learning persistence"""
+    """Context-aware RL conflict resolution with memory management"""
     
     rl_agent = ContextAwareRLAgent()
     resolved = []
     initial_conflicts = len(conflicts)
     
-    # RL episodes for conflict resolution
-    max_episodes = min(200, len(conflicts) * 3)  # More episodes for better learning
+    # RL episodes for conflict resolution (reduced for memory)
+    max_episodes = min(100, len(conflicts) * 2)  # Reduced from 200
     
     for episode in range(max_episodes):
         if not conflicts:
@@ -349,9 +454,14 @@ def resolve_conflicts_with_enhanced_rl(conflicts, timetable_data):
             # Remove resolved conflict
             conflicts = [c for c in conflicts if c['course_id'] != conflict['course_id'] or 
                         c.get('student_id') != conflict.get('student_id')]
+        
+        # Periodic cleanup every 20 episodes
+        if episode % 20 == 0:
+            rl_agent.context_cache.clear()
     
-    # Save learned Q-table for next semester
-    rl_agent._save_q_table()
+    # Final cleanup
+    rl_agent.q_table.clear()
+    rl_agent.context_cache.clear()
     
     logger.info(f"RL resolved {rl_agent.conflicts_resolved}/{initial_conflicts} conflicts")
     return resolved

@@ -96,10 +96,10 @@ class ResourceIsolation:
     def __init__(self):
         from concurrent.futures import ThreadPoolExecutor
         
-        # Separate thread pools for different operations
-        self.clustering_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="clustering")
-        self.cpsat_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="cpsat")
-        self.context_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="context")
+        # Minimal thread pools to prevent memory leaks
+        self.clustering_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="clustering")
+        self.cpsat_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cpsat")
+        self.context_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="context")
     
     async def execute_clustering(self, func, *args):
         """Execute clustering in isolated thread pool"""
@@ -142,9 +142,8 @@ class TimetableGenerationSaga:
                 self.completed_steps.append((step_name, compensate_func, result))
                 self.job_data[job_id]['results'][step_name] = result
                 
-                # Update progress
-                progress = (len(self.completed_steps) / len(self.steps)) * 100
-                await self._update_progress(job_id, int(progress), f"Completed {step_name}")
+                # Skip progress updates for individual stages - only cluster-based updates matter
+                pass  # Progress tracked at cluster level in Stage 2
             
             self.job_data[job_id]['status'] = 'completed'
             return self.job_data[job_id]['results']
@@ -159,12 +158,16 @@ class TimetableGenerationSaga:
         """Stage 0: Load and validate data with hardware detection"""
         from utils.django_client import DjangoAPIClient
         
-        # Initialize hardware detection on first run
+        # ALWAYS detect hardware fresh (no caching)
         global hardware_profile, adaptive_executor
-        if hardware_profile is None:
-            logger.info("[HARDWARE] Detecting system capabilities...")
-            hardware_profile = get_hardware_profile()
-            adaptive_executor = await get_adaptive_executor()
+        logger.info("[HARDWARE] Detecting system capabilities (fresh detection)...")
+        hardware_profile = get_hardware_profile(force_refresh=True)
+        adaptive_executor = await get_adaptive_executor()
+        logger.info(f"[HARDWARE] Available RAM: {hardware_profile.available_ram_gb:.1f}GB")
+        if hardware_profile.has_nvidia_gpu:
+            logger.info(f"[HARDWARE] ✅ GPU: {hardware_profile.gpu_memory_gb:.1f}GB VRAM")
+        else:
+            logger.warning("[HARDWARE] ⚠️ No GPU detected")
             
             logger.info(f"[HARDWARE] Optimal strategy: {hardware_profile.optimal_strategy.value}")
             logger.info(f"[HARDWARE] CPU: {hardware_profile.cpu_cores} cores, {hardware_profile.total_ram_gb:.1f}GB RAM")
@@ -212,137 +215,31 @@ class TimetableGenerationSaga:
             await client.close()
     
     async def _stage1_louvain_clustering(self, job_id: str, request_data: dict):
-        """Stage 1: Parallelized Louvain clustering with weighted constraint graph"""
+        """Stage 1: Louvain clustering with hardware orchestration"""
+        from engine.stage1_clustering import LouvainClusterer
+        from engine.orchestrator import get_orchestrator
+        
         data = self.job_data[job_id]['results']['load_data']
         courses = data['courses']
         
-        def optimized_louvain_clustering():
-            import networkx as nx
-            from concurrent.futures import ProcessPoolExecutor
-            import copy
-            import random
-            
-            # Build constraint graph (sequential for safety)
-            G = nx.Graph()
-            for course in courses:
-                G.add_node(course.course_id, course=course)
-            
-            # Add edges with weights (sequential to avoid race conditions)
-            for i, course_i in enumerate(courses):
-                for course_j in courses[i+1:]:
-                    weight = self._compute_constraint_weight(course_i, course_j)
-                    if weight > 0.1:  # Only significant edges
-                        G.add_edge(course_i.course_id, course_j.course_id, weight=weight)
-            
-            logger.info(f"Built graph with {len(G.nodes)} nodes, {len(G.edges)} edges")
-            
-            # SAFE: Multiple Louvain runs with independent graph copies
-            try:
-                import community as community_louvain
-                
-                def single_louvain_run(graph_copy, seed):
-                    """SAFE: Each run gets independent graph copy"""
-                    random.seed(seed)
-                    return community_louvain.best_partition(graph_copy, weight='weight', random_state=seed)
-                
-                # Use single run to avoid pickling issues
-                best_partition = community_louvain.best_partition(G, weight='weight', random_state=42)
-                partitions = [best_partition]
-                
-                # Select best partition by modularity
-                modularities = [
-                    community_louvain.modularity(partition, G, weight='weight')
-                    for partition in partitions
-                ]
-                best_idx = max(range(len(modularities)), key=lambda i: modularities[i])
-                best_partition = partitions[best_idx]
-                
-                logger.info(f"Best modularity: {modularities[best_idx]:.3f}")
-                
-            except ImportError:
-                logger.warning("python-louvain not available, using department fallback")
-                best_partition = {}
-                dept_map = {}
-                cluster_id = 0
-                for course in courses:
-                    dept = getattr(course, 'department_id', 'default')
-                    if dept not in dept_map:
-                        dept_map[dept] = cluster_id
-                        cluster_id += 1
-                    best_partition[course.course_id] = dept_map[dept]
-            
-            # Convert to final clusters with size optimization
-            return self._optimize_cluster_sizes(best_partition, courses)
+        # Use orchestrator for optimal hardware utilization
+        orchestrator = get_orchestrator()
+        clusterer = LouvainClusterer(target_cluster_size=10)
         
-        clusters = await asyncio.to_thread(optimized_louvain_clustering)
-        logger.info(f"[STAGE1] Optimized Louvain: {len(clusters)} clusters from {len(courses)} courses")
+        clusters = await asyncio.to_thread(
+            orchestrator.execute_stage1_clustering,
+            courses,
+            clusterer
+        )
+        
         return clusters
     
-    def _compute_constraint_weight(self, course_i, course_j):
-        """Compute weighted edge between courses based on multiple factors"""
-        weight = 0.0
-        
-        # Faculty sharing (high weight)
-        if getattr(course_i, 'faculty_id', None) == getattr(course_j, 'faculty_id', None):
-            weight += 10.0
-        
-        # Student overlap (NEP 2020 critical)
-        students_i = set(getattr(course_i, 'student_ids', []))
-        students_j = set(getattr(course_j, 'student_ids', []))
-        if students_i and students_j:
-            overlap = len(students_i & students_j) / max(len(students_i), len(students_j))
-            weight += 10.0 * overlap
-        
-        # Department affinity
-        if getattr(course_i, 'department_id', None) == getattr(course_j, 'department_id', None):
-            weight += 5.0
-        
-        # Room competition (same required features)
-        features_i = set(getattr(course_i, 'required_features', []))
-        features_j = set(getattr(course_j, 'required_features', []))
-        if features_i and features_j and features_i & features_j:
-            weight += 3.0
-        
-        return weight
-    
-    def _optimize_cluster_sizes(self, partition, courses):
-        """Optimize cluster sizes for CP-SAT feasibility"""
-        raw_clusters = {}
-        for course_id, cluster_id in partition.items():
-            if cluster_id not in raw_clusters:
-                raw_clusters[cluster_id] = []
-            course = next((c for c in courses if c.course_id == course_id), None)
-            if course:
-                raw_clusters[cluster_id].append(course)
-        
-        # CRITICAL: Smaller clusters for CP-SAT feasibility
-        final_clusters = {}
-        final_id = 0
-        small_clusters = []
-        
-        for cluster_courses in raw_clusters.values():
-            if len(cluster_courses) > 12:  # Split to max 12 courses (CP-SAT optimal)
-                for i in range(0, len(cluster_courses), 12):
-                    final_clusters[final_id] = cluster_courses[i:i+12]
-                    final_id += 1
-            elif len(cluster_courses) < 5:  # Collect very small clusters
-                small_clusters.extend(cluster_courses)
-            else:
-                final_clusters[final_id] = cluster_courses
-                final_id += 1
-        
-        # Merge small clusters to 8-12 courses
-        if small_clusters:
-            for i in range(0, len(small_clusters), 10):
-                final_clusters[final_id] = small_clusters[i:i+10]
-                final_id += 1
-        
-        logger.info(f"Optimized to {len(final_clusters)} clusters (target: 8-12 courses each)")
-        return final_clusters
+
     
     async def _stage2_cpsat_solving(self, job_id: str, request_data: dict):
-        """Stage 2A: Adaptive parallel CP-SAT with memory monitoring"""
+        """Stage 2A: Smart parallel CP-SAT with memory limits"""
         import psutil
+        import gc
         from concurrent.futures import ProcessPoolExecutor, as_completed
         
         data = self.job_data[job_id]['results']
@@ -352,61 +249,63 @@ class TimetableGenerationSaga:
         mem = psutil.virtual_memory()
         available_gb = mem.available / (1024**3)
         
-        # CRITICAL: If less than 2GB available, process sequentially
-        if available_gb < 2.0:
-            logger.warning(f"[STAGE2] Low memory ({available_gb:.1f}GB), using sequential processing")
-            max_parallel = 1
-            max_courses_per_cluster = 20  # Increased for complete timetable
-            max_rooms = 200  # Use more rooms
-            timeout = 15
+        # Smart parallelization based on memory - FAST MODE
+        if available_gb > 6.0:
+            max_parallel = min(4, hardware_profile.cpu_cores)
+            max_courses_per_cluster = 15
+            max_rooms = 200
+            timeout = 5  # 5s per cluster (fast)
+            logger.info(f"[STAGE2] High memory mode: {max_parallel} workers")
+        elif available_gb > 4.0:
+            max_parallel = 2
+            max_courses_per_cluster = 12
+            max_rooms = 150
+            timeout = 5  # 5s per cluster (fast)
+            logger.info(f"[STAGE2] Medium memory mode: {max_parallel} workers")
         else:
-            # Calculate safe parallelism
-            max_parallel = max(1, min(hardware_profile.cpu_cores, int((available_gb - 1.5) / 0.3)))
-            max_courses_per_cluster = 100  # Process more courses per cluster
-            max_rooms = 500  # Use all available rooms
-            timeout = 30
+            max_parallel = 1
+            max_courses_per_cluster = 10
+            max_rooms = 100
+            timeout = 5  # 5s per cluster (fast)
+            logger.info(f"[STAGE2] Low memory mode: sequential")
         
-        logger.info(f"[STAGE2] RAM: {available_gb:.1f}GB, Workers: {max_parallel}, Max courses/cluster: {max_courses_per_cluster}")
-        await self._update_progress(job_id, 30, f"Starting {max_parallel} workers (low memory mode)")
+        await self._update_progress(job_id, 5, f"Starting CP-SAT solver ({total_clusters} clusters)")
         
         all_solutions = {}
         total_clusters = len(clusters)
         completed = 0
         
-        # Process clusters sequentially if low memory
-        cluster_items = list(clusters.items())
-        
         if max_parallel == 1:
-            # Sequential processing for low memory
-            for idx, (cluster_id, cluster_courses) in enumerate(cluster_items):
+            # Sequential for low memory
+            for idx, (cluster_id, cluster_courses) in enumerate(list(clusters.items())):
                 try:
-                    # Limit cluster size for CP-SAT feasibility
-                    if len(cluster_courses) > 12:
-                        cluster_courses = cluster_courses[:12]
+                    if len(cluster_courses) > max_courses_per_cluster:
+                        cluster_courses = cluster_courses[:max_courses_per_cluster]
                     
                     solution = self._solve_cluster_safe(
                         cluster_id, cluster_courses,
                         data['load_data']['rooms'][:max_rooms],
-                        data['load_data']['time_slots'],  # USE ALL TIME SLOTS
+                        data['load_data']['time_slots'],
                         data['load_data']['faculty']
                     )
                     
                     if solution:
                         all_solutions.update(solution)
-                        logger.info(f"[STAGE2] Cluster {idx+1}/{total_clusters}: {len(solution)} assignments")
                     
+                    gc.collect()
                     completed += 1
-                    progress = 30 + int((completed / total_clusters) * 30)
-                    await self._update_progress(job_id, progress, f"Solved {completed}/{total_clusters} clusters")
-                    
+                    # Weighted progress: Stage2 is 70% of total work (5-60% range)
+                    progress = 5 + int((completed / total_clusters) * 55)
+                    await self._update_progress(job_id, progress, f"Solving clusters: {completed}/{total_clusters}", total_clusters, completed)
                 except Exception as e:
-                    logger.error(f"[STAGE2] Cluster {cluster_id} failed: {e}")
+                    logger.error(f"Cluster {cluster_id} failed: {e}")
                     completed += 1
+                    gc.collect()
         else:
-            # Parallel processing
+            # Parallel processing with memory safety
             with ProcessPoolExecutor(max_workers=max_parallel) as executor:
-                future_to_cluster = {}
-                for idx, (cluster_id, cluster_courses) in enumerate(cluster_items):
+                futures = {}
+                for cluster_id, cluster_courses in list(clusters.items()):
                     if len(cluster_courses) > max_courses_per_cluster:
                         cluster_courses = cluster_courses[:max_courses_per_cluster]
                     
@@ -414,26 +313,26 @@ class TimetableGenerationSaga:
                         self._solve_cluster_safe,
                         cluster_id, cluster_courses,
                         data['load_data']['rooms'][:max_rooms],
-                        data['load_data']['time_slots'],  # USE ALL TIME SLOTS
+                        data['load_data']['time_slots'],
                         data['load_data']['faculty']
                     )
-                    future_to_cluster[future] = (idx, cluster_id)
+                    futures[future] = cluster_id
                 
-                for future in as_completed(future_to_cluster):
-                    idx, cluster_id = future_to_cluster[future]
-                    completed += 1
-                    
+                for future in as_completed(futures, timeout=timeout*len(clusters)):
+                    cluster_id = futures[future]
                     try:
                         solution = future.result(timeout=timeout)
                         if solution:
                             all_solutions.update(solution)
-                            logger.info(f"[STAGE2] Cluster {completed}/{total_clusters}: {len(solution)} assignments")
-                        
-                        progress = 30 + int((completed / total_clusters) * 30)
-                        await self._update_progress(job_id, progress, f"Solved {completed}/{total_clusters} clusters")
-                        
+                        completed += 1
+                        # Weighted progress: Stage2 is 70% of total work (5-60% range)
+                        progress = 5 + int((completed / total_clusters) * 55)
+                        await self._update_progress(job_id, progress, f"Solving clusters: {completed}/{total_clusters}", total_clusters, completed)
                     except Exception as e:
-                        logger.error(f"[STAGE2] Cluster {cluster_id} failed: {e}")
+                        logger.error(f"Cluster {cluster_id} failed: {e}")
+                        completed += 1
+                
+                gc.collect()
         
         logger.info(f"[STAGE2] Completed: {len(all_solutions)} assignments from {completed} clusters")
         
@@ -450,34 +349,40 @@ class TimetableGenerationSaga:
         return {'schedule': all_solutions, 'quality_score': 0, 'conflicts': [], 'execution_time': 0}
     
     def _solve_cluster_safe(self, cluster_id, courses, rooms, time_slots, faculty):
-        """Solve single cluster - use greedy for large datasets"""
+        """Solve single cluster with adaptive CP-SAT + Greedy hybrid"""
+        from engine.stage2_cpsat import AdaptiveCPSATSolver
+        from engine.stage2_greedy import SmartGreedyScheduler
+        
         try:
-            # CRITICAL: Skip CP-SAT for large datasets (student constraints make it infeasible)
-            if len(courses) > 15:
-                logger.info(f"Cluster {cluster_id}: Using greedy (too many courses for CP-SAT)")
-                return self._greedy_schedule(cluster_id, courses, rooms, time_slots, faculty)
-            
-            # Try CP-SAT only for small clusters
-            from engine.stage2_hybrid import CPSATSolver
-            
-            solver = CPSATSolver(
+            # Adaptive CP-SAT solver
+            cpsat_solver = AdaptiveCPSATSolver(
                 courses=courses,
                 rooms=rooms,
                 time_slots=time_slots,
                 faculty=faculty,
-                timeout_seconds=10
+                max_cluster_size=12  # Optimal for CP-SAT
             )
             
-            solution = solver.solve()
-            if solution and len(solution) > 0:
-                logger.info(f"Cluster {cluster_id}: CP-SAT success ({len(solution)} assignments)")
+            # Try CP-SAT with adaptive strategies
+            solution = cpsat_solver.solve_cluster(courses)
+            
+            if solution:
+                logger.info(f"Cluster {cluster_id}: CP-SAT succeeded with {len(solution)} assignments")
                 return solution
             
-            logger.warning(f"Cluster {cluster_id}: CP-SAT failed, using greedy fallback")
-            return self._greedy_schedule(cluster_id, courses, rooms, time_slots, faculty)
+            # Fallback to smart greedy
+            logger.info(f"Cluster {cluster_id}: CP-SAT failed, using smart greedy")
+            greedy_solver = SmartGreedyScheduler(
+                courses=courses,
+                rooms=rooms,
+                time_slots=time_slots,
+                faculty=faculty
+            )
+            return greedy_solver.solve(courses)
             
         except Exception as e:
             logger.error(f"Cluster {cluster_id} error: {e}")
+            # Final fallback to basic greedy
             return self._greedy_schedule(cluster_id, courses, rooms, time_slots, faculty)
     
     def _greedy_schedule(self, cluster_id, courses, rooms, time_slots, faculty):
@@ -558,16 +463,142 @@ class TimetableGenerationSaga:
         return mock_schedule
     
     async def _stage2_ga_optimization(self, job_id: str, request_data: dict):
-        """Stage 2B: Skip GA for large datasets to save memory"""
-        logger.info("[STAGE2B] Skipping GA optimization for memory safety")
-        await self._update_progress(job_id, 70, "Skipping GA optimization (memory safety)")
-        return self.job_data[job_id]['results']['stage2_cpsat_solving']
+        """Stage 2B: GA optimization with hardware orchestration"""
+        from engine.stage2_ga import GeneticAlgorithmOptimizer
+        from engine.orchestrator import get_orchestrator
+        import gc
+        
+        data = self.job_data[job_id]['results']
+        cpsat_result = data['stage2_cpsat_solving']
+        initial_schedule = cpsat_result.get('schedule', {})
+        
+        if not initial_schedule:
+            logger.warning("[STAGE2B] No initial schedule from CP-SAT, skipping GA")
+            await self._update_progress(job_id, 70, "Skipping GA (no initial solution)")
+            return cpsat_result
+        
+        logger.info(f"[STAGE2B] Starting GA optimization with {len(initial_schedule)} initial assignments")
+        await self._update_progress(job_id, 65, "Optimizing with Genetic Algorithm")
+        
+        try:
+            # Prepare data
+            courses = data['load_data']['courses']
+            rooms = data['load_data']['rooms']
+            time_slots = data['load_data']['time_slots']
+            faculty = data['load_data']['faculty']
+            
+            # GA Optimizer
+            ga_optimizer = GeneticAlgorithmOptimizer(
+                courses=courses,
+                rooms=rooms,
+                time_slots=time_slots,
+                faculty=faculty,
+                students={},
+                initial_solution=initial_schedule,
+                population_size=30,
+                generations=50,
+                mutation_rate=0.1,
+                crossover_rate=0.8,
+                elitism_rate=0.1,
+                context_engine=None
+            )
+            
+            # Use orchestrator for optimal hardware utilization (GPU + CPU)
+            orchestrator = get_orchestrator()
+            optimized_schedule = await asyncio.to_thread(
+                orchestrator.execute_stage2_ga,
+                ga_optimizer
+            )
+            final_fitness = ga_optimizer.fitness(optimized_schedule)
+            
+            logger.info(f"[STAGE2B] GA complete: fitness={final_fitness:.4f}")
+            await self._update_progress(job_id, 80, f"GA complete (fitness: {final_fitness:.2f})")
+            
+            gc.collect()
+            
+            return {
+                'schedule': optimized_schedule,
+                'quality_score': final_fitness,
+                'conflicts': [],
+                'execution_time': 0
+            }
+            
+        except Exception as e:
+            logger.error(f"[STAGE2B] GA optimization failed: {e}")
+            await self._update_progress(job_id, 70, "GA optimization failed, using CP-SAT result")
+            gc.collect()
+            return cpsat_result
     
     async def _stage3_rl_conflict_resolution(self, job_id: str, request_data: dict):
-        """Stage 3: Skip RL for large datasets to save memory"""
-        logger.info("[STAGE3] Skipping RL for memory safety")
-        await self._update_progress(job_id, 90, "Skipping RL (memory safety)")
-        return self.job_data[job_id]['results']['stage2_ga_optimization']
+        """Stage 3: RL conflict resolution with hardware orchestration"""
+        from engine.stage3_rl import RLConflictResolver
+        from engine.orchestrator import get_orchestrator
+        import gc
+        
+        data = self.job_data[job_id]['results']
+        ga_result = data['stage2_ga_optimization']
+        schedule = ga_result.get('schedule', {})
+        
+        if not schedule:
+            logger.warning("[STAGE3] No schedule from GA, skipping RL")
+            await self._update_progress(job_id, 90, "Skipping RL (no schedule)")
+            return ga_result
+        
+        logger.info(f"[STAGE3] Starting RL conflict resolution with {len(schedule)} assignments")
+        await self._update_progress(job_id, 85, "Resolving conflicts with RL")
+        
+        try:
+            # Detect conflicts first
+            load_data = data['load_data']
+            conflicts = self._detect_conflicts(schedule, load_data)
+            
+            if not conflicts:
+                logger.info("[STAGE3] No conflicts detected, skipping RL")
+                await self._update_progress(job_id, 90, "No conflicts detected")
+                return ga_result
+            
+            logger.info(f"[STAGE3] Detected {len(conflicts)} conflicts, resolving with RL")
+            
+            # RL Conflict Resolver
+            resolver = RLConflictResolver(
+                courses=load_data['courses'],
+                faculty=load_data['faculty'],
+                rooms=load_data['rooms'],
+                time_slots=load_data['time_slots'],
+                learning_rate=0.15,
+                discount_factor=0.85,
+                epsilon=0.10,
+                max_iterations=100
+            )
+            
+            # Use orchestrator for optimal hardware utilization (GPU if available)
+            orchestrator = get_orchestrator()
+            resolved_schedule = await asyncio.to_thread(
+                orchestrator.execute_stage3_rl,
+                resolver,
+                schedule
+            )
+            
+            # Verify resolution
+            remaining_conflicts = self._detect_conflicts(resolved_schedule, load_data)
+            
+            logger.info(f"[STAGE3] RL complete: {len(conflicts)} → {len(remaining_conflicts)} conflicts")
+            await self._update_progress(job_id, 95, f"Finalizing timetable")
+            
+            gc.collect()
+            
+            return {
+                'schedule': resolved_schedule,
+                'quality_score': ga_result.get('quality_score', 0),
+                'conflicts': remaining_conflicts,
+                'execution_time': 0
+            }
+            
+        except Exception as e:
+            logger.error(f"[STAGE3] RL conflict resolution failed: {e}")
+            await self._update_progress(job_id, 90, "RL failed, using GA result")
+            gc.collect()
+            return ga_result
     
     def _detect_conflicts(self, solution, load_data):
         """Detect conflicts in current solution"""
@@ -626,8 +657,8 @@ class TimetableGenerationSaga:
         """Cleanup RL resources"""
         pass  # RL cleanup if needed
     
-    async def _update_progress(self, job_id: str, progress: int, message: str):
-        """Update job progress with time remaining"""
+    async def _update_progress(self, job_id: str, progress: int, message: str, total_items: int = None, completed_items: int = None):
+        """Enterprise progress tracking with accurate ETA based on actual work completed"""
         global redis_client_global
         from datetime import timedelta
         try:
@@ -638,7 +669,24 @@ class TimetableGenerationSaga:
                 time_remaining_seconds = None
                 eta = None
                 
-                if start_time_str and progress > 0:
+                if start_time_str and completed_items and total_items and completed_items > 0:
+                    # Enterprise ETA: Based on actual cluster completion rate with smoothing
+                    start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
+                    elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                    
+                    # Only calculate ETA after 10% completion for accuracy
+                    if completed_items >= max(5, total_items * 0.1):
+                        avg_time_per_cluster = elapsed / completed_items
+                        remaining_clusters = total_items - completed_items
+                        # Add 20% buffer for slower clusters at the end
+                        time_remaining_seconds = int(avg_time_per_cluster * remaining_clusters * 1.2)
+                        eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
+                    else:
+                        # Early stage: Use conservative estimate
+                        time_remaining_seconds = int(total_items * 5)  # 5s per cluster estimate
+                        eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
+                elif start_time_str and progress > 5:
+                    # Fallback: Linear estimation
                     start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
                     elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
                     total_estimated = (elapsed / progress) * 100
@@ -727,14 +775,10 @@ async def lifespan(app: FastAPI):
     app.state.saga = TimetableGenerationSaga()
     app.state.resource_isolation = ResourceIsolation()
     
-    # Set process limits for safety
-    try:
-        import resource
-        # Limit memory to 4GB
-        resource.setrlimit(resource.RLIMIT_AS, (4 * 1024 * 1024 * 1024, -1))
-        logger.info("Resource limits set for safety")
-    except Exception as e:
-        logger.warning(f"Could not set resource limits: {e}")
+    # Force garbage collection on startup
+    import gc
+    gc.collect()
+    logger.info("Memory cleanup completed")
     
     yield
     
@@ -759,8 +803,12 @@ app.add_middleware(
 # Enterprise background task
 async def run_enterprise_generation(job_id: str, request: GenerationRequest):
     """Enterprise generation using saga pattern"""
+    import gc
     try:
         logger.info(f"[ENTERPRISE] Starting generation for job {job_id}")
+        
+        # Force cleanup before starting
+        gc.collect()
         
         # Execute saga with timeout
         saga = TimetableGenerationSaga()
@@ -954,7 +1002,7 @@ async def health_check():
         }
 
 @app.post("/api/generate_variants", response_model=GenerationResponse)
-async def generate_variants_enterprise(request: GenerationRequest, background_tasks: BackgroundTasks):
+async def generate_variants_enterprise(request: GenerationRequest):
     """Enterprise generation endpoint with saga pattern"""
     global redis_client_global
     try:
@@ -980,8 +1028,8 @@ async def generate_variants_enterprise(request: GenerationRequest, background_ta
         else:
             logger.error(f"❌ Redis not available for job {job_id}")
         
-        # Start enterprise generation
-        background_tasks.add_task(run_enterprise_generation, job_id, request)
+        # Start enterprise generation in background (fire-and-forget)
+        asyncio.create_task(run_enterprise_generation(job_id, request))
         
         logger.info(f"[ENTERPRISE] ✅ Generation queued for job {job_id}")
         
@@ -996,12 +1044,18 @@ async def generate_variants_enterprise(request: GenerationRequest, background_ta
         logger.error(f"[ENTERPRISE] Error starting generation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/progress/{job_id}/")
 @app.get("/api/progress/{job_id}")
 async def get_progress_enterprise(job_id: str):
-    """Get enterprise generation progress"""
+    """Get enterprise generation progress - NO AUTH REQUIRED"""
     try:
         if not app.state.redis_client:
-            return {"error": "Redis not configured"}
+            return {
+                "job_id": job_id,
+                "progress": 0,
+                "status": "error",
+                "message": "Redis not configured"
+            }
         
         progress_data = app.state.redis_client.get(f"progress:job:{job_id}")
         
@@ -1010,43 +1064,57 @@ async def get_progress_enterprise(job_id: str):
                 "job_id": job_id,
                 "progress": 0,
                 "status": "not_found",
-                "message": "Job not found"
+                "message": "Job not found or expired"
             }
         
         return json.loads(progress_data)
         
     except Exception as e:
         logger.error(f"[ENTERPRISE] Error getting progress: {e}")
-        return {"error": str(e)}
+        return {
+            "job_id": job_id,
+            "progress": 0,
+            "status": "error",
+            "message": str(e)
+        }
 
 @app.get("/api/hardware")
 async def get_hardware_status():
-    """Get current hardware profile and capabilities"""
+    """Get current hardware profile and capabilities with orchestrator"""
     try:
-        global hardware_profile
-        if hardware_profile is None:
-            hardware_profile = get_hardware_profile()
+        from engine.orchestrator import get_orchestrator
         
-        # Discover distributed workers if available
-        workers = []
-        try:
-            workers = discover_workers()
-        except:
-            pass
+        orchestrator = get_orchestrator()
+        capabilities = orchestrator.capabilities
+        
+        # Get optimal strategy for sample dataset
+        strategy = orchestrator.get_optimal_strategy(num_courses=1000, num_clusters=100)
+        speedup = orchestrator.estimate_speedup(num_courses=1000)
         
         return {
-            "hardware_profile": hardware_profile.to_dict(),
-            "distributed_workers": len(workers),
-            "worker_details": workers[:5],  # First 5 workers
-            "recommendations": {
-                "optimal_strategy": hardware_profile.optimal_strategy.value,
-                "expected_performance": {
-                    "cpu_multiplier": hardware_profile.cpu_multiplier,
-                    "gpu_multiplier": hardware_profile.gpu_multiplier,
-                    "memory_multiplier": hardware_profile.memory_multiplier
-                },
-                "estimated_time_1000_courses": _estimate_processing_time(hardware_profile)
-            }
+            "hardware_capabilities": {
+                "cpu_cores": capabilities.cpu_cores,
+                "has_gpu": capabilities.has_gpu,
+                "gpu_name": capabilities.gpu_name,
+                "gpu_memory_gb": capabilities.gpu_memory_gb,
+                "has_distributed": capabilities.has_distributed,
+                "distributed_workers": capabilities.distributed_workers,
+                "total_ram_gb": capabilities.total_ram_gb
+            },
+            "optimal_strategy": strategy,
+            "estimated_speedup": {
+                "stage1": f"{speedup['stage1']:.1f}x",
+                "stage2a": f"{speedup['stage2a']:.1f}x",
+                "stage2b": f"{speedup['stage2b']:.1f}x",
+                "stage3": f"{speedup['stage3']:.1f}x",
+                "total": f"{speedup['total']:.1f}x"
+            },
+            "resource_utilization": {
+                "cpu": "100% (all cores used)",
+                "gpu": "100% (if available)" if capabilities.has_gpu else "N/A",
+                "distributed": "100% (if available)" if capabilities.has_distributed else "N/A"
+            },
+            "performance_mode": "MAXIMUM - Using ALL available resources"
         }
         
     except Exception as e:

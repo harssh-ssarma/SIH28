@@ -79,40 +79,57 @@ export default function AdminTimetablesPage() {
       const response = await fetch(`${API_BASE}/generation-jobs/?status=running,queued`, {
         credentials: 'include',
       })
-      if (response.ok) {
-        const jobs = await response.json()
-        const jobsWithProgress = await Promise.all(
-          jobs.map(async (job: any) => {
-            try {
-              const progressRes = await fetch(`${API_BASE}/progress/${job.id}/`, {
-                credentials: 'include',
-              })
-              if (progressRes.ok) {
-                const progressData = await progressRes.json()
-                return {
-                  job_id: job.id,
-                  progress: progressData.progress || 0,
-                  status: progressData.status || 'running',
-                  message: progressData.message || 'Processing...',
-                  time_remaining_seconds: progressData.time_remaining_seconds,
-                }
-              }
-            } catch (e) {
-              console.error('Failed to fetch progress:', e)
-            }
-            return {
-              job_id: job.id,
-              progress: 0,
-              status: 'running',
-              message: 'Processing...',
-              time_remaining_seconds: null,
-            }
-          })
-        )
-        setRunningJobs(jobsWithProgress.filter(j => j.status === 'running' || j.status === 'queued'))
+      if (!response.ok) return
+      
+      const data = await response.json()
+      const jobs = Array.isArray(data) ? data : (data.results || [])
+      
+      // Filter out cancelled/completed jobs immediately
+      const activeJobs = jobs.filter((job: any) => 
+        job.status === 'running' || job.status === 'queued'
+      )
+      
+      if (activeJobs.length === 0) {
+        setRunningJobs([])
+        return
       }
+      
+      const jobsWithProgress = await Promise.all(
+        activeJobs.map(async (job: any) => {
+          try {
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 2000)
+            
+            const progressRes = await fetch(`${API_BASE}/progress/${job.id}/`, {
+              credentials: 'include',
+              signal: controller.signal,
+            })
+            clearTimeout(timeoutId)
+            
+            if (progressRes.ok) {
+              const progressData = await progressRes.json()
+              return {
+                job_id: job.id,
+                progress: progressData.progress || 0,
+                status: progressData.status || job.status,
+                message: progressData.message || 'Processing...',
+                time_remaining_seconds: progressData.time_remaining_seconds,
+              }
+            }
+          } catch (e) {
+            // Silently handle network errors
+          }
+          return null
+        })
+      )
+      
+      // Filter out null results and non-active jobs
+      const validJobs = jobsWithProgress.filter(j => 
+        j && (j.status === 'running' || j.status === 'queued')
+      )
+      setRunningJobs(validJobs)
     } catch (err) {
-      console.error('Failed to load running jobs:', err)
+      // Silently handle errors
     }
   }
 
@@ -232,8 +249,8 @@ export default function AdminTimetablesPage() {
 
   return (
       <div className="space-y-6">
-        {/* Running Jobs Banner */}
-        {runningJobs.length > 0 && (
+        {/* Running Jobs Banner - Only show if jobs have progress > 0 */}
+        {runningJobs.length > 0 && runningJobs.some(j => j.progress > 0 || j.status === 'running') && (
           <div className="card bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
             <div className="card-header">
               <h3 className="font-semibold text-blue-900 dark:text-blue-100">🔄 Generation in Progress</h3>
@@ -270,10 +287,11 @@ export default function AdminTimetablesPage() {
                         }}
                       >
                         <div
-                          className="absolute inset-0 animate-shimmer"
+                          className="absolute inset-0"
                           style={{
                             background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%)',
                             backgroundSize: '200% 100%',
+                            animation: 'shimmer 2s linear infinite',
                           }}
                         />
                       </div>

@@ -101,11 +101,7 @@ class HardwareDetector:
     def detect_hardware(self, force_refresh: bool = False) -> HardwareProfile:
         """Detect all available hardware and determine optimal strategy"""
         
-        # Load from cache if available and not forcing refresh
-        if not force_refresh and self._load_from_cache():
-            return self.profile
-        
-        logger.info("Detecting hardware configuration...")
+        logger.info("Detecting hardware (no cache)...")
         
         # Detect CPU
         cpu_info = self._detect_cpu()
@@ -157,10 +153,7 @@ class HardwareDetector:
             memory_multiplier=multipliers['memory']
         )
         
-        # Save to cache
-        self._save_to_cache()
-        
-        logger.info(f"Hardware detection complete. Optimal strategy: {strategy.value}")
+        logger.info(f"Hardware detection complete. Strategy: {strategy.value}")
         logger.info(f"CPU: {cpu_info['cores']} cores, {memory_info['total_gb']:.1f}GB RAM")
         if gpu_info['has_nvidia'] or gpu_info['has_amd']:
             logger.info(f"GPU: {gpu_info['memory_gb']:.1f}GB VRAM")
@@ -190,12 +183,15 @@ class HardwareDetector:
             }
     
     def _detect_memory(self) -> Dict:
-        """Detect memory information"""
+        """Detect memory information with real-time refresh"""
         try:
             memory = psutil.virtual_memory()
+            total_gb = round(memory.total / (1024**3), 2)
+            available_gb = round(memory.available / (1024**3), 2)
+            logger.info(f"Memory detected: {total_gb}GB total, {available_gb}GB available")
             return {
-                'total_gb': memory.total / (1024**3),
-                'available_gb': memory.available / (1024**3)
+                'total_gb': total_gb,
+                'available_gb': available_gb
             }
         except Exception as e:
             logger.warning(f"Memory detection failed: {e}")
@@ -214,28 +210,33 @@ class HardwareDetector:
             'opencl_available': False
         }
         
-        # Check for NVIDIA GPU and CUDA
+        # Check for NVIDIA GPU via nvidia-smi (most reliable)
         try:
-            import torch
-            if torch.cuda.is_available():
-                gpu_info['has_nvidia'] = True
-                gpu_info['memory_gb'] = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                gpu_info['cuda_version'] = torch.version.cuda
-                logger.info(f"NVIDIA GPU detected: {torch.cuda.get_device_name(0)}")
-        except ImportError:
-            # Try nvidia-ml-py
+            result = subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'],
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and result.stdout:
+                lines = result.stdout.strip().split('\n')
+                if lines:
+                    parts = lines[0].split(',')
+                    gpu_name = parts[0].strip()
+                    memory_mb = int(parts[1].strip().split()[0])
+                    gpu_info['has_nvidia'] = True
+                    gpu_info['memory_gb'] = memory_mb / 1024
+                    logger.info(f"✅ NVIDIA GPU: {gpu_name} ({gpu_info['memory_gb']:.1f}GB)")
+        except:
+            pass
+        
+        # Fallback to PyTorch
+        if not gpu_info['has_nvidia']:
             try:
-                import pynvml
-                pynvml.nvmlInit()
-                handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-                info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                gpu_info['has_nvidia'] = True
-                gpu_info['memory_gb'] = info.total / (1024**3)
-                logger.info("NVIDIA GPU detected via pynvml")
+                import torch
+                if torch.cuda.is_available():
+                    gpu_info['has_nvidia'] = True
+                    gpu_info['memory_gb'] = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                    gpu_info['cuda_version'] = torch.version.cuda
+                    logger.info(f"✅ GPU via PyTorch: {torch.cuda.get_device_name(0)}")
             except:
                 pass
-        except Exception as e:
-            logger.debug(f"NVIDIA GPU detection failed: {e}")
         
         # Check for AMD GPU and OpenCL
         try:

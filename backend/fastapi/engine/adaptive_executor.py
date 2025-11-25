@@ -10,8 +10,9 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import multiprocessing as mp
 
 from .hardware_detector import HardwareProfile, ExecutionStrategy, get_hardware_profile, get_optimal_config
-from .stage2_hybrid import CPSATSolver, GeneticAlgorithmOptimizer, HybridScheduler
-from .stage3_rl import ContextAwareRLAgent, resolve_conflicts_with_enhanced_rl
+from .stage2_cpsat import AdaptiveCPSATSolver
+from .stage2_ga import GeneticAlgorithmOptimizer
+from .stage3_rl import RLConflictResolver
 from models.timetable_models import Course, Faculty, Room, TimeSlot
 
 logger = logging.getLogger(__name__)
@@ -163,18 +164,18 @@ class CPUExecutor:
                            clusters: List[List[Course]]) -> Dict:
         """Execute Stage 2 on CPU"""
         
-        # Use CP-SAT solver first
-        cpsat_solver = CPSATSolver(
+        # Use Adaptive CP-SAT solver
+        cpsat_solver = AdaptiveCPSATSolver(
             courses=courses,
             rooms=rooms,
             time_slots=time_slots,
             faculty=faculty,
-            timeout_seconds=self.config['cpsat_timeout']
+            max_cluster_size=12
         )
         
         # Get feasible solution
         feasible_solution = await asyncio.get_event_loop().run_in_executor(
-            None, cpsat_solver.solve
+            None, cpsat_solver.solve_cluster, courses
         )
         
         if not feasible_solution:
@@ -253,15 +254,15 @@ class CPUExecutor:
         for cluster in cluster_chunk:
             all_courses.extend(cluster)
         
-        cpsat_solver = CPSATSolver(
+        cpsat_solver = AdaptiveCPSATSolver(
             courses=all_courses,
             rooms=rooms,
             time_slots=time_slots,
             faculty=faculty,
-            timeout_seconds=self.config['cpsat_timeout']
+            max_cluster_size=12
         )
         
-        feasible_solution = cpsat_solver.solve()
+        feasible_solution = cpsat_solver.solve_cluster(all_courses)
         
         if not feasible_solution:
             return {'schedule': {}, 'quality_score': 0, 'conflicts': [], 'execution_time': 0}
@@ -339,16 +340,16 @@ class GPUExecutor:
         for cluster in clusters:
             all_courses.extend(cluster)
         
-        cpsat_solver = CPSATSolver(
+        cpsat_solver = AdaptiveCPSATSolver(
             courses=all_courses,
             rooms=rooms,
             time_slots=time_slots,
             faculty=faculty,
-            timeout_seconds=self.config['cpsat_timeout']
+            max_cluster_size=12
         )
         
         feasible_solution = await asyncio.get_event_loop().run_in_executor(
-            None, cpsat_solver.solve
+            None, cpsat_solver.solve_cluster, all_courses
         )
         
         if not feasible_solution:

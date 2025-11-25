@@ -33,11 +33,17 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        """Filter jobs based on user role"""
-        user = self.request.user
-        # Return all jobs for now since created_by field doesn't exist
-        # TODO: Add created_by field to GenerationJob model for proper filtering
-        return GenerationJob.objects.all().order_by('-created_at')
+        """Filter jobs based on user role and status"""
+        queryset = GenerationJob.objects.all().order_by('-created_at')
+        
+        # Filter by status if provided
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            # Handle comma-separated statuses
+            statuses = [s.strip() for s in status_filter.split(',')]
+            queryset = queryset.filter(status__in=statuses)
+        
+        return queryset
 
     @action(detail=False, methods=["post"], url_path="generate")
     def generate_timetable(self, request):

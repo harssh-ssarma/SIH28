@@ -134,10 +134,11 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
               }}
             >
               <div
-                className="absolute inset-0 animate-shimmer"
+                className="absolute inset-0"
                 style={{
-                  background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%)',
+                  background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.8) 50%, transparent 100%)',
                   backgroundSize: '200% 100%',
+                  animation: 'shimmer-reverse 4s infinite linear',
                 }}
               />
             </div>

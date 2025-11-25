@@ -8,7 +8,8 @@ from celery import Celery
 import os
 
 from models.timetable_models import Course, Faculty, Room, TimeSlot
-from .stage2_hybrid import CPSATSolver, GeneticAlgorithmOptimizer
+from .stage2_cpsat import AdaptiveCPSATSolver
+from .stage2_ga import GeneticAlgorithmOptimizer
 from .stage3_rl import resolve_conflicts_with_enhanced_rl
 
 logger = logging.getLogger(__name__)
@@ -61,18 +62,18 @@ def solve_cluster_task(self, courses: List[Course], faculty: Dict,
         for cluster in cluster_chunk:
             all_courses.extend(cluster)
         
-        cpsat_solver = CPSATSolver(
+        cpsat_solver = AdaptiveCPSATSolver(
             courses=all_courses,
             rooms=rooms,
             time_slots=time_slots,
             faculty=faculty,
-            timeout_seconds=config.get('cpsat_timeout', 30)
+            max_cluster_size=12
         )
         
         self.update_state(state='PROGRESS', meta={'progress': 20, 'status': 'Solving clusters'})
         
-        # Solve with CP-SAT + GA
-        feasible_solution = cpsat_solver.solve()
+        # Solve with Adaptive CP-SAT + GA
+        feasible_solution = cpsat_solver.solve_cluster(all_courses)
         
         if not feasible_solution:
             result = {'schedule': {}, 'quality_score': 0, 'conflicts': [], 'execution_time': 0}
@@ -191,17 +192,17 @@ def gpu_accelerated_task(self, courses: List[Course], faculty: Dict,
         for cluster in clusters:
             all_courses.extend(cluster)
         
-        cpsat_solver = CPSATSolver(
+        cpsat_solver = AdaptiveCPSATSolver(
             courses=all_courses,
             rooms=rooms,
             time_slots=time_slots,
             faculty=faculty,
-            timeout_seconds=config.get('cpsat_timeout', 30)
+            max_cluster_size=12
         )
         
         self.update_state(state='PROGRESS', meta={'progress': 20, 'status': 'GPU solving clusters'})
         
-        feasible_solution = cpsat_solver.solve()
+        feasible_solution = cpsat_solver.solve_cluster(all_courses)
         
         if not feasible_solution:
             result = {'schedule': {}, 'quality_score': 0, 'conflicts': [], 'execution_time': 0}
@@ -277,17 +278,17 @@ def hybrid_cloud_task(self, courses: List[Course], faculty: Dict,
         for cluster in clusters:
             all_courses.extend(cluster)
         
-        cpsat_solver = CPSATSolver(
+        cpsat_solver = AdaptiveCPSATSolver(
             courses=all_courses,
             rooms=rooms,
             time_slots=time_slots,
             faculty=faculty,
-            timeout_seconds=worker_config.get('cpsat_timeout', 30)
+            max_cluster_size=12
         )
         
         self.update_state(state='PROGRESS', meta={'progress': 20, 'status': 'Solving with adaptive strategy'})
         
-        feasible_solution = cpsat_solver.solve()
+        feasible_solution = cpsat_solver.solve_cluster(all_courses)
         
         if not feasible_solution:
             result = {'schedule': {}, 'quality_score': 0, 'conflicts': [], 'execution_time': 0}
