@@ -339,6 +339,30 @@ export class ProgressTracker {
 }
 
 // ============================================
+// TIMETABLE CONFIGURATION API
+// ============================================
+
+export async function fetchLastTimetableConfig(): Promise<any> {
+  const response = await fetch(
+    `${DJANGO_API_BASE}/academics/timetable-configs/last_used/`,
+    getFetchOptions()
+  )
+  if (!response.ok) {
+    return null
+  }
+  return handleResponse(response)
+}
+
+export async function saveTimetableConfig(config: any): Promise<any> {
+  const response = await fetch(`${DJANGO_API_BASE}/academics/timetable-configs/`, {
+    method: 'POST',
+    ...getFetchOptions(),
+    body: JSON.stringify(config),
+  })
+  return handleResponse(response)
+}
+
+// ============================================
 // UTILITY: Transform Workflows to List Items
 // ============================================
 

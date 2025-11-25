@@ -1,0 +1,1 @@
+from .timetable_config_models import TimetableConfiguration

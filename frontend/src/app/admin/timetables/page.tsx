@@ -11,7 +11,7 @@ import {
 import type { TimetableListItem, FacultyAvailability } from '@/types/timetable'
 
 export default function AdminTimetablesPage() {
-  const [activeYear, setActiveYear] = useState('all')
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [timetables, setTimetables] = useState<TimetableListItem[]>([])
   const [facultyAvailability, setFacultyAvailability] = useState<FacultyAvailability[]>([])
   const [loading, setLoading] = useState(true)
@@ -85,20 +85,15 @@ export default function AdminTimetablesPage() {
     }
   }
 
-  const getFilteredTimetables = () => {
-    if (activeYear === 'all') return timetables
-    return timetables.filter(t => t.year === parseInt(activeYear))
-  }
+  const getGroupedBySemester = () => {
+    const grouped: { [key: string]: TimetableListItem[] } = {}
 
-  const getGroupedTimetables = () => {
-    const filtered = getFilteredTimetables()
-    const grouped: { [key: number]: TimetableListItem[] } = {}
-
-    filtered.forEach(timetable => {
-      if (!grouped[timetable.year]) {
-        grouped[timetable.year] = []
+    timetables.forEach(timetable => {
+      const key = `${timetable.academic_year}-${timetable.semester}`
+      if (!grouped[key]) {
+        grouped[key] = []
       }
-      grouped[timetable.year].push(timetable)
+      grouped[key].push(timetable)
     })
 
     return grouped
@@ -134,15 +129,7 @@ export default function AdminTimetablesPage() {
     }
   }
 
-  const navItems = [
-    { id: 'all', label: 'All Years', count: timetables.length },
-    { id: '1', label: '1st Year', count: timetables.filter(t => t.year === 1).length },
-    { id: '2', label: '2nd Year', count: timetables.filter(t => t.year === 2).length },
-    { id: '3', label: '3rd Year', count: timetables.filter(t => t.year === 3).length },
-    { id: '4', label: '4th Year', count: timetables.filter(t => t.year === 4).length },
-  ]
-
-  const groupedTimetables = getGroupedTimetables()
+  const groupedTimetables = getGroupedBySemester()
 
   if (loading) {
     return (
@@ -208,99 +195,43 @@ export default function AdminTimetablesPage() {
           </div>
         </div>
 
-        {/* Faculty Availability Card */}
-        <div className="card">
-          <div className="card-header">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-[#2196F3]/10 dark:bg-[#2196F3]/20 flex items-center justify-center">
-                <svg
-                  className="w-5 h-5 text-[#2196F3]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"
-                  />
-                </svg>
-              </div>
-              <div>
-                <h3 className="card-title">Faculty Availability</h3>
-                <p className="text-sm text-[#6B6B6B] dark:text-[#B3B3B3] mt-1">
-                  Manage faculty availability for scheduling
-                </p>
-              </div>
-            </div>
-          </div>
+        {/* Two Column Layout: Timetables (Left) + Faculty (Right) */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column: Timetables (2/3 width) */}
+          <div className="lg:col-span-2 space-y-6">
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {facultyAvailability.filter(f => f.name).map(faculty => (
-              <div key={faculty.id} className="card flex items-center justify-between p-4">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className="w-8 h-8 bg-[#2196F3]/10 dark:bg-[#2196F3]/20 rounded-full flex items-center justify-center flex-shrink-0">
-                    <span className="text-sm font-medium text-[#2196F3]">
-                      {faculty.name
-                        .split(' ')
-                        .map(n => n[0])
-                        .join('')}
-                    </span>
-                  </div>
-                  <span className="text-sm font-medium text-[#2C2C2C] dark:text-[#FFFFFF] truncate">
-                    {faculty.name}
-                  </span>
-                </div>
+            {/* View Mode Toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Department Timetables</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Course-centric schedules for all semesters</p>
+              </div>
+              <div className="flex gap-2">
                 <button
-                  type="button"
-                  onClick={() => toggleFacultyAvailability(faculty.id)}
-                  aria-label={`Toggle availability for ${faculty.name}`}
-                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[#2196F3] focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-[#121212] ${
-                    faculty.available ? 'bg-[#2196F3]' : 'bg-[#E0E0E0] dark:bg-[#404040]'
+                  onClick={() => setViewMode('grid')}
+                  className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                    viewMode === 'grid'
+                      ? 'bg-[#2196F3] text-white'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                   }`}
                 >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-300 shadow-md ${
-                      faculty.available ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
+                  Grid View
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                    viewMode === 'list'
+                      ? 'bg-[#2196F3] text-white'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  List View
                 </button>
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
 
-        {/* Modern Navigation Tabs */}
-        <div className="border-b border-[#E0E0E0] dark:border-[#2A2A2A]">
-          <nav className="flex space-x-1 overflow-x-auto scrollbar-hide">
-            {navItems.map(item => (
-              <button
-                key={item.id}
-                onClick={() => setActiveYear(item.id)}
-                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-all duration-300 ${
-                  activeYear === item.id
-                    ? 'border-[#2196F3] text-[#2196F3]'
-                    : 'border-transparent text-[#6B6B6B] dark:text-[#B3B3B3] hover:text-[#2C2C2C] dark:hover:text-[#FFFFFF] hover:border-[#E0E0E0] dark:hover:border-[#404040]'
-                }`}
-              >
-                <span>{item.label}</span>
-                <span
-                  className={`text-xs px-2 py-0.5 ${
-                    activeYear === item.id
-                      ? 'bg-[#2196F3]/10 text-[#2196F3]'
-                      : 'bg-[#E0E0E0] dark:bg-[#404040] text-[#6B6B6B] dark:text-[#B3B3B3]'
-                  }`}
-                >
-                  {item.count}
-                </span>
-              </button>
-            ))}
-          </nav>
-        </div>
-
-        {/* Timetables Hierarchical View */}
-        <div className="space-y-4 sm:space-y-6">
+            {/* Timetables by Semester */}
+            <div className="space-y-4">
           {Object.keys(groupedTimetables).length === 0 ? (
             <div className="card">
               <div className="text-center py-8 sm:py-12">
@@ -309,17 +240,7 @@ export default function AdminTimetablesPage() {
                   No Timetables Found
                 </h3>
                 <p className="text-sm text-[#606060] dark:text-[#aaaaaa] mb-4 sm:mb-6 px-4">
-                  {activeYear === 'all'
-                    ? 'No timetables have been created yet.'
-                    : `No timetables found for ${
-                        activeYear === '1'
-                          ? '1st'
-                          : activeYear === '2'
-                            ? '2nd'
-                            : activeYear === '3'
-                              ? '3rd'
-                              : '4th'
-                      } year.`}
+                  No timetables have been created yet.
                 </p>
                 <a href="/admin/timetables/new" className="btn-primary">
                   Create First Timetable
@@ -328,93 +249,164 @@ export default function AdminTimetablesPage() {
             </div>
           ) : (
             Object.entries(groupedTimetables)
-              .sort(([a], [b]) => parseInt(a) - parseInt(b))
-              .map(([year, yearTimetables]) => (
-                <div key={year} className="card">
-                  <div className="card-header">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <h3 className="card-title">
-                        {year === '1' ? '1st' : year === '2' ? '2nd' : year === '3' ? '3rd' : '4th'}{' '}
-                        Year Timetables
-                      </h3>
-                      <span className="badge badge-info">
-                        {yearTimetables.length} {yearTimetables.length === 1 ? 'batch' : 'batches'}
-                      </span>
+              .sort(([a], [b]) => b.localeCompare(a))
+              .map(([semesterKey, semesterTimetables]) => {
+                const [academicYear, semester] = semesterKey.split('-')
+                return (
+                  <div key={semesterKey} className="card">
+                    <div className="card-header">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div>
+                          <h3 className="card-title">
+                            {academicYear} - Semester {semester}
+                          </h3>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            {semesterTimetables.length} course{semesterTimetables.length !== 1 ? 's' : ''} scheduled
+                          </p>
+                        </div>
+                        <span className="badge badge-info">
+                          {semesterTimetables.filter(t => t.status === 'approved').length} approved
+                        </span>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 sm:gap-4">
-                    {yearTimetables
-                      .sort((a, b) => a.batch.localeCompare(b.batch))
-                      .map(timetable => (
-                        <a
-                          key={timetable.id}
-                          href={`/admin/timetables/${timetable.id}/review`}
-                          className="block p-3 sm:p-4 bg-white dark:bg-[#1E1E1E] border border-[#E0E0E0] dark:border-[#2A2A2A]"
-                        >
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-medium text-[#2C2C2C] dark:text-[#FFFFFF] truncate">
-                                {timetable.department} - Section {timetable.batch}
-                              </h4>
-                              <p className="text-sm text-[#6B6B6B] dark:text-[#B3B3B3]">
-                                Semester {timetable.semester}
-                              </p>
-                            </div>
-                            <span
-                              className={`px-2 py-1 text-xs font-medium flex-shrink-0 ml-2 ${getStatusColor(
-                                timetable.status
-                              )}`}
-                            >
-                              <span className="hidden sm:inline">
-                                {getStatusIcon(timetable.status)}{' '}
-                              </span>
-                              {timetable.status.charAt(0).toUpperCase() + timetable.status.slice(1)}
-                            </span>
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-[#606060] dark:text-[#aaaaaa]">
-                                Last Updated:
-                              </span>
-                              <span className="text-[#0f0f0f] dark:text-white">
-                                {timetable.lastUpdated}
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 sm:gap-4">
+                      {semesterTimetables
+                        .sort((a, b) => a.department.localeCompare(b.department))
+                        .map(timetable => (
+                          <a
+                            key={timetable.id}
+                            href={`/admin/timetables/${timetable.id}/review`}
+                            className="block p-3 sm:p-4 bg-white dark:bg-[#1E1E1E] border border-[#E0E0E0] dark:border-[#2A2A2A] rounded-lg hover:border-[#2196F3] dark:hover:border-[#2196F3] transition-colors"
+                          >
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-medium text-[#2C2C2C] dark:text-[#FFFFFF] truncate">
+                                  {timetable.department}
+                                </h4>
+                                <p className="text-sm text-[#6B6B6B] dark:text-[#B3B3B3]">
+                                  {timetable.batch || 'All Students'}
+                                </p>
+                              </div>
+                              <span
+                                className={`px-2 py-1 text-xs font-medium flex-shrink-0 ml-2 rounded ${getStatusColor(
+                                  timetable.status
+                                )}`}
+                              >
+                                {getStatusIcon(timetable.status)} {timetable.status.charAt(0).toUpperCase() + timetable.status.slice(1)}
                               </span>
                             </div>
 
-                            {timetable.score && (
+                            <div className="space-y-2">
                               <div className="flex items-center justify-between text-sm">
-                                <span className="text-[#606060] dark:text-[#aaaaaa]">Score:</span>
-                                <span className="font-medium text-[#00ba7c]">
-                                  {timetable.score}/10
+                                <span className="text-[#606060] dark:text-[#aaaaaa]">
+                                  Last Updated:
+                                </span>
+                                <span className="text-[#0f0f0f] dark:text-white">
+                                  {timetable.lastUpdated}
                                 </span>
                               </div>
-                            )}
 
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-[#606060] dark:text-[#aaaaaa]">Conflicts:</span>
-                              <span
-                                className={`font-medium ${
-                                  timetable.conflicts > 0 ? 'text-[#ff4444]' : 'text-[#00ba7c]'
-                                }`}
-                              >
-                                {timetable.conflicts}
+                              {timetable.score && (
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="text-[#606060] dark:text-[#aaaaaa]">Score:</span>
+                                  <span className="font-medium text-[#00ba7c]">
+                                    {timetable.score}/10
+                                  </span>
+                                </div>
+                              )}
+
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="text-[#606060] dark:text-[#aaaaaa]">Conflicts:</span>
+                                <span
+                                  className={`font-medium ${
+                                    timetable.conflicts > 0 ? 'text-[#ff4444]' : 'text-[#00ba7c]'
+                                  }`}
+                                >
+                                  {timetable.conflicts}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 pt-3 border-t border-[#e5e5e5] dark:border-[#3d3d3d]">
+                              <span className="text-xs text-[#065fd4] font-medium group-hover:text-[#0856c1] transition-colors duration-200">
+                                👁️ View Details →
                               </span>
                             </div>
-                          </div>
+                          </a>
+                        ))}
+                    </div>
+                  </div>
+                )
+              })
+            </div>
+          </div>
 
-                          <div className="mt-3 pt-3 border-t border-[#e5e5e5] dark:border-[#3d3d3d]">
-                            <span className="text-xs text-[#065fd4] font-medium group-hover:text-[#0856c1] transition-colors duration-200">
-                              👁️ View Details →
-                            </span>
-                          </div>
-                        </a>
-                      ))}
+          {/* Right Column: Faculty Availability (1/3 width) */}
+          <div className="lg:col-span-1">
+            <div className="card sticky top-6">
+              <div className="card-header">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-[#2196F3]/10 dark:bg-[#2196F3]/20 flex items-center justify-center rounded-lg">
+                    <svg
+                      className="w-5 h-5 text-[#2196F3]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"
+                      />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white">Faculty</h3>
+                    <p className="text-xs text-[#6B6B6B] dark:text-[#B3B3B3]">
+                      {facultyAvailability.filter(f => f.available).length} available
+                    </p>
                   </div>
                 </div>
-              ))
-          )}
+              </div>
+
+              <div className="max-h-[calc(100vh-200px)] overflow-y-auto space-y-2">
+                {facultyAvailability.filter(f => f.name).map(faculty => (
+                  <div key={faculty.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-8 h-8 bg-[#2196F3]/10 dark:bg-[#2196F3]/20 rounded-full flex items-center justify-center flex-shrink-0">
+                        <span className="text-xs font-medium text-[#2196F3]">
+                          {faculty.name
+                            .split(' ')
+                            .map(n => n[0])
+                            .join('')
+                            .slice(0, 2)}
+                        </span>
+                      </div>
+                      <span className="text-sm font-medium text-[#2C2C2C] dark:text-[#FFFFFF] truncate">
+                        {faculty.name}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleFacultyAvailability(faculty.id)}
+                      aria-label={`Toggle availability for ${faculty.name}`}
+                      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[#2196F3] focus:ring-offset-2 ${
+                        faculty.available ? 'bg-[#2196F3]' : 'bg-[#E0E0E0] dark:bg-[#404040]'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform duration-300 shadow-md ${
+                          faculty.available ? 'translate-x-5' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Quick Stats */}

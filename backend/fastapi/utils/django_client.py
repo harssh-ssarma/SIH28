@@ -225,11 +225,12 @@ class DjangoAPIClient:
     async def fetch_time_slots(self, org_name: str) -> List[TimeSlot]:
         """Generate standard time slots"""
         try:
-            # Generate standard time slots (9 AM - 5 PM, 6 days)
+            # Generate standard time slots (8 AM - 5 PM, 6 days, 8 slots per day)
             days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
             times = [
-                ('09:00', '10:00'), ('10:00', '11:00'), ('11:00', '12:00'),
-                ('12:00', '13:00'), ('14:00', '15:00'), ('15:00', '16:00'), ('16:00', '17:00')
+                ('08:00', '09:00'), ('09:00', '10:00'), ('10:00', '11:00'), ('11:00', '12:00'),
+                ('12:00', '13:00'),  # Lunch break can be skipped if needed
+                ('13:00', '14:00'), ('14:00', '15:00'), ('15:00', '16:00'), ('16:00', '17:00')
             ]
             
             time_slots = []
