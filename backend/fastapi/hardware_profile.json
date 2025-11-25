@@ -1,0 +1,26 @@
+{
+  "cpu_cores": 6,
+  "cpu_threads": 12,
+  "cpu_frequency": 3301.0,
+  "cpu_architecture": "AMD64",
+  "total_ram_gb": 7.345546722412109,
+  "available_ram_gb": 0.87457275390625,
+  "has_nvidia_gpu": false,
+  "has_amd_gpu": false,
+  "gpu_memory_gb": 0.0,
+  "cuda_version": null,
+  "opencl_available": false,
+  "storage_type": "SSD",
+  "storage_speed_mbps": 500.0,
+  "network_bandwidth_mbps": 3.0,
+  "is_cloud_instance": false,
+  "cloud_provider": null,
+  "distributed_nodes": [],
+  "optimal_strategy": "cpu_multi",
+  "fallback_strategies": [
+    "cpu_single"
+  ],
+  "cpu_multiplier": 2.063125,
+  "gpu_multiplier": 1.0,
+  "memory_multiplier": 0.9181933403015137
+}

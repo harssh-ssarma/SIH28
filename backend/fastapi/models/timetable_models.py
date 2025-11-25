@@ -18,12 +18,12 @@ class Course(BaseModel):
     course_id: str
     course_code: str
     course_name: str
-    faculty_id: str
-    student_ids: List[str]
-    batch_ids: List[str]
-    duration: int = Field(..., ge=1, le=4, description="Sessions per week")
-    type: CourseType
-    credits: int = Field(..., ge=1, le=4, description="NEP 2020 credit structure")
+    faculty_id: str = ""
+    student_ids: List[str] = Field(default_factory=list)
+    batch_ids: List[str] = Field(default_factory=list)
+    duration: int = Field(default=3, ge=1, le=10, description="Sessions per week")
+    type: Optional[str] = None
+    credits: int = Field(default=3, ge=1, le=10, description="NEP 2020 credit structure")
     required_features: List[str] = Field(default_factory=list)
     department_id: str
     subject_type: str = Field(default="core", description="core, elective, or open_elective")
@@ -32,9 +32,11 @@ class Course(BaseModel):
 class Faculty(BaseModel):
     """Faculty Member"""
     faculty_id: str
-    name: str
+    faculty_name: str
+    faculty_code: str = ""
     department_id: str
-    max_load: int = Field(default=24, description="Max hours per week")
+    max_hours_per_week: int = Field(default=18, description="Max hours per week")
+    specialization: str = ""
     available_slots: List[int] = Field(default_factory=list)
     preferred_slots: Dict[int, float] = Field(default_factory=dict)
 
@@ -43,37 +45,42 @@ class Room(BaseModel):
     """Room with heterogeneous capacities and features"""
     room_id: str
     room_code: str
+    room_name: str
+    room_type: str = "classroom"
     capacity: int
     features: List[str] = Field(default_factory=list)
-    building: Optional[str] = None
 
 
 class TimeSlot(BaseModel):
     """Time Slot"""
     slot_id: str
-    day: int = Field(..., ge=0, le=4, description="0=Mon, 4=Fri")
+    day_of_week: str
+    day: int = Field(..., ge=0, le=5, description="0=Mon, 5=Sat")
     period: int = Field(..., ge=0, le=9, description="Period number")
     start_time: str
     end_time: str
+    slot_name: str = ""
 
 
 class Student(BaseModel):
     """Student"""
     student_id: str
-    name: str
-    batch_id: str
-    enrolled_course_ids: List[str]
-    program_id: str
+    student_name: str
+    enrollment_number: str
+    department_id: str
+    semester: int
+    batch_id: str = ""
+    enrolled_course_ids: List[str] = Field(default_factory=list)
 
 
 class Batch(BaseModel):
     """Batch/Section"""
     batch_id: str
     batch_code: str
+    batch_name: str
     department_id: str
-    program_id: str
     semester: int
-    student_count: int
+    total_students: int
 
 
 class TimetableEntry(BaseModel):

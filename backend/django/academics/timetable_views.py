@@ -217,18 +217,34 @@ def get_student_timetable(request):
 @api_view(["GET"])
 def get_progress(request, job_id):
     """
-    Get generation progress from Redis
+    Get generation progress from Redis or Database
     GET /api/progress/{job_id}/
     """
     try:
         from django.core.cache import cache
+        from .models import GenerationJob
         import json
         
-        # Get progress from Redis
+        # Try Redis first
         progress_key = f"progress:job:{job_id}"
         progress_data = cache.get(progress_key)
         
-        if not progress_data:
+        if progress_data:
+            if isinstance(progress_data, str):
+                progress_data = json.loads(progress_data)
+            return Response(progress_data)
+        
+        # Fallback to database
+        try:
+            job = GenerationJob.objects.get(id=job_id)
+            return Response({
+                'job_id': str(job.id),
+                'progress': job.progress,
+                'status': job.status,
+                'message': job.error_message or f'Status: {job.status}',
+                'stage': job.status
+            })
+        except GenerationJob.DoesNotExist:
             return Response(
                 {
                     'job_id': job_id,
@@ -238,12 +254,6 @@ def get_progress(request, job_id):
                 },
                 status=status.HTTP_404_NOT_FOUND
             )
-        
-        # Parse if string
-        if isinstance(progress_data, str):
-            progress_data = json.loads(progress_data)
-        
-        return Response(progress_data)
         
     except Exception as e:
         logger.error(f"Error getting progress: {e}")

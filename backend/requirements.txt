@@ -8,8 +8,7 @@ django-redis==5.4.0
 django-filter==24.3
 django-ratelimit==4.1.0
 django-otp==1.3.0
-psycopg[binary]==3.2.3
-psycopg2-binary==2.9.9
+# psycopg2-binary>=2.9.0  # Install separately if PostgreSQL needed
 argon2-cffi==23.1.0
 gunicorn==23.0.0
 python-decouple==3.8
@@ -21,7 +20,7 @@ celery-progress==0.3  # Progress tracking for Celery tasks
 openpyxl==3.1.5
 xlrd==2.0.1
 
-# FastAPI Timetable Service Dependencies
+# FastAPI Timetable Service Dependencies - Hardware Adaptive
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
 pydantic==2.9.2
@@ -33,18 +32,52 @@ networkx==3.2.1
 python-louvain==0.16
 scikit-learn>=1.3.0
 websockets==12.0
+torch>=2.6.0
+
+# Hardware-Adaptive System Extensions
+scipy==1.11.4
+deap==1.4.1  # Genetic Algorithm
+aiohttp==3.9.1  # Async HTTP client
+py-cpuinfo==9.0.0  # CPU detection
+joblib==1.3.2  # Parallel processing
+multiprocess==0.70.15  # Process isolation
+python-socketio==5.10.0  # WebSocket support
+cloudpickle==3.0.0  # Serialization
+structlog==23.2.0  # Structured logging
+rich==13.7.0  # Terminal output
+tqdm==4.66.1  # Progress bars
+
+# GPU Acceleration (Optional - auto-detected)
+# torchvision>=0.15.0; sys_platform != "darwin"
+# torchaudio>=2.0.0; sys_platform != "darwin"
+# pyopencl>=2023.1; platform_machine != "arm64"  # AMD/Intel GPU
+# pynvml>=11.5.0  # NVIDIA monitoring
+
+# Cloud SDKs (Optional - auto-detected)
+# google-cloud-compute>=1.15.0  # Google Cloud
+# azure-mgmt-compute>=30.0.0  # Azure
+
+# Mathematical optimization
+# cvxpy>=1.4.0  # Convex optimization (optional)
+pulp>=2.7.0  # Linear programming
+
+# Time series
+pandas==2.1.4
+pytz==2023.3
 
 # Shared Dependencies
 redis==5.2.0
 httpx==0.27.2
 requests==2.32.3
 python-dotenv==1.0.1
-sentry-sdk==2.19.2
+sentry-sdk[fastapi]==2.19.2
 python-jose[cryptography]==3.3.0
 setuptools>=65.0.0
 psutil==6.1.0  # System resource monitoring for adaptive parallelism
 gevent==23.9.1  # Async worker pool for Celery (optional)
 eventlet==0.33.3  # Alternative async pool for Celery (optional)
+cryptography>=41.0.0  # Security
+bcrypt>=4.0.0  # Password hashing
 
 # Phase 1: Real-Time Progress & WebSocket
 websockets==12.0  # Already present, keeping for clarity
@@ -63,6 +96,7 @@ django-storages==1.14.4  # Django S3 integration
 # Testing & Development
 pytest==7.4.3
 pytest-django==4.7.0
+pytest-asyncio==0.21.1  # FastAPI async testing
 pytest-cov==4.1.0
 faker==20.1.0
 locust==2.20.0
@@ -70,3 +104,13 @@ bandit==1.7.5
 black==23.12.1
 flake8==6.1.0
 isort==5.13.2
+mypy==1.7.1  # Type checking
+
+# Performance profiling (Development)
+py-spy==0.3.14
+memory-profiler==0.61.0
+line-profiler==4.1.1
+
+# Documentation (Development)
+mkdocs==1.5.3
+mkdocs-material==9.4.8

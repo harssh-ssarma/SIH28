@@ -14,114 +14,60 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
   const [phase, setPhase] = useState('Initializing...')
   const [eta, setEta] = useState<number | null>(null)
   const [cancelling, setCancelling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const API_BASE = process.env.NEXT_PUBLIC_DJANGO_API_URL || 'http://localhost:8000/api'
-  const WS_BASE = process.env.NEXT_PUBLIC_FASTAPI_WS_URL || 'ws://localhost:8001'
+  const reconnectAttemptsRef = useRef(0)
+  const MAX_RECONNECT_ATTEMPTS = 3
 
   useEffect(() => {
-    let isConnected = false
+    let pollInterval: NodeJS.Timeout | null = null
 
-    const connectWebSocket = () => {
+    const pollProgress = async () => {
       try {
-        const ws = new WebSocket(`${WS_BASE}/ws/progress/${jobId}`)
-        wsRef.current = ws
+        const res = await fetch(`${API_BASE}/progress/${jobId}/`, {
+          credentials: 'include',
+        })
 
-        ws.onopen = () => {
-          console.log('WebSocket connected')
-          isConnected = true
-        }
+        if (res.ok) {
+          const data = await res.json()
+          setProgress(data.progress || 0)
+          setStatus(data.status || 'running')
+          setPhase(data.stage || data.message || 'Processing...')
 
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data)
-            setProgress(data.progress || 0)
-            setStatus(data.status || 'running')
-            setPhase(data.phase || data.message || 'Processing...')
-            setEta(data.eta_seconds)
-
-            if (data.status === 'completed' && data.timetable_id) {
-              onComplete(data.timetable_id)
-              ws.close()
-            } else if (data.status === 'failed') {
-              alert(`Generation failed: ${data.error || 'Unknown error'}`)
-              ws.close()
-            } else if (data.status === 'cancelled') {
-              ws.close()
-            }
-          } catch (err) {
-            console.error('Failed to parse WebSocket message:', err)
-          }
-        }
-
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
-        }
-
-        ws.onclose = () => {
-          console.log('WebSocket disconnected')
-          isConnected = false
-          
-          // Reconnect after 3 seconds if not completed/failed
-          if (status !== 'completed' && status !== 'failed' && status !== 'cancelled') {
-            reconnectTimeoutRef.current = setTimeout(() => {
-              console.log('Reconnecting WebSocket...')
-              connectWebSocket()
-            }, 3000)
+          if (data.status === 'completed') {
+            if (pollInterval) clearInterval(pollInterval)
+            onComplete(jobId)
+          } else if (data.status === 'failed') {
+            if (pollInterval) clearInterval(pollInterval)
+            setError(data.message || data.error || 'Generation failed')
+          } else if (data.status === 'cancelled') {
+            if (pollInterval) clearInterval(pollInterval)
+            setPhase('Generation cancelled')
           }
         }
       } catch (err) {
-        console.error('Failed to connect WebSocket:', err)
-        // Fallback to polling if WebSocket fails
-        startPolling()
+        console.error('Failed to poll progress:', err)
       }
     }
 
-    const startPolling = () => {
-      const pollProgress = async () => {
-        try {
-          const res = await fetch(`${API_BASE}/progress/${jobId}/`, {
-            credentials: 'include',
-          })
-
-          if (res.ok) {
-            const data = await res.json()
-            setProgress(data.progress || 0)
-            setStatus(data.status || 'running')
-            setPhase(data.stage || data.message || 'Processing...')
-
-            if (data.status === 'completed') {
-              onComplete(jobId)
-            } else if (data.status === 'failed') {
-              alert(`Generation failed: ${data.message || 'Unknown error'}`)
-            }
-          }
-        } catch (err) {
-          console.error('Failed to poll progress:', err)
-        }
-      }
-
-      const interval = setInterval(pollProgress, 2000)
-      pollProgress()
-
-      return () => clearInterval(interval)
-    }
-
-    // Try WebSocket first, fallback to polling
-    connectWebSocket()
+    // Use HTTP polling only (WebSocket not working)
+    pollInterval = setInterval(pollProgress, 2000)
+    pollProgress()
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
-      }
+      if (pollInterval) clearInterval(pollInterval)
     }
-  }, [jobId, onComplete, status])
+  }, [jobId, onComplete])
 
   const handleCancel = async () => {
+    if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+      alert(`Cannot cancel ${status} process`)
+      return
+    }
+
     if (!confirm('Are you sure you want to cancel this generation? This cannot be undone.')) {
       return
     }
@@ -152,10 +98,24 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
   return (
     <div className="card max-w-2xl mx-auto">
       <div className="p-6 space-y-6">
-        <div className="text-center">
-          <h3 className="text-xl font-semibold mb-2">Generating Timetable</h3>
-          <p className="text-sm text-gray-600">{phase}</p>
-        </div>
+        {error ? (
+          <div className="text-center space-y-4">
+            <div className="text-red-600 text-6xl">⚠️</div>
+            <h3 className="text-xl font-semibold text-red-600">Generation Failed</h3>
+            <p className="text-sm text-gray-700 bg-red-50 p-4 rounded border border-red-200">{error}</p>
+            <a
+              href="/admin/timetables"
+              className="inline-block px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Back to Timetables
+            </a>
+          </div>
+        ) : (
+          <>
+            <div className="text-center">
+              <h3 className="text-xl font-semibold mb-2">Generating Timetable</h3>
+              <p className="text-sm text-gray-600">{phase}</p>
+            </div>
 
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
@@ -180,24 +140,26 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
         </div>
 
-        <div className="flex justify-center gap-4">
-          <a
-            href="/admin/timetables"
-            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-          >
-            Back to Timetables
-          </a>
-          
-          {status !== 'completed' && status !== 'failed' && status !== 'cancelled' && (
-            <button
-              onClick={handleCancel}
-              disabled={cancelling}
-              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {cancelling ? 'Cancelling...' : 'Cancel Generation'}
-            </button>
-          )}
-        </div>
+            <div className="flex justify-center gap-4">
+              <a
+                href="/admin/timetables"
+                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+              >
+                Back to Timetables
+              </a>
+              
+              {status !== 'completed' && status !== 'failed' && status !== 'cancelled' && (
+                <button
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {cancelling ? 'Cancelling...' : 'Cancel Generation'}
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

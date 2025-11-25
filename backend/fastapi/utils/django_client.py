@@ -33,7 +33,7 @@ class DjangoAPIClient:
 
     async def fetch_courses(
         self,
-        org_id: str,
+        org_name: str,
         semester: int,
         department_id: Optional[str] = None
     ) -> List[Course]:
@@ -41,44 +41,82 @@ class DjangoAPIClient:
         try:
             cursor = self.db_conn.cursor()
             
+            # First get org_id from org_name
+            cursor.execute("SELECT org_id, org_name FROM organizations WHERE org_name = %s", (org_name,))
+            org_row = cursor.fetchone()
+            if not org_row:
+                logger.error(f"Organization '{org_name}' not found")
+                # Try to list available organizations
+                cursor.execute("SELECT org_id, org_name FROM organizations LIMIT 5")
+                orgs = cursor.fetchall()
+                logger.error(f"Available organizations: {[o['org_name'] for o in orgs]}")
+                return []
+            org_id = org_row['org_id']
+            logger.info(f"Found organization: {org_row['org_name']} (ID: {org_id})")
+            
+            # Join with course_offerings to get faculty assignment
             query = """
-                SELECT course_id, course_code, course_name, dept_id,
-                       lecture_hours_per_week, room_type_required, 
-                       min_room_capacity, course_type
-                FROM courses 
-                WHERE org_id = %s AND is_active = true
-                AND (
-                    (offered_in_odd_semester = true AND %s = 1) OR
-                    (offered_in_even_semester = true AND %s = 2)
-                )
+                SELECT DISTINCT c.course_id, c.course_code, c.course_name, c.dept_id,
+                       c.lecture_hours_per_week, c.room_type_required, 
+                       c.min_room_capacity, c.course_type,
+                       co.primary_faculty_id
+                FROM courses c
+                INNER JOIN course_offerings co ON c.course_id = co.course_id
+                WHERE c.org_id = %s 
+                AND c.is_active = true
+                AND co.is_active = true
+                AND co.primary_faculty_id IS NOT NULL
+                AND co.semester_type = %s
             """
-            params = [org_id, semester, semester]
+            
+            # Map semester number to semester_type (1=ODD, 2=EVEN) - UPPERCASE
+            semester_type = 'ODD' if semester == 1 else 'EVEN'
+            
+            params = [org_id, semester_type]
             
             if department_id:
-                query += " AND dept_id = %s"
+                query += " AND c.dept_id = %s"
                 params.append(department_id)
             
-            query += " LIMIT 100"
-            
+            logger.info(f"Executing course query with org_id={org_id}, semester_type={semester_type}")
             cursor.execute(query, params)
             rows = cursor.fetchall()
+            logger.info(f"Query returned {len(rows)} rows")
             
             courses = []
             for row in rows:
-                course = Course(
-                    course_id=str(row['course_id']),
-                    course_code=row['course_code'],
-                    course_name=row['course_name'],
-                    department_id=str(row['dept_id']),
-                    faculty_id="",  # Will be assigned
-                    credits=row.get('lecture_hours_per_week', 3),
-                    duration=1,
-                    subject_type=row.get('course_type', 'core'),
-                    required_features=[],
-                    student_ids=[],
-                    batch_ids=[]
-                )
-                courses.append(course)
+                try:
+                    course = Course(
+                        course_id=str(row['course_id']),
+                        course_code=row['course_code'],
+                        course_name=row['course_name'],
+                        department_id=str(row['dept_id']),
+                        faculty_id=str(row['primary_faculty_id']),
+                        credits=row.get('lecture_hours_per_week', 3) or 3,
+                        duration=row.get('lecture_hours_per_week', 3) or 3,
+                        type=row.get('course_type', 'core'),
+                        subject_type=row.get('course_type', 'core'),
+                        required_features=[],
+                        student_ids=[],
+                        batch_ids=[]
+                    )
+                    courses.append(course)
+                except Exception as e:
+                    logger.warning(f"Skipping course {row.get('course_code')}: {e}")
+                    continue
+            
+            # Debug: Check course_offerings table
+            if len(courses) == 0:
+                cursor.execute("""
+                    SELECT DISTINCT semester_type, semester_number, COUNT(*) as count
+                    FROM course_offerings
+                    WHERE org_id = %s
+                    GROUP BY semester_type, semester_number
+                    ORDER BY count DESC
+                    LIMIT 10
+                """, (org_id,))
+                debug_rows = cursor.fetchall()
+                logger.warning(f"Semester types in database: {[(r['semester_type'], r['semester_number'], r['count']) for r in debug_rows]}")
             
             cursor.close()
             logger.info(f"Fetched {len(courses)} courses from database")
@@ -86,34 +124,46 @@ class DjangoAPIClient:
 
         except Exception as e:
             logger.error(f"Failed to fetch courses: {e}")
+            if self.db_conn:
+                self.db_conn.rollback()
             return []
 
-    async def fetch_faculty(self, org_id: str) -> Dict[str, Faculty]:
+    async def fetch_faculty(self, org_name: str) -> Dict[str, Faculty]:
         """Fetch faculty from database"""
         try:
             cursor = self.db_conn.cursor()
+            
+            # Get org_id
+            cursor.execute("SELECT org_id FROM organizations WHERE org_name = %s", (org_name,))
+            org_row = cursor.fetchone()
+            if not org_row:
+                return {}
+            org_id = org_row['org_id']
             
             cursor.execute("""
                 SELECT faculty_id, faculty_code, first_name, last_name, 
                        dept_id, max_hours_per_week, specialization
                 FROM faculty 
                 WHERE org_id = %s AND is_active = true
-                LIMIT 50
             """, (org_id,))
             
             rows = cursor.fetchall()
             faculty_dict = {}
             
             for row in rows:
-                fac = Faculty(
-                    faculty_id=str(row['faculty_id']),
-                    faculty_code=row['faculty_code'],
-                    faculty_name=f"{row['first_name']} {row['last_name']}",
-                    department_id=str(row['dept_id']),
-                    max_hours_per_week=row.get('max_hours_per_week', 18),
-                    specialization=row.get('specialization', '')
-                )
-                faculty_dict[fac.faculty_id] = fac
+                try:
+                    fac = Faculty(
+                        faculty_id=str(row['faculty_id']),
+                        faculty_code=row.get('faculty_code', ''),
+                        faculty_name=f"{row['first_name']} {row['last_name']}",
+                        department_id=str(row['dept_id']),
+                        max_hours_per_week=row.get('max_hours_per_week', 18) or 18,
+                        specialization=row.get('specialization', '') or ''
+                    )
+                    faculty_dict[fac.faculty_id] = fac
+                except Exception as e:
+                    logger.warning(f"Skipping faculty {row.get('faculty_code')}: {e}")
+                    continue
             
             cursor.close()
             logger.info(f"Fetched {len(faculty_dict)} faculty from database")
@@ -121,34 +171,46 @@ class DjangoAPIClient:
 
         except Exception as e:
             logger.error(f"Failed to fetch faculty: {e}")
+            if self.db_conn:
+                self.db_conn.rollback()
             return {}
 
-    async def fetch_rooms(self, org_id: str) -> List[Room]:
+    async def fetch_rooms(self, org_name: str) -> List[Room]:
         """Fetch rooms from database"""
         try:
             cursor = self.db_conn.cursor()
+            
+            # Get org_id
+            cursor.execute("SELECT org_id FROM organizations WHERE org_name = %s", (org_name,))
+            org_row = cursor.fetchone()
+            if not org_row:
+                return []
+            org_id = org_row['org_id']
             
             cursor.execute("""
                 SELECT room_id, room_code, room_number, room_type, 
                        seating_capacity, building_id
                 FROM rooms 
                 WHERE org_id = %s AND is_active = true
-                LIMIT 60
             """, (org_id,))
             
             rows = cursor.fetchall()
             rooms = []
             
             for row in rows:
-                room = Room(
-                    room_id=str(row['room_id']),
-                    room_code=row['room_code'],
-                    room_name=row['room_number'],
-                    room_type=row.get('room_type', 'classroom'),
-                    capacity=row.get('seating_capacity', 60),
-                    features=[]
-                )
-                rooms.append(room)
+                try:
+                    room = Room(
+                        room_id=str(row['room_id']),
+                        room_code=row.get('room_code', ''),
+                        room_name=row.get('room_number', ''),
+                        room_type=row.get('room_type', 'classroom') or 'classroom',
+                        capacity=row.get('seating_capacity', 60) or 60,
+                        features=[]
+                    )
+                    rooms.append(room)
+                except Exception as e:
+                    logger.warning(f"Skipping room {row.get('room_code')}: {e}")
+                    continue
             
             cursor.close()
             logger.info(f"Fetched {len(rooms)} rooms from database")
@@ -156,9 +218,11 @@ class DjangoAPIClient:
 
         except Exception as e:
             logger.error(f"Failed to fetch rooms: {e}")
+            if self.db_conn:
+                self.db_conn.rollback()
             return []
 
-    async def fetch_time_slots(self, org_id: str) -> List[TimeSlot]:
+    async def fetch_time_slots(self, org_name: str) -> List[TimeSlot]:
         """Generate standard time slots"""
         try:
             # Generate standard time slots (9 AM - 5 PM, 6 days)
@@ -170,11 +234,13 @@ class DjangoAPIClient:
             
             time_slots = []
             slot_id = 0
-            for day in days:
-                for start, end in times:
+            for day_idx, day in enumerate(days):
+                for period_idx, (start, end) in enumerate(times):
                     slot = TimeSlot(
                         slot_id=str(slot_id),
                         day_of_week=day,
+                        day=day_idx,
+                        period=period_idx,
                         start_time=start,
                         end_time=end,
                         slot_name=f"{day.capitalize()} {start}-{end}"
@@ -189,32 +255,42 @@ class DjangoAPIClient:
             logger.error(f"Failed to generate time slots: {e}")
             return []
 
-    async def fetch_students(self, org_id: str) -> Dict[str, Student]:
+    async def fetch_students(self, org_name: str) -> Dict[str, Student]:
         """Fetch students from database"""
         try:
             cursor = self.db_conn.cursor()
+            
+            # Get org_id
+            cursor.execute("SELECT org_id FROM organizations WHERE org_name = %s", (org_name,))
+            org_row = cursor.fetchone()
+            if not org_row:
+                return {}
+            org_id = org_row['org_id']
             
             cursor.execute("""
                 SELECT student_id, enrollment_number, first_name, last_name,
                        dept_id, current_semester
                 FROM students 
                 WHERE org_id = %s AND is_active = true
-                LIMIT 200
             """, (org_id,))
             
             rows = cursor.fetchall()
             students_dict = {}
             
             for row in rows:
-                student = Student(
-                    student_id=str(row['student_id']),
-                    enrollment_number=row['enrollment_number'],
-                    student_name=f"{row['first_name']} {row['last_name']}",
-                    department_id=str(row['dept_id']),
-                    semester=row.get('current_semester', 1),
-                    batch_id=""
-                )
-                students_dict[student.student_id] = student
+                try:
+                    student = Student(
+                        student_id=str(row['student_id']),
+                        enrollment_number=row.get('enrollment_number', ''),
+                        student_name=f"{row['first_name']} {row['last_name']}",
+                        department_id=str(row['dept_id']),
+                        semester=row.get('current_semester', 1) or 1,
+                        batch_id=""
+                    )
+                    students_dict[student.student_id] = student
+                except Exception as e:
+                    logger.warning(f"Skipping student {row.get('enrollment_number')}: {e}")
+                    continue
             
             cursor.close()
             logger.info(f"Fetched {len(students_dict)} students from database")
@@ -222,34 +298,46 @@ class DjangoAPIClient:
 
         except Exception as e:
             logger.error(f"Failed to fetch students: {e}")
+            if self.db_conn:
+                self.db_conn.rollback()
             return {}
 
-    async def fetch_batches(self, org_id: str) -> Dict[str, Batch]:
+    async def fetch_batches(self, org_name: str) -> Dict[str, Batch]:
         """Fetch batches from database"""
         try:
             cursor = self.db_conn.cursor()
+            
+            # Get org_id
+            cursor.execute("SELECT org_id FROM organizations WHERE org_name = %s", (org_name,))
+            org_row = cursor.fetchone()
+            if not org_row:
+                return {}
+            org_id = org_row['org_id']
             
             cursor.execute("""
                 SELECT batch_id, batch_code, batch_name, dept_id,
                        current_semester, total_students
                 FROM batches 
                 WHERE org_id = %s AND is_active = true
-                LIMIT 30
             """, (org_id,))
             
             rows = cursor.fetchall()
             batches_dict = {}
             
             for row in rows:
-                batch = Batch(
-                    batch_id=str(row['batch_id']),
-                    batch_code=row['batch_code'],
-                    batch_name=row['batch_name'],
-                    department_id=str(row['dept_id']),
-                    semester=row.get('current_semester', 1),
-                    total_students=row.get('total_students', 60)
-                )
-                batches_dict[batch.batch_id] = batch
+                try:
+                    batch = Batch(
+                        batch_id=str(row['batch_id']),
+                        batch_code=row.get('batch_code', ''),
+                        batch_name=row.get('batch_name', ''),
+                        department_id=str(row['dept_id']),
+                        semester=row.get('current_semester', 1) or 1,
+                        total_students=row.get('total_students', 60) or 60
+                    )
+                    batches_dict[batch.batch_id] = batch
+                except Exception as e:
+                    logger.warning(f"Skipping batch {row.get('batch_code')}: {e}")
+                    continue
             
             cursor.close()
             logger.info(f"Fetched {len(batches_dict)} batches from database")
@@ -257,6 +345,8 @@ class DjangoAPIClient:
 
         except Exception as e:
             logger.error(f"Failed to fetch batches: {e}")
+            if self.db_conn:
+                self.db_conn.rollback()
             return {}
 
     async def save_timetable(self, job_id: str, timetable_data: Dict):

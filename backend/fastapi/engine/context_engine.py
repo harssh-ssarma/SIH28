@@ -55,7 +55,11 @@ class TemporalContext:
 
     def get_time_effectiveness(self, time_slot: TimeSlot) -> float:
         """Calculate time-of-day effectiveness multiplier"""
-        hour = time_slot.start_time.hour
+        # Handle both string and time object
+        if isinstance(time_slot.start_time, str):
+            hour = int(time_slot.start_time.split(':')[0])
+        else:
+            hour = time_slot.start_time.hour
 
         for period, config in self.effectiveness_patterns.items():
             if config['start'] <= hour < config['end']:
@@ -63,9 +67,13 @@ class TemporalContext:
 
         return 0.7  # Default for unusual hours
 
-    def get_day_effectiveness(self, day: str) -> float:
+    def get_day_effectiveness(self, day) -> float:
         """Get day-of-week effectiveness"""
-        return self.day_effectiveness.get(day.lower(), 0.8)
+        # Handle both int (0-6) and string day
+        if isinstance(day, int):
+            day_names = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+            day = day_names[day % 7]
+        return self.day_effectiveness.get(str(day).lower(), 0.8)
 
     def get_semester_phase_stability(self, current_week: int) -> float:
         """Get semester phase stability factor"""
@@ -147,7 +155,7 @@ class AcademicContext:
         """Build prerequisite relationship graph"""
         for course in courses:
             self.prerequisite_graph[course.course_id] = {
-                'prerequisites': course.prerequisite_courses or [],
+                'prerequisites': getattr(course, 'prerequisite_courses', []) or [],
                 'credits': course.credits,
                 'subject_type': course.subject_type
             }
@@ -309,19 +317,72 @@ class MultiDimensionalContextEngine:
         rooms: List[Room],
         time_slots: List[TimeSlot]
     ):
-        """Initialize context engine with current data"""
+        """Initialize context engine with current data and timeout protection"""
         logger.info("Initializing Multi-Dimensional Context Engine...")
+        
+        # Progress tracking
+        from timeout_handler import ProcessMonitor
+        monitor = ProcessMonitor()
+        monitor.update_progress()
+        
+        # Check dataset size and reduce if necessary
+        if len(courses) > 1000:
+            logger.warning(f"Large dataset detected: {len(courses)} courses. Using simplified initialization.")
+            return self._simplified_initialization(courses, faculty, students, rooms, time_slots)
+        
+        try:
+            # Initialize with timeout protection
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Context initialization timeout")
+            
+            # Set 2-minute timeout
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(120)
+            
+            # Initialize academic context
+            logger.info("Building prerequisite graph...")
+            self.academic.build_prerequisite_graph(courses)
 
-        # Initialize academic context
-        self.academic.build_prerequisite_graph(courses)
+            # Analyze behavioral patterns (limit to first 500 courses)
+            logger.info("Analyzing behavioral patterns...")
+            limited_courses = courses[:500] if len(courses) > 500 else courses
+            co_enrollment = self.behavioral.analyze_co_enrollment_patterns(limited_courses)
 
-        # Analyze behavioral patterns
-        co_enrollment = self.behavioral.analyze_co_enrollment_patterns(courses)
-
-        # Analyze social networks
-        peer_networks = self.social.analyze_peer_networks(students, courses)
-
-        logger.info("Context engine initialization complete")
+            # Analyze social networks (limit to first 1000 students)
+            logger.info("Analyzing social networks...")
+            limited_students = dict(list(students.items())[:1000]) if len(students) > 1000 else students
+            peer_networks = self.social.analyze_peer_networks(limited_students, limited_courses)
+            
+            signal.alarm(0)  # Cancel timeout
+            logger.info("Context engine initialization complete")
+            
+        except TimeoutError:
+            signal.alarm(0)
+            logger.warning("Context initialization timed out, using simplified mode")
+            return self._simplified_initialization(courses, faculty, students, rooms, time_slots)
+        except Exception as e:
+            signal.alarm(0)
+            logger.error(f"Context initialization failed: {e}")
+            return self._simplified_initialization(courses, faculty, students, rooms, time_slots)
+    
+    def _simplified_initialization(self, courses, faculty, students, rooms, time_slots):
+        """Simplified initialization for large datasets"""
+        logger.info("Using simplified context initialization...")
+        
+        # Only initialize essential components
+        limited_courses = courses[:200]  # Limit to 200 courses
+        self.academic.build_prerequisite_graph(limited_courses)
+        
+        # Set default effectiveness patterns
+        for course in limited_courses:
+            if hasattr(course, 'faculty_id'):
+                self.behavioral.faculty_effectiveness[course.faculty_id] = {
+                    'default': 0.8
+                }
+        
+        logger.info("Simplified context initialization complete")
 
     def get_context_vector(
         self,
