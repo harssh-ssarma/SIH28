@@ -49,6 +49,8 @@ class Room(BaseModel):
     room_type: str = "classroom"
     capacity: int
     features: List[str] = Field(default_factory=list)
+    dept_id: Optional[str] = None  # Department constraint for room allocation
+    department_id: Optional[str] = None  # Alias for dept_id
 
 
 class TimeSlot(BaseModel):

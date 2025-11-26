@@ -14,16 +14,26 @@ let refreshPromise: Promise<string> | null = null;
  * Get access token with auto-refresh if expired
  */
 export async function getAccessToken(): Promise<string | null> {
-  // Check both 'token' and 'access_token' for compatibility
-  const token = localStorage.getItem('token') || localStorage.getItem('access_token');
-  if (!token) return null;
-
-  // Check if token is expired or about to expire (within 5 minutes)
-  if (isTokenExpiringSoon(token)) {
-    return await refreshAccessToken();
+  // Check if we're in browser environment
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    return null;
   }
 
-  return token;
+  try {
+    // Check both 'token' and 'access_token' for compatibility
+    const token = localStorage.getItem('token') || localStorage.getItem('access_token');
+    if (!token) return null;
+
+    // Check if token is expired or about to expire (within 5 minutes)
+    if (isTokenExpiringSoon(token)) {
+      return await refreshAccessToken();
+    }
+
+    return token;
+  } catch (error) {
+    console.error('Error getting access token:', error);
+    return null;
+  }
 }
 
 /**
@@ -46,6 +56,11 @@ function isTokenExpiringSoon(token: string): boolean {
  * Prevents multiple simultaneous refresh requests
  */
 async function refreshAccessToken(): Promise<string | null> {
+  // Check if we're in browser environment
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    return null;
+  }
+
   // If refresh already in progress, wait for it
   if (refreshPromise) {
     return await refreshPromise;
@@ -53,9 +68,10 @@ async function refreshAccessToken(): Promise<string | null> {
 
   refreshPromise = (async () => {
     try {
-      const refreshToken = localStorage.getItem('refreshToken');
+      const refreshToken = localStorage.getItem('refreshToken') || localStorage.getItem('refresh_token');
       if (!refreshToken) {
-        throw new Error('No refresh token');
+        console.warn('No refresh token available');
+        return null;
       }
 
       const response = await fetch('http://localhost:8000/api/auth/token/refresh/', {
@@ -65,24 +81,23 @@ async function refreshAccessToken(): Promise<string | null> {
       });
 
       if (!response.ok) {
-        throw new Error('Token refresh failed');
+        console.warn('Token refresh failed with status:', response.status);
+        return null;
       }
 
       const data: TokenResponse = await response.json();
       localStorage.setItem('token', data.access);
+      localStorage.setItem('access_token', data.access);
       
       // Update refresh token if provided
       if (data.refresh) {
         localStorage.setItem('refreshToken', data.refresh);
+        localStorage.setItem('refresh_token', data.refresh);
       }
 
       return data.access;
     } catch (error) {
-      console.error('Token refresh failed:', error);
-      // Clear tokens and redirect to login
-      localStorage.removeItem('token');
-      localStorage.removeItem('refreshToken');
-      window.location.href = '/login';
+      console.error('Token refresh error:', error);
       return null;
     } finally {
       refreshPromise = null;
@@ -99,10 +114,22 @@ export async function authenticatedFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  const token = await getAccessToken();
+  // Try to get token, but don't fail if not available
+  let token = await getAccessToken();
+  
+  // If no token, try to get it from localStorage directly (fallback)
+  if (!token && typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+    try {
+      token = localStorage.getItem('token') || localStorage.getItem('access_token');
+    } catch (e) {
+      console.error('Error accessing localStorage:', e);
+    }
+  }
   
   if (!token) {
-    throw new Error('Not authenticated');
+    // Instead of throwing, try the request without auth (some endpoints might not require it)
+    console.warn('No authentication token available, attempting request without auth');
+    return await fetch(url, options);
   }
 
   const headers = {
@@ -118,6 +145,10 @@ export async function authenticatedFetch(
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`;
       response = await fetch(url, { ...options, headers });
+    } else {
+      // If refresh failed, try without auth as last resort
+      console.warn('Token refresh failed, attempting request without auth');
+      response = await fetch(url, options);
     }
   }
 

@@ -328,7 +328,27 @@ class TimetableGenerationSaga:
             if not courses or len(courses) < 5:
                 raise ValueError(f"Insufficient courses: {len(courses)}")
             
-            logger.info(f"[DATA] Loaded {len(courses)} courses, {len(faculty)} faculty, {len(rooms)} rooms, {len(students)} students")
+            # CRITICAL DEBUG: Check if rooms and time_slots are loaded
+            logger.info(f"[DATA] Loaded {len(courses)} courses, {len(faculty)} faculty, {len(rooms)} rooms, {len(time_slots)} time_slots, {len(students)} students")
+            
+            if len(rooms) == 0:
+                logger.error("[DATA] ❌ NO ROOMS LOADED - Scheduler will fail!")
+            else:
+                # Show room capacity distribution
+                room_capacities = [r.capacity for r in rooms]
+                logger.info(f"[DATA] Room capacities: min={min(room_capacities)}, max={max(room_capacities)}, avg={sum(room_capacities)/len(room_capacities):.1f}")
+            
+            if len(time_slots) == 0:
+                logger.error("[DATA] ❌ NO TIME SLOTS GENERATED - Scheduler will fail!")
+            else:
+                logger.info(f"[DATA] Time slots: {len(time_slots)} slots across {len(set(t.day for t in time_slots))} days")
+            
+            # Check course enrollment distribution
+            if courses:
+                enrollments = [len(c.student_ids) for c in courses]
+                logger.info(f"[DATA] Course enrollments: min={min(enrollments)}, max={max(enrollments)}, avg={sum(enrollments)/len(enrollments):.1f}")
+                large_courses = sum(1 for e in enrollments if e > 60)
+                logger.info(f"[DATA] Large courses (>60 students): {large_courses}/{len(courses)}")
             
             return {
                 'courses': courses,

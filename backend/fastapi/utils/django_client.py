@@ -63,19 +63,20 @@ class DjangoAPIClient:
             org_id = org_row['org_id']
             logger.info(f"Found organization: {org_row['org_name']} (ID: {org_id})")
             
-            # Query creates separate course instance per offering (handles multi-faculty courses)
+            # CRITICAL: course_enrollments has offering_id - join on that for correct students per offering
             query = """
                 SELECT c.course_id, c.course_code, c.course_name, c.dept_id,
                        c.lecture_hours_per_week, c.room_type_required, 
                        c.min_room_capacity, c.course_type,
                        co.offering_id, co.primary_faculty_id,
-                       COALESCE(ARRAY_AGG(DISTINCT ce.student_id) FILTER (WHERE ce.student_id IS NOT NULL), ARRAY[]::uuid[]) as student_ids
+                       ARRAY_AGG(DISTINCT ce.student_id) as student_ids,
+                       COUNT(DISTINCT ce.student_id) as student_count
                 FROM courses c
                 INNER JOIN course_offerings co ON c.course_id = co.course_id
                     AND co.is_active = true
                     AND co.primary_faculty_id IS NOT NULL
                     AND co.semester_type = %s
-                LEFT JOIN course_enrollments ce ON c.course_id = ce.course_id AND ce.is_active = true
+                INNER JOIN course_enrollments ce ON co.offering_id = ce.offering_id AND ce.is_active = true
                 WHERE c.org_id = %s 
                 AND c.is_active = true
                 GROUP BY c.course_id, c.course_code, c.course_name, c.dept_id,
@@ -187,7 +188,8 @@ class DjangoAPIClient:
                 logger.info(f"Top 10 offerings by enrollment: {[(r['course_code'], r['student_count']) for r in sample_offerings]}")
             
             cursor.close()
-            logger.info(f"Fetched {len(courses)} course offerings with {len(unique_students)} students in selected courses (Total enrolled students in system: {total_students})")
+            logger.info(f"Fetched {len(courses)} course offerings (out of {len(rows)} total offerings)")
+            logger.info(f"Total unique students: {len(unique_students)} (System total: {total_students})")
             return courses
 
         except Exception as e:
@@ -257,7 +259,7 @@ class DjangoAPIClient:
             
             cursor.execute("""
                 SELECT room_id, room_code, room_number, room_type, 
-                       seating_capacity, building_id
+                       seating_capacity, building_id, dept_id
                 FROM rooms 
                 WHERE org_id = %s AND is_active = true
             """, (org_id,))
@@ -273,7 +275,9 @@ class DjangoAPIClient:
                         room_name=row.get('room_number', ''),
                         room_type=row.get('room_type', 'classroom') or 'classroom',
                         capacity=row.get('seating_capacity', 60) or 60,
-                        features=[]
+                        features=[],
+                        dept_id=str(row['dept_id']) if row.get('dept_id') else None,
+                        department_id=str(row['dept_id']) if row.get('dept_id') else None
                     )
                     rooms.append(room)
                 except Exception as e:

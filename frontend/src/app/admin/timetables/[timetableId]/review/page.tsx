@@ -140,7 +140,10 @@ export default function TimetableReviewPage() {
       )
 
       if (!workflowRes.ok) {
-        throw new Error('Failed to load workflow')
+        if (workflowRes.status === 401 || workflowRes.status === 403) {
+          throw new Error('Authentication required. Please log in again.')
+        }
+        throw new Error(`Failed to load workflow (${workflowRes.status})`)
       }
 
       const workflowData = await workflowRes.json()

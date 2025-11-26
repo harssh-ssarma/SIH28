@@ -274,6 +274,12 @@ class AdaptiveCPSATSolver:
                         continue
                     
                     for room in self.rooms:
+                        # CRITICAL: Department matching constraint
+                        course_dept = getattr(course, 'department_id', None)
+                        room_dept = getattr(room, 'dept_id', None) or getattr(room, 'department_id', None)
+                        if course_dept and room_dept and course_dept != room_dept:
+                            continue
+                        
                         # Quick capacity check
                         if student_count > room.capacity:
                             continue
