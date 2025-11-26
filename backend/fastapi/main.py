@@ -37,11 +37,53 @@ from engine.distributed_tasks import discover_workers, select_optimal_workers
 import os
 
 # Configure logging FIRST (before any logger usage)
+# Clear log file on startup
+import os
+log_file = os.path.join(os.path.dirname(__file__), 'fastapi_logs.txt')
+with open(log_file, 'w') as f:
+    f.write('# FastAPI Backend Logs - Started at ' + datetime.now().isoformat() + '\n')
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Console output
+        logging.FileHandler(log_file, mode='a')  # File output (append mode)
+    ]
 )
 logger = logging.getLogger(__name__)
+logger.info(f"Logs saved to: {log_file}")
+
+class StageError(Exception):
+    """Base exception for stage errors"""
+    def __init__(self, stage: str, message: str, original_error: Exception = None):
+        self.stage = stage
+        self.message = message
+        self.original_error = original_error
+        super().__init__(f"[{stage}] {message}")
+
+def handle_stage_error(stage_name: str):
+    """Decorator for consistent error handling across stages"""
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except asyncio.CancelledError:
+                logger.warning(f"[{stage_name}] Cancelled by user")
+                raise
+            except MemoryError as e:
+                logger.error(f"[{stage_name}] Memory exhausted: {e}")
+                raise StageError(stage_name, "Memory exhausted", e)
+            except TimeoutError as e:
+                logger.error(f"[{stage_name}] Timeout: {e}")
+                raise StageError(stage_name, "Operation timed out", e)
+            except Exception as e:
+                logger.error(f"[{stage_name}] Unexpected error: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise StageError(stage_name, str(e), e)
+        return wrapper
+    return decorator
 
 # Feature 10: Celery detection (package only, not runtime availability)
 try:
@@ -233,9 +275,6 @@ class TimetableGenerationSaga:
                 
                 self.completed_steps.append((step_name, compensate_func, result))
                 self.job_data[job_id]['results'][step_name] = result
-                
-                # Skip progress updates for individual stages - only cluster-based updates matter
-                pass  # Progress tracked at cluster level in Stage 2
             
             self.job_data[job_id]['status'] = 'completed'
             monitor.stop_monitoring()
@@ -281,6 +320,7 @@ class TimetableGenerationSaga:
             
             raise
     
+    @handle_stage_error("LOAD_DATA")
     async def _load_data(self, job_id: str, request_data: dict):
         """Stage 0: Load and validate data with hardware detection"""
         from utils.django_client import DjangoAPIClient
@@ -361,10 +401,10 @@ class TimetableGenerationSaga:
         finally:
             await client.close()
     
+    @handle_stage_error("CLUSTERING")
     async def _stage1_louvain_clustering(self, job_id: str, request_data: dict):
         """Stage 1: Louvain clustering with hardware-adaptive configuration + cancellation"""
         from engine.stage1_clustering import LouvainClusterer
-        from engine.orchestrator import get_orchestrator
         from utils.memory_cleanup import get_memory_usage, aggressive_cleanup
         import gc
         
@@ -386,14 +426,8 @@ class TimetableGenerationSaga:
         
         self.progress_tracker.set_stage('clustering')
         
-        orchestrator = get_orchestrator()
         clusterer = LouvainClusterer(target_cluster_size=10)
-        
-        clusters = await asyncio.to_thread(
-            orchestrator.execute_stage1_clustering,
-            courses,
-            clusterer
-        )
+        clusters = await asyncio.to_thread(clusterer.cluster_courses, courses)
         
         # Check cancellation after clustering
         if await self._check_cancellation(job_id):
@@ -408,6 +442,7 @@ class TimetableGenerationSaga:
     
 
     
+    @handle_stage_error("CPSAT")
     async def _stage2_cpsat_solving(self, job_id: str, request_data: dict):
         """Stage 2A: Parallel CP-SAT with ThreadPoolExecutor (memory-safe)"""
         import psutil
@@ -539,17 +574,17 @@ class TimetableGenerationSaga:
         cleanup_stats = aggressive_cleanup()
         logger.info(f"[STAGE2] Completed: {len(all_solutions)} assignments, freed {cleanup_stats['freed_mb']:.1f}MB")
         
-        # Calculate CP-SAT success metrics
+        # Calculate CP-SAT success metrics (courses not sessions)
         total_courses = sum(len(courses) for courses in clusters.values())
-        success_rate = (len(all_solutions) / total_courses * 100) if total_courses > 0 else 0
+        scheduled_courses = len(set(cid for (cid, _) in all_solutions.keys()))
+        success_rate = (scheduled_courses / total_courses * 100) if total_courses > 0 else 0
         
         logger.info(f"\n{'='*80}")
         logger.info(f"[CP-SAT SUMMARY] Final Results:")
-        logger.info(f"[CP-SAT SUMMARY] Total clusters: {total_clusters}")
-        logger.info(f"[CP-SAT SUMMARY] Total courses: {total_courses}")
-        logger.info(f"[CP-SAT SUMMARY] Assignments made: {len(all_solutions)}")
+        scheduled_courses = len(set(cid for (cid, _) in all_solutions.keys()))
+        logger.info(f"[CP-SAT SUMMARY] Clusters: {total_clusters}, Courses: {total_courses}")
+        logger.info(f"[CP-SAT SUMMARY] Scheduled: {scheduled_courses}/{total_courses} courses ({len(all_solutions)} sessions)")
         logger.info(f"[CP-SAT SUMMARY] Success rate: {success_rate:.1f}%")
-        logger.info(f"[CP-SAT SUMMARY] Unscheduled courses: {total_courses - len(all_solutions)}")
         logger.info(f"{'='*80}\n")
         
         # Decision thresholds with detailed recommendations
@@ -781,6 +816,7 @@ class TimetableGenerationSaga:
         logger.info(f"[MOCK] Generated {len(mock_schedule)} assignments")
         return mock_schedule
     
+    @handle_stage_error("GA")
     async def _stage2_ga_optimization(self, job_id: str, request_data: dict):
         """Stage 2B: GPU Tensor GA - 90%+ GPU utilization with memory management + cancellation"""
         import gc
@@ -877,7 +913,8 @@ class TimetableGenerationSaga:
                     population_size=pop,
                     generations=gen,
                     use_sample_fitness=ga_config.get('fitness_mode', 'full') == 'sample_based',
-                    sample_size=ga_config.get('sample_students', 100)
+                    sample_size=ga_config.get('sample_students', 100),
+                    hardware_config=ga_config  # CRITICAL: Pass hardware config
                 )
                 ga_optimizer.progress_tracker = self.progress_tracker
                 ga_optimizer.job_id = job_id
@@ -919,10 +956,10 @@ class TimetableGenerationSaga:
             
             return cpsat_result
     
+    @handle_stage_error("RL")
     async def _stage3_rl_conflict_resolution(self, job_id: str, request_data: dict):
         """Stage 3: RL conflict resolution with memory management + cancellation"""
         from engine.stage3_rl import RLConflictResolver
-        from engine.orchestrator import get_orchestrator
         from utils.memory_cleanup import get_memory_usage, aggressive_cleanup
         import gc
         
@@ -996,15 +1033,8 @@ class TimetableGenerationSaga:
             
             logger.info(f"[STAGE3] Config: algorithm={algorithm}, iterations={max_iter}, conflicts={len(conflicts)}")
             
-            # Use orchestrator for optimal hardware utilization (GPU if available)
-            orchestrator = get_orchestrator()
-            
-            # RL training - FIXED: orchestrator.execute_stage3_rl takes 2 args, not 3
-            resolved_schedule = await asyncio.to_thread(
-                orchestrator.execute_stage3_rl,
-                resolver,
-                schedule
-            )
+            # RL training with direct call
+            resolved_schedule = await asyncio.to_thread(resolver.resolve, schedule)
             
             # Verify resolution
             remaining_conflicts = self._detect_conflicts(resolved_schedule, load_data)
@@ -1980,41 +2010,31 @@ async def get_progress_enterprise(job_id: str):
 
 @app.get("/api/hardware")
 async def get_hardware_status():
-    """Get current hardware profile and capabilities with orchestrator"""
+    """Get current hardware profile and capabilities"""
     try:
-        from engine.orchestrator import get_orchestrator
+        global hardware_profile
+        if not hardware_profile:
+            hardware_profile = get_hardware_profile(force_refresh=True)
         
-        orchestrator = get_orchestrator()
-        capabilities = orchestrator.capabilities
-        
-        # Get optimal strategy for sample dataset
-        strategy = orchestrator.get_optimal_strategy(num_courses=1000, num_clusters=100)
-        speedup = orchestrator.estimate_speedup(num_courses=1000)
+        optimal_config = get_optimal_config(hardware_profile)
         
         return {
             "hardware_capabilities": {
-                "cpu_cores": capabilities.cpu_cores,
-                "has_gpu": capabilities.has_gpu,
-                "gpu_name": capabilities.gpu_name,
-                "gpu_memory_gb": capabilities.gpu_memory_gb,
-                "has_distributed": capabilities.has_distributed,
-                "distributed_workers": capabilities.distributed_workers,
-                "total_ram_gb": capabilities.total_ram_gb
+                "cpu_cores": hardware_profile.cpu_cores,
+                "has_gpu": hardware_profile.has_nvidia_gpu,
+                "gpu_memory_gb": hardware_profile.gpu_memory_gb,
+                "total_ram_gb": hardware_profile.total_ram_gb,
+                "tier": optimal_config['tier']
             },
-            "optimal_strategy": strategy,
-            "estimated_speedup": {
-                "stage1": f"{speedup['stage1']:.1f}x",
-                "stage2a": f"{speedup['stage2a']:.1f}x",
-                "stage2b": f"{speedup['stage2b']:.1f}x",
-                "stage3": f"{speedup['stage3']:.1f}x",
-                "total": f"{speedup['total']:.1f}x"
-            },
-            "resource_utilization": {
-                "cpu": "100% (all cores used)",
-                "gpu": "100% (if available)" if capabilities.has_gpu else "N/A",
-                "distributed": "100% (if available)" if capabilities.has_distributed else "N/A"
-            },
-            "performance_mode": "MAXIMUM - Using ALL available resources"
+            "optimal_strategy": hardware_profile.optimal_strategy.value,
+            "estimated_time": optimal_config['expected_time_minutes'],
+            "expected_quality": optimal_config['expected_quality'],
+            "stage_configs": {
+                "clustering": optimal_config['stage1_louvain']['algorithm'],
+                "cpsat": optimal_config['stage2a_cpsat']['primary_solver'],
+                "ga": optimal_config['stage2b_ga']['algorithm'],
+                "rl": optimal_config['stage3_qlearning']['algorithm']
+            }
         }
         
     except Exception as e:
@@ -2044,35 +2064,31 @@ async def refresh_hardware_detection():
 
 @app.post("/api/incremental/add")
 async def add_course_incremental(course_data: dict, timetable_id: str):
-    """Add course to existing timetable incrementally"""
+    """Add course to existing timetable incrementally (30s vs 15min full regen)"""
     try:
         from engine.incremental_update import IncrementalUpdater
         from utils.django_client import DjangoAPIClient
         
-        # Load existing timetable
         client = DjangoAPIClient()
         existing = await client.fetch_timetable(timetable_id)
-        
-        # Load resources
         rooms = await client.fetch_rooms(course_data['organization_id'])
         time_slots = await client.fetch_time_slots(course_data['organization_id'])
         faculty = await client.fetch_faculty(course_data['organization_id'])
         
-        # Incremental update
         updater = IncrementalUpdater(existing)
         from models.timetable_models import Course
         course = Course(**course_data)
-        updated = updater.add_course(course, rooms, time_slots, faculty)
+        result = updater.add_course(course, rooms, time_slots, faculty)
         
         await client.close()
-        return {"success": True, "updated_entries": len(updated)}
+        return {"success": True, "updated_entries": len(result)}
     except Exception as e:
         logger.error(f"Incremental add failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/incremental/remove/{course_id}")
 async def remove_course_incremental(course_id: str, timetable_id: str):
-    """Remove course from existing timetable"""
+    """Remove course from existing timetable (instant)"""
     try:
         from engine.incremental_update import IncrementalUpdater
         from utils.django_client import DjangoAPIClient
@@ -2081,10 +2097,10 @@ async def remove_course_incremental(course_id: str, timetable_id: str):
         existing = await client.fetch_timetable(timetable_id)
         
         updater = IncrementalUpdater(existing)
-        updated = updater.remove_course(course_id)
+        result = updater.remove_course(course_id)
         
         await client.close()
-        return {"success": True, "updated_entries": len(updated)}
+        return {"success": True, "updated_entries": len(result)}
     except Exception as e:
         logger.error(f"Incremental remove failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2108,6 +2124,176 @@ async def cancel_generation(job_id: str):
         }
     except Exception as e:
         logger.error(f"[CANCEL] Error setting cancellation flag: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/department/{department_id}/view")
+async def get_department_view(department_id: str, semester: int, academic_year: str, timetable_id: str):
+    """Get department-specific view of master timetable"""
+    try:
+        from services.department_view_service import DepartmentViewService
+        from utils.django_client import DjangoAPIClient
+        
+        client = DjangoAPIClient()
+        timetable = await client.fetch_timetable(timetable_id)
+        courses = await client.fetch_courses(department_id, semester)
+        faculty = await client.fetch_faculty(department_id)
+        students = await client.fetch_students(department_id)
+        
+        service = DepartmentViewService(timetable, courses, faculty, students)
+        view = service.get_department_view(department_id, semester, academic_year)
+        
+        await client.close()
+        return view.dict()
+    except Exception as e:
+        logger.error(f"Department view error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/university/dashboard")
+async def get_university_dashboard(organization_id: str):
+    """Get registrar's university-wide dashboard"""
+    try:
+        from services.department_view_service import DepartmentViewService
+        from utils.django_client import DjangoAPIClient
+        
+        client = DjangoAPIClient()
+        timetable = await client.fetch_all_timetables(organization_id)
+        courses = await client.fetch_all_courses(organization_id)
+        faculty = await client.fetch_all_faculty(organization_id)
+        students = await client.fetch_all_students(organization_id)
+        
+        service = DepartmentViewService(timetable, courses, faculty, students)
+        dashboard = service.get_university_dashboard()
+        
+        await client.close()
+        return dashboard.dict()
+    except Exception as e:
+        logger.error(f"University dashboard error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/conflicts/detect")
+async def detect_conflicts(timetable_id: str):
+    """Detect all conflicts in timetable"""
+    try:
+        from services.conflict_resolution_service import ConflictResolutionService
+        from utils.django_client import DjangoAPIClient
+        
+        client = DjangoAPIClient()
+        timetable = await client.fetch_timetable(timetable_id)
+        courses = await client.fetch_all_courses(timetable_id)
+        rooms = await client.fetch_all_rooms(timetable_id)
+        time_slots = await client.fetch_all_time_slots(timetable_id)
+        faculty = await client.fetch_all_faculty(timetable_id)
+        
+        service = ConflictResolutionService(timetable, courses, rooms, time_slots, faculty)
+        conflicts = service.detect_all_conflicts()
+        
+        await client.close()
+        return {"conflicts": [c.dict() for c in conflicts], "total": len(conflicts)}
+    except Exception as e:
+        logger.error(f"Conflict detection error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/conflicts/resolve")
+async def resolve_conflicts(timetable_id: str, auto_resolve: bool = True):
+    """Resolve conflicts automatically with hierarchical approach"""
+    try:
+        from services.conflict_resolution_service import ConflictResolutionService
+        from utils.django_client import DjangoAPIClient
+        
+        client = DjangoAPIClient()
+        timetable = await client.fetch_timetable(timetable_id)
+        courses = await client.fetch_all_courses(timetable_id)
+        rooms = await client.fetch_all_rooms(timetable_id)
+        time_slots = await client.fetch_all_time_slots(timetable_id)
+        faculty = await client.fetch_all_faculty(timetable_id)
+        
+        service = ConflictResolutionService(timetable, courses, rooms, time_slots, faculty)
+        
+        if auto_resolve:
+            results = service.resolve_all_conflicts()
+        else:
+            conflicts = service.detect_all_conflicts()
+            results = {'total': len(conflicts), 'resolved': 0, 'manual_review': len(conflicts)}
+        
+        await client.close()
+        return results
+    except Exception as e:
+        logger.error(f"Conflict resolution error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/conflicts/resolve/{conflict_id}")
+async def resolve_single_conflict(conflict_id: str, timetable_id: str):
+    """Resolve single conflict with hierarchical approach"""
+    try:
+        from services.conflict_resolution_service import ConflictResolutionService
+        from utils.django_client import DjangoAPIClient
+        
+        client = DjangoAPIClient()
+        timetable = await client.fetch_timetable(timetable_id)
+        courses = await client.fetch_all_courses(timetable_id)
+        rooms = await client.fetch_all_rooms(timetable_id)
+        time_slots = await client.fetch_all_time_slots(timetable_id)
+        faculty = await client.fetch_all_faculty(timetable_id)
+        
+        service = ConflictResolutionService(timetable, courses, rooms, time_slots, faculty)
+        conflicts = service.detect_all_conflicts()
+        
+        conflict = next((c for c in conflicts if c.conflict_id == conflict_id), None)
+        if not conflict:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+        
+        result = service.resolve_conflict(conflict)
+        
+        await client.close()
+        return result
+    except Exception as e:
+        logger.error(f"Single conflict resolution error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/preferences/submit")
+async def submit_department_preferences(preferences: dict):
+    """Submit department preferences for upcoming semester (Week 1-2 of governance model)"""
+    try:
+        from services.department_preference_service import DepartmentPreferenceService, DepartmentPreferences
+        
+        service = DepartmentPreferenceService(redis_client=app.state.redis_client)
+        prefs = DepartmentPreferences(**preferences)
+        result = service.submit_preferences(prefs)
+        
+        return result
+    except Exception as e:
+        logger.error(f"Preference submission error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/preferences/{department_id}/{semester}")
+async def get_department_preferences(department_id: str, semester: int):
+    """Get department preferences for semester"""
+    try:
+        from services.department_preference_service import DepartmentPreferenceService
+        
+        service = DepartmentPreferenceService(redis_client=app.state.redis_client)
+        prefs = service.get_preferences(department_id, semester)
+        
+        if not prefs:
+            raise HTTPException(status_code=404, detail="Preferences not found")
+        
+        return prefs.dict()
+    except Exception as e:
+        logger.error(f"Get preferences error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/preferences/stats/{semester}")
+async def get_preference_statistics(semester: int):
+    """Get statistics on submitted preferences for semester"""
+    try:
+        from services.department_preference_service import DepartmentPreferenceService
+        
+        service = DepartmentPreferenceService(redis_client=app.state.redis_client)
+        stats = service.get_preference_statistics(semester)
+        
+        return stats
+    except Exception as e:
+        logger.error(f"Preference stats error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 def _estimate_processing_time(profile: HardwareProfile) -> dict:
@@ -2149,7 +2335,6 @@ async def cleanup_duplicates():
         "engine/distributed_scheduler.py", 
         "engine/gpu_scheduler.py",
         "engine/incremental_scheduler.py",
-        "engine/orchestrator.py",
         "engine/variant_generator.py",
         "tasks/timetable_tasks.py"
     ]

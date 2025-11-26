@@ -324,7 +324,7 @@ class AdaptiveCPSATSolver:
             cp_model.UNKNOWN: "UNKNOWN"
         }
         status_name = status_names.get(status, f"UNKNOWN_STATUS_{status}")
-        logger.info(f"[CP-SAT SOLVE] Solver finished: {status_name} in {solver.WallTime():.2f}s")
+        logger.info(f"[CP-SAT] {status_name} in {solver.WallTime():.2f}s")
         
         if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
             solution = {}
@@ -374,11 +374,11 @@ class AdaptiveCPSATSolver:
             student_count = len(course.student_ids)
             faculty_avail = None
             
-            logger.info(f"[CP-SAT DOMAINS] Course {course_idx+1}/{len(cluster)}: {student_count} students, features={course_features}")
+            logger.debug(f"[CP-SAT DOMAINS] Course {course_idx+1}/{len(cluster)}: {student_count} students")
             
             if course.faculty_id in self.faculty:
                 faculty_avail = set(getattr(self.faculty[course.faculty_id], 'available_slots', []))
-                logger.info(f"[CP-SAT DOMAINS]   Faculty available slots: {len(faculty_avail) if faculty_avail else 'all'}")
+                logger.debug(f"[CP-SAT DOMAINS]   Faculty slots: {len(faculty_avail) if faculty_avail else 'all'}")
             
             for session in range(course.duration):
                 valid_pairs = []
@@ -415,8 +415,7 @@ class AdaptiveCPSATSolver:
                 valid_domains[(course.course_id, session)] = valid_pairs
                 total_valid_pairs += len(valid_pairs)
                 
-                logger.info(f"[CP-SAT DOMAINS]   Session {session}: {len(valid_pairs)} valid pairs")
-                logger.info(f"[CP-SAT DOMAINS]   Rejected: capacity={rejected_capacity}, features={rejected_features}, faculty={rejected_faculty}")
+                logger.debug(f"[CP-SAT DOMAINS]   Session {session}: {len(valid_pairs)} pairs")
                 
                 if len(valid_pairs) == 0:
                     logger.error(f"[CP-SAT DOMAINS]   ❌ NO VALID PAIRS for course {course_idx+1} session {session}!")
@@ -424,29 +423,41 @@ class AdaptiveCPSATSolver:
         # Clear temporary data
         del room_features
         
-        logger.info(f"[CP-SAT DOMAINS] ✅ Total: {total_valid_pairs} valid domain pairs for {len(cluster)} courses")
-        logger.info(f"[CP-SAT DOMAINS] Average: {total_valid_pairs/len(cluster):.1f} pairs per course")
+        logger.info(f"[CP-SAT DOMAINS] ✅ {total_valid_pairs} pairs for {len(cluster)} courses (avg: {total_valid_pairs/len(cluster):.0f})")
         return valid_domains
     
     def _add_faculty_constraints(self, model, variables, cluster):
-        """Faculty conflict prevention"""
+        """Faculty conflict prevention - SESSION-LEVEL constraints (CORRECT)"""
         for faculty_id in set(c.faculty_id for c in cluster):
             faculty_courses = [c for c in cluster if c.faculty_id == faculty_id]
+            
+            # SESSION-LEVEL: Faculty can't teach 2 different courses at same time
+            # But CAN teach multiple sessions of SAME course
             for t_slot in self.time_slots:
-                faculty_vars = [
-                    variables[(c.course_id, s, t_slot.slot_id, r.room_id)]
-                    for c in faculty_courses
-                    for s in range(c.duration)
-                    for r in self.rooms
-                    if (c.course_id, s, t_slot.slot_id, r.room_id) in variables
-                ]
-                if faculty_vars:
-                    model.Add(sum(faculty_vars) <= 1)
+                # Collect all session variables for this faculty at this time slot
+                all_session_vars = []
+                for course in faculty_courses:
+                    for session in range(course.duration):
+                        session_vars = [
+                            variables[(course.course_id, session, t_slot.slot_id, r.room_id)]
+                            for r in self.rooms
+                            if (course.course_id, session, t_slot.slot_id, r.room_id) in variables
+                        ]
+                        if session_vars:
+                            # Each session can be assigned to at most 1 room
+                            # But we need to track which course this session belongs to
+                            all_session_vars.extend(session_vars)
+                
+                # Faculty can teach at most 1 session at this time slot
+                # (This allows same course to have multiple sessions, but not simultaneously)
+                if all_session_vars:
+                    model.Add(sum(all_session_vars) <= 1)
     
     def _add_room_constraints(self, model, variables, cluster):
-        """Room conflict prevention"""
+        """Room conflict prevention - SESSION-LEVEL (rooms can't be double-booked)"""
         for room in self.rooms:
             for t_slot in self.time_slots:
+                # Room can only host 1 session at a time (any course, any session)
                 room_vars = [
                     variables[(c.course_id, s, t_slot.slot_id, room.room_id)]
                     for c in cluster

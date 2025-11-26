@@ -1,0 +1,4 @@
+# FastAPI Backend Logs - Started at 2025-11-27T04:34:10.340814
+2025-11-27 04:34:10,341 - __main__ - INFO - Logs saved to: D:\GitHub\SIH28\backend\fastapi\fastapi_logs.txt
+2025-11-27 04:34:10,465 - __main__ - INFO - Starting Enterprise FastAPI Timetable Service...
+2025-11-27 04:34:11,074 - __main__ - INFO - Memory cleanup completed

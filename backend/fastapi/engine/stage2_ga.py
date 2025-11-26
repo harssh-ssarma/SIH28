@@ -73,7 +73,8 @@ class GeneticAlgorithmOptimizer:
         early_stop_patience: int = 5,
         use_sample_fitness: bool = False,
         sample_size: int = 200,
-        gpu_offload_conflicts: bool = True  # NEW: Offload conflicts to GPU
+        gpu_offload_conflicts: bool = True,
+        hardware_config: Dict = None  # NEW: Hardware config from detector
     ):
         self.courses = courses
         self.rooms = rooms
@@ -124,30 +125,34 @@ class GeneticAlgorithmOptimizer:
         else:
             self.sample_students = set()
         
-        # Hardware-adaptive configuration - FORCE GPU if available
-        self.gpu_offload_conflicts = gpu_offload_conflicts and TORCH_AVAILABLE
-        if TORCH_AVAILABLE and DEVICE is not None:
+        # Hardware-adaptive configuration - RESPECT hardware config
+        if hardware_config:
+            # Use hardware detector config
+            self.use_gpu = hardware_config.get('use_gpu', False) and TORCH_AVAILABLE
+            self.gpu_offload_conflicts = self.use_gpu and gpu_offload_conflicts
+            logger.info(f"Hardware config: use_gpu={self.use_gpu}, pop={self.population_size}")
+        else:
+            # Fallback: auto-detect
+            self.use_gpu = TORCH_AVAILABLE and DEVICE is not None
+            self.gpu_offload_conflicts = self.use_gpu and gpu_offload_conflicts
+            logger.warning("No hardware config provided, using auto-detection")
+        
+        if self.use_gpu:
             try:
                 logger.info(f"Initializing GPU tensors for {len(courses)} courses...")
                 self._init_gpu_tensors()
                 if self.gpu_offload_conflicts:
                     self._init_gpu_conflict_detection()
-                self.use_gpu = True
-                self.use_multicore = False
-                logger.info(f"✅ GPU ENABLED: pop={self.population_size}, courses={len(courses)}, conflict_offload={self.gpu_offload_conflicts}")
+                logger.info(f"✅ GPU ENABLED: pop={self.population_size}, courses={len(courses)}")
             except Exception as e:
                 logger.error(f"❌ GPU init failed: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
                 self.use_gpu = False
-                self.use_multicore = False
                 self.gpu_offload_conflicts = False
-                logger.warning(f"Falling back to single-core CPU")
+                logger.warning(f"Falling back to CPU")
         else:
-            self.use_gpu = False
-            self.use_multicore = False
-            self.gpu_offload_conflicts = False
-            logger.warning(f"GPU not available (TORCH_AVAILABLE={TORCH_AVAILABLE}, DEVICE={DEVICE})")
+            logger.info(f"CPU mode: pop={self.population_size}")
+        
+        self.use_multicore = False  # Always single-core to prevent RAM exhaustion
         
         self.use_island_model = False  # Set externally
         self.progress_tracker = None  # Set externally for unified progress updates
@@ -667,21 +672,25 @@ class GeneticAlgorithmOptimizer:
                 self._cleanup_gpu()
                 break
         
-        # Final cleanup
-        self.population.clear()
-        self.fitness_cache.clear()
-        if self.gpu_fitness_cache is not None:
-            self.gpu_fitness_cache.clear()
-        if self.use_gpu:
-            self._cleanup_gpu()
-        
-        # Final progress update
-        if hasattr(self, 'progress_tracker') and self.progress_tracker:
-            self._update_ga_progress_batch(self.generations, self.generations, best_fitness)
-        
-        logger.info(f"GA complete: Final fitness={best_fitness:.4f}")
-        self._stop_flag = True  # Set stop flag
-        return best_solution
+        # CRITICAL FIX: Cleanup on success path
+        try:
+            self.population.clear()
+            self.fitness_cache.clear()
+            if self.gpu_fitness_cache is not None:
+                self.gpu_fitness_cache.clear()
+            if self.use_gpu:
+                self._cleanup_gpu()
+            
+            # Final progress update
+            if hasattr(self, 'progress_tracker') and self.progress_tracker:
+                self._update_ga_progress_batch(self.generations, self.generations, best_fitness)
+            
+            logger.info(f"GA complete: Final fitness={best_fitness:.4f}")
+            self._stop_flag = True
+            return best_solution
+        except Exception as cleanup_error:
+            logger.error(f"GA cleanup error: {cleanup_error}")
+            return best_solution
     
     def stop(self):
         """Stop GA evolution immediately"""

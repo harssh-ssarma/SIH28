@@ -164,3 +164,92 @@ class TimetableResult(BaseModel):
     statistics: GenerationStatistics
     metrics: QualityMetrics
     generation_time_seconds: float
+
+
+# ============================================================================
+# DEPARTMENT VIEW MODELS (Enterprise Features)
+# ============================================================================
+
+class DepartmentStats(BaseModel):
+    """Department-level statistics"""
+    department_id: str
+    department_name: str
+    total_courses: int
+    scheduled_courses: int
+    pending_courses: int
+    total_faculty: int
+    active_faculty: int
+    total_students: int
+    cross_enrollment_out: int  # Dept students taking other dept courses
+    cross_enrollment_in: int   # Other students taking dept courses
+    room_utilization: float
+    faculty_utilization: float
+
+
+class CrossEnrollmentEntry(BaseModel):
+    """Cross-department enrollment tracking"""
+    course_id: str
+    course_code: str
+    course_name: str
+    offering_department: str
+    total_enrolled: int
+    own_department_count: int
+    external_count: int
+    external_departments: Dict[str, int]  # dept_id -> count
+    conflict_potential: str  # "high", "medium", "low"
+    conflicting_courses: List[str] = Field(default_factory=list)
+
+
+class FacultySchedule(BaseModel):
+    """Faculty schedule summary"""
+    faculty_id: str
+    faculty_name: str
+    department_id: str
+    weekly_hours: int
+    max_hours: int
+    courses: List[str]
+    load_status: str  # "normal", "full", "overload", "underload"
+    schedule_entries: List[TimetableEntry] = Field(default_factory=list)
+
+
+class ConflictAlert(BaseModel):
+    """Conflict detection alert"""
+    conflict_id: str
+    conflict_type: str  # "student", "faculty", "room"
+    severity: str  # "critical", "high", "medium", "low"
+    description: str
+    affected_courses: List[str]
+    affected_entities: List[str]  # student_ids, faculty_ids, or room_ids
+    suggested_resolution: Optional[str] = None
+    timestamp: str
+
+
+class DepartmentTimetableView(BaseModel):
+    """Complete department view of timetable"""
+    department_id: str
+    department_name: str
+    semester: int
+    academic_year: str
+    stats: DepartmentStats
+    own_courses: List[TimetableEntry]
+    cross_enrollment: List[CrossEnrollmentEntry]
+    faculty_schedules: List[FacultySchedule]
+    conflicts: List[ConflictAlert]
+    last_updated: str
+
+
+class UniversityDashboard(BaseModel):
+    """Registrar's university-wide dashboard"""
+    total_departments: int
+    total_courses: int
+    total_faculty: int
+    total_students: int
+    total_rooms: int
+    scheduled_courses: int
+    pending_courses: int
+    overall_faculty_utilization: float
+    overall_room_utilization: float
+    total_conflicts: int
+    critical_conflicts: int
+    department_stats: List[DepartmentStats]
+    recent_alerts: List[ConflictAlert]

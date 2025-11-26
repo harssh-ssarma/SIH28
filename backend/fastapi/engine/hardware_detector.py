@@ -646,16 +646,17 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
     elif tier == "laptop":
         stage2b = {
             'algorithm': 'micro_ga',
-            'population': 12,
-            'generations': 18,
+            'population': 3,  # CRITICAL: Reduced from 12 to prevent memory exhaustion
+            'generations': 5,  # CRITICAL: Reduced from 18 to prevent Windows freeze
             'islands': 1,
-            'parallel_fitness': True,
-            'parallel_mode': 'thread',
-            'fitness_workers': 4,
-            'fitness_evaluation': 'full',
+            'parallel_fitness': False,  # CRITICAL: Disabled to save memory
+            'parallel_mode': 'sequential',  # CRITICAL: Sequential to prevent memory spikes
+            'fitness_workers': 1,
+            'fitness_evaluation': 'sample_based',  # CRITICAL: Sample-based to reduce memory
+            'sample_students': 50,  # CRITICAL: Only evaluate 50 students per fitness
             'fitness_cache': True,
             'early_stopping': True,
-            'early_stop_patience': 3,
+            'early_stop_patience': 2,
             'use_gpu': False
         }
     elif tier == "workstation":
