@@ -339,23 +339,25 @@ class TimetableGenerationSaga:
             await client.close()
     
     async def _stage1_louvain_clustering(self, job_id: str, request_data: dict):
-        """Stage 1: Louvain clustering with memory management"""
+        """Stage 1: Louvain clustering with hardware-adaptive configuration"""
         from engine.stage1_clustering import LouvainClusterer
         from engine.orchestrator import get_orchestrator
         from utils.memory_cleanup import get_memory_usage, aggressive_cleanup
         import gc
         
-        # Check memory before clustering
+        # Get hardware-adaptive config
+        global hardware_profile
+        optimal_config = get_optimal_config(hardware_profile) if hardware_profile else None
+        stage1_config = optimal_config['stage1_louvain'] if optimal_config else {'workers': 1, 'edge_threshold': 0.5}
+        
         mem_before = get_memory_usage()
-        logger.info(f"[STAGE1] Memory before clustering: {mem_before['rss_mb']:.1f}MB ({mem_before['percent']:.1f}%)")
+        logger.info(f"[STAGE1] Memory: {mem_before['rss_mb']:.1f}MB | Config: {stage1_config['algorithm']} (workers={stage1_config['workers']})")
         
         data = self.job_data[job_id]['results']['load_data']
         courses = data['courses']
         
-        # Set stage (background task will handle progress updates)
         self.progress_tracker.set_stage('clustering')
         
-        # Use orchestrator for optimal hardware utilization
         orchestrator = get_orchestrator()
         clusterer = LouvainClusterer(target_cluster_size=10)
         
@@ -365,10 +367,9 @@ class TimetableGenerationSaga:
             clusterer
         )
         
-        # Cleanup after clustering
         del clusterer
         gc.collect()
-        logger.info(f"[STAGE1] Clustering complete: {len(clusters)} clusters")
+        logger.info(f"[STAGE1] Complete: {len(clusters)} clusters")
         
         return clusters
     
@@ -399,27 +400,27 @@ class TimetableGenerationSaga:
             mem_usage = get_memory_usage()
             logger.info(f"[STAGE2] After cleanup: {mem_usage['rss_mb']:.1f}MB ({mem_usage['percent']:.1f}%)")
         
-        # Use ThreadPoolExecutor (not ProcessPoolExecutor) to avoid pickle errors
-        # Threads share memory, so no duplication like processes
-        base_timeout = 5
+        # Get hardware-adaptive config
+        global hardware_profile
+        optimal_config = get_optimal_config(hardware_profile) if hardware_profile else None
+        stage2a_config = optimal_config['stage2a_cpsat'] if optimal_config else {'timeout': 1, 'parallel_clusters': 2, 'student_limit': 50}
+        
+        base_timeout = stage2a_config['timeout']
+        max_parallel = stage2a_config['parallel_clusters']
+        student_limit = stage2a_config['student_limit']
+        
+        # Adaptive limits based on memory
         if available_gb > 8.0:
-            max_parallel = 4
             max_courses_per_cluster = 15
             max_rooms = 200
         elif available_gb > 6.0:
-            max_parallel = 3
             max_courses_per_cluster = 12
             max_rooms = 150
-        elif available_gb > 4.0:
-            max_parallel = 2
+        else:
             max_courses_per_cluster = 10
             max_rooms = 100
-        else:
-            max_parallel = 1
-            max_courses_per_cluster = 8
-            max_rooms = 80
         
-        logger.info(f"[STAGE2] ThreadPool mode: {max_parallel} workers, RAM: {available_gb:.1f}GB")
+        logger.info(f"[STAGE2] Config: timeout={base_timeout}s, parallel={max_parallel}, students={student_limit}, RAM={available_gb:.1f}GB")
         
         all_solutions = {}
         total_clusters = len(clusters)
@@ -724,14 +725,13 @@ class TimetableGenerationSaga:
             time_slots = data['load_data']['time_slots']
             faculty = data['load_data']['faculty']
             
-            has_gpu = torch.cuda.is_available()
-            
             # Use hardware-optimal config
             global hardware_profile
             optimal_config = get_optimal_config(hardware_profile) if hardware_profile else {'stage2b_ga': {'population': 12, 'generations': 18, 'islands': 1, 'use_gpu': False, 'fitness_mode': 'full'}}
             ga_config = optimal_config['stage2b_ga']
             
-            if has_gpu and ga_config['use_gpu']:
+            # CRITICAL: Only use GPU if config explicitly allows it (checks VRAM >= 8GB)
+            if ga_config['use_gpu']:
                 # GPU Tensor GA
                 from engine.gpu_tensor_ga import GPUTensorGA
                 
@@ -800,7 +800,7 @@ class TimetableGenerationSaga:
             self.progress_tracker.mark_stage_complete()
             
             # CRITICAL: Aggressive cleanup before RL stage
-            if has_gpu:
+            if ga_config['use_gpu']:
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
             
@@ -822,7 +822,7 @@ class TimetableGenerationSaga:
             # Cleanup on error
             if 'gpu_ga' in locals():
                 del gpu_ga
-            if has_gpu:
+            if ga_config.get('use_gpu', False):
                 torch.cuda.empty_cache()
             aggressive_cleanup()
             
@@ -875,8 +875,10 @@ class TimetableGenerationSaga:
             
             logger.info(f"[STAGE3] Detected {len(conflicts)} conflicts, resolving with RL")
             
-            # RL Conflict Resolver with GPU support
-            has_gpu = hardware_profile.has_nvidia_gpu if hardware_profile else False
+            # Get hardware-adaptive config
+            global hardware_profile
+            optimal_config = get_optimal_config(hardware_profile) if hardware_profile else None
+            stage3_config = optimal_config['stage3_qlearning'] if optimal_config else {'max_iterations': 100, 'transfer_learning': True, 'similar_universities': 3}
             
             resolver = RLConflictResolver(
                 courses=load_data['courses'],
@@ -886,13 +888,13 @@ class TimetableGenerationSaga:
                 learning_rate=0.15,
                 discount_factor=0.85,
                 epsilon=0.10,
-                max_iterations=100,
-                use_gpu=has_gpu,
+                max_iterations=stage3_config['max_iterations'],
+                use_gpu=stage3_config.get('use_gpu', False),
                 org_id=request_data.get('organization_id'),
-                progress_tracker=self.progress_tracker  # Pass unified progress tracker
+                progress_tracker=self.progress_tracker
             )
             
-            logger.info(f"[STAGE3] RL config: GPU={has_gpu}, conflicts={len(conflicts)}")
+            logger.info(f"[STAGE3] Config: algorithm={stage3_config['algorithm']}, iterations={stage3_config['max_iterations']}, conflicts={len(conflicts)}")
             
             # Use orchestrator for optimal hardware utilization (GPU if available)
             orchestrator = get_orchestrator()

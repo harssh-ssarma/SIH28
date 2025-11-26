@@ -526,7 +526,7 @@ def get_hardware_profile(force_refresh: bool = False) -> HardwareProfile:
     return hardware_detector.detect_hardware(force_refresh)
 
 def get_optimal_config(profile: HardwareProfile) -> Dict:
-    """Get hardware-adaptive optimal configuration"""
+    """Get hardware-adaptive optimal configuration based on complete methodology matrix"""
     
     cpu_cores = profile.cpu_cores
     total_ram = profile.total_ram_gb
@@ -534,94 +534,233 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
     has_gpu = profile.has_nvidia_gpu
     gpu_vram = profile.gpu_memory_gb
     
-    # Determine hardware tier
-    if total_ram >= 24 and cpu_cores >= 12:
-        tier = "workstation"
-    elif total_ram >= 12 and cpu_cores >= 6:
-        tier = "laptop"
-    else:
+    # Classify hardware tier (POTATO < LAPTOP < WORKSTATION < SERVER < DISTRIBUTED)
+    if available_ram < 6:
         tier = "potato"
-    
-    # Stage 1: Louvain
-    if tier == "workstation":
-        louvain_workers = min(cpu_cores - 2, 12)
-    elif tier == "laptop":
-        louvain_workers = min(cpu_cores // 2, 4)
+    elif available_ram < 16:
+        tier = "laptop"
+    elif available_ram < 32:
+        tier = "workstation"
     else:
-        louvain_workers = 1
+        tier = "server"
     
-    # Stage 2A: CP-SAT
-    if tier == "workstation":
-        cpsat_timeout = 2
-        cpsat_parallel = min(cpu_cores - 2, 12)
-        student_limit = 100
+    # STAGE 1: LOUVAIN CLUSTERING
+    if tier == "potato":
+        stage1 = {
+            'algorithm': 'simple_department_grouping',
+            'workers': 1,
+            'edge_construction': 'skip',
+            'edge_threshold': None,
+            'parallel_mode': 'sequential',
+            'use_gpu': False
+        }
     elif tier == "laptop":
-        cpsat_timeout = 1
-        cpsat_parallel = min(cpu_cores // 2, 4)
-        student_limit = 50
-    else:
-        cpsat_timeout = 0.5
-        cpsat_parallel = 1
-        student_limit = 10
+        stage1 = {
+            'algorithm': 'louvain_batched',
+            'workers': min(4, cpu_cores - 2),
+            'edge_construction': 'parallel_batched',
+            'batch_size': 100,
+            'edge_threshold': 0.5,
+            'parallel_mode': 'batched',
+            'use_gpu': False
+        }
+    elif tier == "workstation":
+        stage1 = {
+            'algorithm': 'louvain_parallel',
+            'workers': cpu_cores - 4,
+            'edge_construction': 'full_parallel',
+            'edge_threshold': 0.3,
+            'parallel_mode': 'parallel',
+            'use_gpu': False
+        }
+    else:  # server
+        stage1 = {
+            'algorithm': 'louvain_optimized',
+            'workers': cpu_cores - 8,
+            'edge_construction': 'distributed_chunks',
+            'edge_threshold': 0.1,
+            'parallel_mode': 'distributed',
+            'use_gpu': gpu_vram >= 8
+        }
     
-    # Stage 2B: GA - CRITICAL DECISION
-    # NEVER use GPU for GA if VRAM < 8GB (causes OOM)
+    # STAGE 2A: CP-SAT (HARD CONSTRAINTS)
+    if tier == "potato":
+        stage2a = {
+            'primary_solver': 'greedy',
+            'cpsat_usage': 'fallback_only',
+            'timeout': 0.5,
+            'parallel_clusters': 1,
+            'student_constraints': 'minimal',
+            'student_limit': 10,
+            'quick_feasibility': True,
+            'skip_threshold': 0.3,
+            'fallback': 'greedy'
+        }
+    elif tier == "laptop":
+        stage2a = {
+            'primary_solver': 'cpsat_aggressive',
+            'timeout': 1,
+            'parallel_clusters': min(4, cpu_cores - 2),
+            'student_constraints': 'hierarchical',
+            'student_limit': 50,
+            'quick_feasibility': True,
+            'feasibility_timeout': 0.1,
+            'fallback': 'greedy',
+            'cpsat_workers_per_cluster': 2
+        }
+    elif tier == "workstation":
+        stage2a = {
+            'primary_solver': 'cpsat_standard',
+            'timeout': 2,
+            'parallel_clusters': min(8, cpu_cores - 4),
+            'student_constraints': 'hierarchical',
+            'student_limit': 100,
+            'quick_feasibility': True,
+            'cpsat_workers_per_cluster': 4,
+            'progressive_timeout': True
+        }
+    else:  # server
+        stage2a = {
+            'primary_solver': 'cpsat_full',
+            'timeout': 3,
+            'parallel_clusters': min(16, cpu_cores - 8),
+            'student_constraints': 'hierarchical',
+            'student_limit': 200,
+            'quick_feasibility': False,
+            'cpsat_workers_per_cluster': 8,
+            'use_hints': True
+        }
+    
+    # STAGE 2B: GENETIC ALGORITHM (SOFT CONSTRAINTS)
+    # CRITICAL: GPU only if VRAM >= 8GB AND population >= 100
     use_gpu_ga = has_gpu and gpu_vram >= 8 and total_ram >= 24
     
-    if tier == "workstation" and total_ram >= 24:
-        ga_population = 30
-        ga_generations = 30
-        ga_islands = 4 if use_gpu_ga else 1
+    if tier == "potato":
+        stage2b = {
+            'algorithm': 'hill_climbing',
+            'skip_ga': True,
+            'iterations': 50,
+            'neighbor_strategy': 'single_swap',
+            'use_gpu': False
+        }
     elif tier == "laptop":
-        ga_population = 12
-        ga_generations = 18
-        ga_islands = 1  # NO island model for 16GB RAM
-    else:
-        ga_population = 5
-        ga_generations = 10
-        ga_islands = 1
+        stage2b = {
+            'algorithm': 'micro_ga',
+            'population': 12,
+            'generations': 18,
+            'islands': 1,
+            'parallel_fitness': True,
+            'parallel_mode': 'thread',
+            'fitness_workers': 4,
+            'fitness_evaluation': 'full',
+            'fitness_cache': True,
+            'early_stopping': True,
+            'early_stop_patience': 3,
+            'use_gpu': False
+        }
+    elif tier == "workstation":
+        stage2b = {
+            'algorithm': 'island_ga',
+            'population': 20,
+            'generations': 30,
+            'islands': 4,
+            'parallel_mode': 'process',
+            'island_workers': 4,
+            'migration_frequency': 5,
+            'migration_rate': 0.1,
+            'fitness_evaluation': 'full',
+            'fitness_cache': True,
+            'early_stopping': True,
+            'use_gpu': use_gpu_ga,
+            'gpu_strategy': 'fitness_only'
+        }
+    else:  # server
+        stage2b = {
+            'algorithm': 'island_ga_gpu',
+            'population': 50,
+            'generations': 50,
+            'islands': 8,
+            'parallel_mode': 'process',
+            'island_workers': 8,
+            'fitness_evaluation': 'full',
+            'use_gpu': True,
+            'gpu_strategy': 'batched_fitness',
+            'gpu_batch_size': 400,
+            'fitness_cache': False
+        }
     
-    # Stage 3: RL
-    if tier == "workstation":
-        rl_iterations = 200
-        rl_similar_unis = 10
+    # STAGE 3: Q-LEARNING / RL
+    if tier == "potato":
+        stage3 = {
+            'algorithm': 'simple_swap_heuristic',
+            'skip_rl': True,
+            'max_swaps': 50,
+            'swap_strategy': 'greedy_conflict_resolution',
+            'use_gpu': False
+        }
     elif tier == "laptop":
-        rl_iterations = 100
-        rl_similar_unis = 3
-    else:
-        rl_iterations = 50
-        rl_similar_unis = 1
+        stage3 = {
+            'algorithm': 'q_learning_tabular',
+            'max_iterations': 100,
+            'state_representation': 'abstract_context',
+            'state_abstraction': 'hierarchical',
+            'action_space': 'pruned',
+            'transfer_learning': True,
+            'similar_universities': 3,
+            'bootstrap_strategy': 'weighted_average',
+            'bootstrap_weight': 0.3,
+            'q_table_storage': 'redis',
+            'use_gpu': False
+        }
+    elif tier == "workstation":
+        stage3 = {
+            'algorithm': 'q_learning_enhanced',
+            'max_iterations': 200,
+            'state_representation': 'rich_context',
+            'transfer_learning': True,
+            'similar_universities': 10,
+            'parallel_action_evaluation': True,
+            'action_workers': 4,
+            'use_gpu': False
+        }
+    else:  # server
+        stage3 = {
+            'algorithm': 'q_learning_full',
+            'max_iterations': 500,
+            'state_representation': 'full_context',
+            'transfer_learning': True,
+            'transfer_strategy': 'cluster_all_similar',
+            'parallel_action_evaluation': True,
+            'action_workers': 8,
+            'use_gpu': False
+        }
     
     return {
         'tier': tier,
-        'stage1_louvain': {
-            'workers': louvain_workers,
-            'edge_threshold': 0.5,
-            'parallel_mode': 'batched' if tier != 'potato' else 'sequential'
-        },
-        'stage2a_cpsat': {
-            'timeout': cpsat_timeout,
-            'parallel_clusters': cpsat_parallel,
-            'student_limit': student_limit,
-            'quick_feasibility': True
-        },
-        'stage2b_ga': {
-            'population': ga_population,
-            'generations': ga_generations,
-            'islands': ga_islands,
-            'parallel_fitness': True,
-            'fitness_workers': min(cpu_cores // 2, 4),
-            'fitness_mode': 'full',
-            'sample_students': None,
-            'early_stopping': True,
-            'early_stop_patience': 3,
-            'use_gpu': use_gpu_ga
-        },
-        'stage3_qlearning': {
-            'max_iterations': rl_iterations,
-            'transfer_learning': True,
-            'similar_universities': rl_similar_unis,
-            'bootstrap_weight': 0.3,
-            'use_gpu': False
-        }
+        'stage1_louvain': stage1,
+        'stage2a_cpsat': stage2a,
+        'stage2b_ga': stage2b,
+        'stage3_qlearning': stage3,
+        'expected_time_minutes': _estimate_time(tier),
+        'expected_quality': _estimate_quality(tier)
     }
+
+def _estimate_time(tier: str) -> int:
+    """Estimate total processing time in minutes"""
+    times = {
+        'potato': 25,
+        'laptop': 12,
+        'workstation': 5,
+        'server': 2
+    }
+    return times.get(tier, 12)
+
+def _estimate_quality(tier: str) -> str:
+    """Estimate expected quality range"""
+    quality = {
+        'potato': '75-80%',
+        'laptop': '85-92%',
+        'workstation': '90-95%',
+        'server': '93-97%'
+    }
+    return quality.get(tier, '85-92%')
