@@ -69,13 +69,13 @@ class DjangoAPIClient:
                        c.lecture_hours_per_week, c.room_type_required, 
                        c.min_room_capacity, c.course_type,
                        co.offering_id, co.primary_faculty_id,
-                       ARRAY_AGG(DISTINCT ce.student_id) FILTER (WHERE ce.student_id IS NOT NULL) as student_ids
+                       COALESCE(ARRAY_AGG(DISTINCT ce.student_id) FILTER (WHERE ce.student_id IS NOT NULL), ARRAY[]::uuid[]) as student_ids
                 FROM courses c
                 INNER JOIN course_offerings co ON c.course_id = co.course_id
                     AND co.is_active = true
                     AND co.primary_faculty_id IS NOT NULL
                     AND co.semester_type = %s
-                LEFT JOIN course_enrollments ce ON co.offering_id = ce.offering_id AND ce.is_active = true
+                LEFT JOIN course_enrollments ce ON c.course_id = ce.course_id AND ce.is_active = true
                 WHERE c.org_id = %s 
                 AND c.is_active = true
                 GROUP BY c.course_id, c.course_code, c.course_name, c.dept_id,
@@ -102,11 +102,13 @@ class DjangoAPIClient:
             logger.info(f"Query returned {len(rows)} rows in {query_time:.2f}s")
             
             courses = []
-            total_enrollments = 0
+            unique_students = set()  # Track unique students across all courses
+            enrollment_counts = []  # Track enrollment per offering
             for row in rows:
                 try:
                     student_ids = [str(sid) for sid in (row.get('student_ids') or []) if sid is not None]
-                    total_enrollments += len(student_ids)
+                    enrollment_counts.append(len(student_ids))
+                    unique_students.update(student_ids)  # Add to unique set
                     
                     # Use offering_id as unique course_id to handle multi-faculty courses
                     course = Course(
@@ -141,8 +143,51 @@ class DjangoAPIClient:
                 debug_rows = cursor.fetchall()
                 logger.warning(f"Semester types in database: {[(r['semester_type'], r['semester_number'], r['count']) for r in debug_rows]}")
             
+            # Get total distinct students enrolled (not just from filtered courses)
+            cursor.execute("""
+                SELECT COUNT(DISTINCT student_id) as total_students
+                FROM course_enrollments
+                WHERE is_active = true
+            """)
+            total_students_row = cursor.fetchone()
+            total_students = total_students_row['total_students'] if total_students_row else 0
+            logger.info(f"DEBUG: Total students in course_enrollments: {total_students}, Unique students in fetched courses: {len(unique_students)}")
+            
+            # Debug: Check enrollments for ODD semester offerings
+            cursor.execute("""
+                SELECT COUNT(DISTINCT ce.student_id) as odd_students,
+                       COUNT(DISTINCT co.offering_id) as odd_offerings,
+                       COUNT(*) as total_enrollments
+                FROM course_offerings co
+                LEFT JOIN course_enrollments ce ON co.offering_id = ce.offering_id AND ce.is_active = true
+                WHERE co.org_id = %s AND co.semester_type = %s AND co.is_active = true
+            """, (org_id, semester_type))
+            debug_row = cursor.fetchone()
+            logger.info(f"ODD semester DB stats: {debug_row['odd_offerings']} offerings, {debug_row['odd_students']} students, {debug_row['total_enrollments']} enrollments")
+            
+            # Log enrollment distribution
+            if enrollment_counts:
+                avg_enrollment = sum(enrollment_counts) / len(enrollment_counts)
+                max_enrollment = max(enrollment_counts)
+                offerings_with_students = sum(1 for c in enrollment_counts if c > 0)
+                logger.info(f"Enrollment distribution: avg={avg_enrollment:.1f}, max={max_enrollment}, {offerings_with_students}/{len(enrollment_counts)} offerings have students")
+                
+                # Debug: Show sample offerings with student counts
+                cursor.execute("""
+                    SELECT co.offering_id, c.course_code, COUNT(ce.student_id) as student_count
+                    FROM course_offerings co
+                    INNER JOIN courses c ON co.course_id = c.course_id
+                    LEFT JOIN course_enrollments ce ON co.offering_id = ce.offering_id AND ce.is_active = true
+                    WHERE co.org_id = %s AND co.semester_type = %s AND co.is_active = true
+                    GROUP BY co.offering_id, c.course_code
+                    ORDER BY student_count DESC
+                    LIMIT 10
+                """, (org_id, semester_type))
+                sample_offerings = cursor.fetchall()
+                logger.info(f"Top 10 offerings by enrollment: {[(r['course_code'], r['student_count']) for r in sample_offerings]}")
+            
             cursor.close()
-            logger.info(f"Fetched {len(courses)} courses with {total_enrollments} total student enrollments")
+            logger.info(f"Fetched {len(courses)} course offerings with {len(unique_students)} students in selected courses (Total enrolled students in system: {total_students})")
             return courses
 
         except Exception as e:

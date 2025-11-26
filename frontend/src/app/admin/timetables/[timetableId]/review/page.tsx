@@ -9,6 +9,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
+import { authenticatedFetch } from '@/lib/auth'
 
 // Backend types matching Django models
 interface TimetableEntry {
@@ -132,20 +133,11 @@ export default function TimetableReviewPage() {
       setLoading(true)
       setError(null)
 
-      // Get auth token
-      const token = localStorage.getItem('access_token')
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      }
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-      }
-
-      // Fetch workflow details
-      const workflowRes = await fetch(`${API_BASE}/timetable/workflows/${workflowId}/`, {
-        headers,
-        credentials: 'include',
-      })
+      // Fetch workflow details with auto-refresh
+      const workflowRes = await authenticatedFetch(
+        `${API_BASE}/timetable/workflows/${workflowId}/`,
+        { credentials: 'include' }
+      )
 
       if (!workflowRes.ok) {
         throw new Error('Failed to load workflow')
@@ -156,12 +148,9 @@ export default function TimetableReviewPage() {
 
       // Fetch variants for this job
       if (workflowData.job_id) {
-        const variantsRes = await fetch(
+        const variantsRes = await authenticatedFetch(
           `${API_BASE}/timetable/variants/?job_id=${workflowData.job_id}`,
-          {
-            headers,
-            credentials: 'include',
-          }
+          { credentials: 'include' }
         )
 
         if (variantsRes.ok) {
@@ -190,18 +179,13 @@ export default function TimetableReviewPage() {
   const handleVariantSelect = async (variantId: string) => {
     try {
       setActionLoading(true)
-      const token = localStorage.getItem('access_token')
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      }
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-      }
-      const response = await fetch(`${API_BASE}/timetable/variants/${variantId}/select/`, {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-      })
+      const response = await authenticatedFetch(
+        `${API_BASE}/timetable/variants/${variantId}/select/`,
+        {
+          method: 'POST',
+          credentials: 'include',
+        }
+      )
 
       if (!response.ok) {
         throw new Error('Failed to select variant')
@@ -235,21 +219,15 @@ export default function TimetableReviewPage() {
 
     try {
       setActionLoading(true)
-      const token = localStorage.getItem('access_token')
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      }
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-      }
-      const response = await fetch(`${API_BASE}/timetable/workflows/${workflowId}/approve/`, {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify({
-          comments: approvalComments,
-        }),
-      })
+      const response = await authenticatedFetch(
+        `${API_BASE}/timetable/workflows/${workflowId}/approve/`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ comments: approvalComments }),
+        }
+      )
 
       if (!response.ok) {
         throw new Error('Failed to approve timetable')
@@ -274,21 +252,15 @@ export default function TimetableReviewPage() {
 
     try {
       setActionLoading(true)
-      const token = localStorage.getItem('access_token')
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      }
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
-      }
-      const response = await fetch(`${API_BASE}/timetable/workflows/${workflowId}/reject/`, {
-        method: 'POST',
-        headers,
-        credentials: 'include',
-        body: JSON.stringify({
-          comments: rejectionReason,
-        }),
-      })
+      const response = await authenticatedFetch(
+        `${API_BASE}/timetable/workflows/${workflowId}/reject/`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ comments: rejectionReason }),
+        }
+      )
 
       if (!response.ok) {
         throw new Error('Failed to reject timetable')
