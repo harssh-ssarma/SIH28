@@ -516,15 +516,22 @@ class TimetableGenerationSaga:
         cleanup_stats = aggressive_cleanup()
         logger.info(f"[STAGE2] Completed: {len(all_solutions)} assignments, freed {cleanup_stats['freed_mb']:.1f}MB")
         
-        # FALLBACK: If no solutions found, generate mock timetable
-        if len(all_solutions) == 0:
-            logger.warning("[STAGE2] CP-SAT failed for all clusters, generating complete mock timetable")
-            all_solutions = self._generate_mock_timetable(
-                data['load_data']['courses'],  # ALL COURSES
-                data['load_data']['rooms'],  # ALL ROOMS
-                data['load_data']['time_slots']  # ALL TIME SLOTS
-            )
-            logger.info(f"[STAGE2] Generated {len(all_solutions)} mock assignments for ALL departments")
+        # Calculate CP-SAT success metrics
+        total_courses = sum(len(courses) for courses in clusters.values())
+        success_rate = (len(all_solutions) / total_courses * 100) if total_courses > 0 else 0
+        
+        # CHECK: Cancel if CP-SAT success rate is too low (< 10%)
+        # Rationale: If CP-SAT can't schedule at least 10% of courses, there's a fundamental issue
+        # GA/RL can't fix fundamental constraint violations, only optimize valid solutions
+        if success_rate < 10:
+            logger.error(f"[STAGE2] ❌ CP-SAT success rate too low: {success_rate:.1f}% ({len(all_solutions)}/{total_courses})")
+            logger.error("[STAGE2] Likely causes: department mismatch, insufficient rooms, invalid time slots")
+            raise asyncio.CancelledError(f"CP-SAT success rate {success_rate:.1f}% below minimum threshold (10%)")
+        
+        # Log success
+        logger.info(f"[STAGE2] ✅ CP-SAT success: {len(all_solutions)}/{total_courses} assignments ({success_rate:.1f}%)")
+        if success_rate < 50:
+            logger.warning(f"[STAGE2] ⚠️ Low success rate ({success_rate:.1f}%) - GA/RL will attempt to improve")
         
         return {'schedule': all_solutions, 'quality_score': 0, 'conflicts': [], 'execution_time': 0}
     
