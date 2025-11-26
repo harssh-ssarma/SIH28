@@ -124,29 +124,15 @@ class DjangoAPIClient:
                     enrollment_counts.append(len(student_ids))
                     unique_students.update(student_ids)
                     
-                    # Parse co_faculty_ids (JSON array)
-                    co_faculty_ids = row.get('co_faculty_ids') or []
-                    if isinstance(co_faculty_ids, str):
-                        import json
-                        try:
-                            co_faculty_ids = json.loads(co_faculty_ids)
-                        except:
-                            co_faculty_ids = []
-                    
-                    # Split course into sections if co-faculty exists and enrollment > 60
-                    faculty_list = [str(row['primary_faculty_id'])]
-                    if co_faculty_ids:
-                        faculty_list.extend([str(fid) for fid in co_faculty_ids if fid])
-                    
-                    num_sections = len(faculty_list)
-                    
-                    if num_sections > 1 and len(student_ids) > 60:
-                        # Split students across sections
+                    # CRITICAL: Split large courses (>60 students) into sections to fit 60-capacity rooms
+                    if len(student_ids) > 60:
+                        # Calculate number of sections needed (round up)
+                        num_sections = (len(student_ids) + 59) // 60  # Ceiling division
                         students_per_section = len(student_ids) // num_sections
                         remainder = len(student_ids) % num_sections
                         
                         start_idx = 0
-                        for section_idx, faculty_id in enumerate(faculty_list):
+                        for section_idx in range(num_sections):
                             # Distribute remainder students to first sections
                             section_size = students_per_section + (1 if section_idx < remainder else 0)
                             section_students = student_ids[start_idx:start_idx + section_size]
@@ -155,9 +141,9 @@ class DjangoAPIClient:
                             course = Course(
                                 course_id=f"{row['course_id']}_off_{row['offering_id']}_sec{section_idx}",
                                 course_code=f"{row['course_code']}",
-                                course_name=f"{row['course_name']} (Section {section_idx+1})",
+                                course_name=f"{row['course_name']} (Sec {section_idx+1}/{num_sections})",
                                 department_id=str(row['dept_id']),
-                                faculty_id=faculty_id,
+                                faculty_id=str(row['primary_faculty_id']),  # Same faculty for all sections
                                 credits=row.get('lecture_hours_per_week', 3) or 3,
                                 duration=row.get('lecture_hours_per_week', 3) or 3,
                                 type=row.get('course_type', 'core'),
@@ -168,7 +154,7 @@ class DjangoAPIClient:
                             )
                             courses.append(course)
                     else:
-                        # Single section course
+                        # Single section course (≤60 students)
                         course = Course(
                             course_id=f"{row['course_id']}_off_{row['offering_id']}",
                             course_code=f"{row['course_code']}",
