@@ -188,11 +188,22 @@ class GeneticAlgorithmOptimizer:
         if hasattr(self, 'progress_tracker') and self.progress_tracker:
             self._update_init_progress(1, self.population_size)
         
+        # FAST perturbation: only change 5% of assignments (not 15%)
+        num_keys = len(self.initial_solution)
+        num_changes = max(1, int(num_keys * 0.05))  # 5% for faster init
+        keys_list = list(self.initial_solution.keys())
+        
         # Add perturbed versions (reuse objects) with progress
         for i in range(self.population_size - 1):
-            perturbed = self._perturb_solution(self.initial_solution)
-            if perturbed:
-                self.population.append(perturbed)
+            perturbed = self.initial_solution.copy()
+            # Fast perturbation: random changes without validation
+            for _ in range(num_changes):
+                key = random.choice(keys_list)
+                valid_pairs = self.valid_domains.get(key, [])
+                if valid_pairs:
+                    perturbed[key] = random.choice(valid_pairs)
+            self.population.append(perturbed)
+            
             # Update progress EVERY individual for smooth progress
             if hasattr(self, 'progress_tracker') and self.progress_tracker:
                 self._update_init_progress(i + 2, self.population_size)
@@ -200,10 +211,10 @@ class GeneticAlgorithmOptimizer:
         logger.info(f"Initialized GA population: {len(self.population)} individuals")
     
     def _perturb_solution(self, solution: Dict) -> Dict:
-        """Perturb solution by changing 10-20% of assignments"""
+        """Perturb solution by changing 5-10% of assignments (fast)"""
         perturbed = solution.copy()  # Proper copy
         keys = list(perturbed.keys())
-        num_changes = max(1, int(len(keys) * 0.15))  # Fixed 15%
+        num_changes = max(1, int(len(keys) * 0.08))  # 8% for speed
         
         for _ in range(num_changes):
             key = random.choice(keys)
@@ -232,12 +243,19 @@ class GeneticAlgorithmOptimizer:
         if not self._is_feasible(solution):
             fitness_val = -1000 * self._count_violations(solution)
         else:
-            # Soft constraint weights
-            sc1 = self._faculty_preference_satisfaction(solution) * 0.3
-            sc2 = self._schedule_compactness(solution) * 0.3
-            sc3 = self._room_utilization(solution) * 0.2
-            sc4 = self._workload_balance(solution) * 0.2
-            fitness_val = sc1 + sc2 + sc3 + sc4
+            # FAST fitness: skip expensive compactness for large schedules
+            if len(solution) > 1500:
+                sc1 = self._faculty_preference_satisfaction(solution) * 0.4
+                sc3 = self._room_utilization(solution) * 0.3
+                sc4 = self._workload_balance(solution) * 0.3
+                fitness_val = sc1 + sc3 + sc4
+            else:
+                # Full fitness for smaller schedules
+                sc1 = self._faculty_preference_satisfaction(solution) * 0.3
+                sc2 = self._schedule_compactness(solution) * 0.3
+                sc3 = self._room_utilization(solution) * 0.2
+                sc4 = self._workload_balance(solution) * 0.2
+                fitness_val = sc1 + sc2 + sc3 + sc4
         
         # Thread-safe cache write
         self._cache_fitness(sol_key, fitness_val)
@@ -389,25 +407,29 @@ class GeneticAlgorithmOptimizer:
         return total_score / count if count > 0 else 0.0
     
     def _schedule_compactness(self, solution: Dict) -> float:
-        """Minimize gaps in schedules"""
+        """Minimize gaps in schedules (FAST version for large schedules)"""
         try:
-            total_gaps = 0
+            # Skip for very large schedules (too expensive)
+            if len(solution) > 1500:
+                return 0.5  # Neutral score
             
-            for faculty_id in set(c.faculty_id for c in self.courses):
-                time_slots_used = []
-                for (cid, s), (time_slot, _) in solution.items():
-                    course = next((c for c in self.courses if c.course_id == cid), None)
-                    if course and course.faculty_id == faculty_id:
-                        # Convert to int for arithmetic
-                        try:
-                            slot_int = int(time_slot) if isinstance(time_slot, str) else time_slot
-                            time_slots_used.append(slot_int)
-                        except (ValueError, TypeError):
-                            continue
-                
-                if len(time_slots_used) > 1:
-                    time_slots_used.sort()
-                    gaps = sum(time_slots_used[i+1] - time_slots_used[i] - 1 for i in range(len(time_slots_used) - 1))
+            # Build faculty schedule dict (faster than repeated iteration)
+            faculty_slots = defaultdict(list)
+            for (cid, s), (time_slot, _) in solution.items():
+                course = next((c for c in self.courses if c.course_id == cid), None)
+                if course:
+                    try:
+                        slot_int = int(time_slot) if isinstance(time_slot, str) else time_slot
+                        faculty_slots[course.faculty_id].append(slot_int)
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Calculate gaps
+            total_gaps = 0
+            for slots in faculty_slots.values():
+                if len(slots) > 1:
+                    slots.sort()
+                    gaps = sum(slots[i+1] - slots[i] - 1 for i in range(len(slots) - 1))
                     total_gaps += gaps
             
             max_gaps = len(self.courses) * 5

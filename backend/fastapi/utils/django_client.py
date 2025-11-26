@@ -63,31 +63,31 @@ class DjangoAPIClient:
             org_id = org_row['org_id']
             logger.info(f"Found organization: {org_row['org_name']} (ID: {org_id})")
             
-            # Optimized query with student enrollments
+            # Query creates separate course instance per offering (handles multi-faculty courses)
             query = """
                 SELECT c.course_id, c.course_code, c.course_name, c.dept_id,
                        c.lecture_hours_per_week, c.room_type_required, 
                        c.min_room_capacity, c.course_type,
-                       co.primary_faculty_id,
+                       co.offering_id, co.primary_faculty_id,
                        ARRAY_AGG(DISTINCT ce.student_id) FILTER (WHERE ce.student_id IS NOT NULL) as student_ids
                 FROM courses c
                 INNER JOIN course_offerings co ON c.course_id = co.course_id
+                    AND co.is_active = true
+                    AND co.primary_faculty_id IS NOT NULL
+                    AND co.semester_type = %s
                 LEFT JOIN course_enrollments ce ON co.offering_id = ce.offering_id AND ce.is_active = true
                 WHERE c.org_id = %s 
                 AND c.is_active = true
-                AND co.is_active = true
-                AND co.primary_faculty_id IS NOT NULL
-                AND co.semester_type = %s
                 GROUP BY c.course_id, c.course_code, c.course_name, c.dept_id,
                          c.lecture_hours_per_week, c.room_type_required,
-                         c.min_room_capacity, c.course_type, co.primary_faculty_id
+                         c.min_room_capacity, c.course_type, co.offering_id, co.primary_faculty_id
                 LIMIT 5000
             """
             
             # Map semester number to semester_type (1=ODD, 2=EVEN) - UPPERCASE
             semester_type = 'ODD' if semester == 1 else 'EVEN'
             
-            params = [org_id, semester_type]
+            params = [semester_type, org_id]
             
             if department_id:
                 query += " AND c.dept_id = %s"
@@ -105,13 +105,13 @@ class DjangoAPIClient:
             total_enrollments = 0
             for row in rows:
                 try:
-                    # Get student IDs from aggregated array
                     student_ids = [str(sid) for sid in (row.get('student_ids') or []) if sid is not None]
                     total_enrollments += len(student_ids)
                     
+                    # Use offering_id as unique course_id to handle multi-faculty courses
                     course = Course(
-                        course_id=str(row['course_id']),
-                        course_code=row['course_code'],
+                        course_id=f"{row['course_id']}_off_{row['offering_id']}",
+                        course_code=f"{row['course_code']}",
                         course_name=row['course_name'],
                         department_id=str(row['dept_id']),
                         faculty_id=str(row['primary_faculty_id']),
