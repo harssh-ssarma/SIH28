@@ -47,9 +47,11 @@ class ApiClient {
           // Retry original request after refresh
           return this.request<T>(endpoint, options);
         }
-        // Refresh failed, redirect to login
+        // Refresh failed, redirect to login using Next.js router
         if (typeof window !== 'undefined') {
-          window.location.href = '/auth/signin';
+          const { useRouter } = await import('next/navigation');
+          const router = useRouter();
+          router.push('/auth/signin');
         }
       }
 

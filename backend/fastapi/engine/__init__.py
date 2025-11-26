@@ -10,7 +10,6 @@ from .memory_manager import (
     MemoryManager, get_memory_manager, reset_memory_manager,
     memory_monitored, check_memory_limit, batch_process
 )
-from .parallel_config import ParallelizationStrategy, get_optimal_workers
 from .orchestrator import HardwareOrchestrator, get_orchestrator, reset_orchestrator
 
 __all__ = [
@@ -22,6 +21,5 @@ __all__ = [
     'RLConflictResolver', 'ContextAwareRLAgent',
     'MemoryManager', 'get_memory_manager', 'reset_memory_manager',
     'memory_monitored', 'check_memory_limit', 'batch_process',
-    'ParallelizationStrategy', 'get_optimal_workers',
     'HardwareOrchestrator', 'get_orchestrator', 'reset_orchestrator'
 ]

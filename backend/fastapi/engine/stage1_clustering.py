@@ -17,9 +17,24 @@ class LouvainClusterer:
     Optimizes cluster sizes for CP-SAT feasibility
     """
     
-    def __init__(self, target_cluster_size: int = 10):
+    def __init__(self, target_cluster_size: int = 10, edge_threshold: float = None):
         self.target_cluster_size = target_cluster_size
-        self.EDGE_THRESHOLD = 0.5  # SPARSE: Only significant edges (was 1.0)
+        # Adaptive edge threshold based on RAM
+        if edge_threshold is None:
+            import psutil
+            mem = psutil.virtual_memory()
+            available_gb = mem.available / (1024**3)
+            if available_gb < 3.0:
+                self.EDGE_THRESHOLD = 1.0  # Very sparse
+            elif available_gb < 5.0:
+                self.EDGE_THRESHOLD = 0.5  # Sparse
+            elif available_gb < 8.0:
+                self.EDGE_THRESHOLD = 0.3  # Medium
+            else:
+                self.EDGE_THRESHOLD = 0.1  # Dense
+            logger.info(f"Adaptive edge threshold: {self.EDGE_THRESHOLD} (RAM: {available_gb:.1f}GB)")
+        else:
+            self.EDGE_THRESHOLD = edge_threshold
     
     def cluster_courses(self, courses: List[Course]) -> Dict[int, List[Course]]:
         """

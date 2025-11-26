@@ -58,7 +58,7 @@ class AdaptiveCPSATSolver:
         self.num_workers = min(8, multiprocessing.cpu_count())
         logger.info(f"🚀 CP-SAT using {self.num_workers} CPU cores for parallel solving")
         
-    def solve_cluster(self, cluster: List[Course]) -> Optional[Dict]:
+    def solve_cluster(self, cluster: List[Course], timeout: float = None) -> Optional[Dict]:
         """
         Ultra-fast cluster solving with aggressive shortcuts
         """
