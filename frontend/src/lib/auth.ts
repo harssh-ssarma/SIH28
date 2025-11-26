@@ -70,7 +70,6 @@ async function refreshAccessToken(): Promise<string | null> {
     try {
       const refreshToken = localStorage.getItem('refreshToken') || localStorage.getItem('refresh_token');
       if (!refreshToken) {
-        console.warn('No refresh token available');
         return null;
       }
 
@@ -81,7 +80,6 @@ async function refreshAccessToken(): Promise<string | null> {
       });
 
       if (!response.ok) {
-        console.warn('Token refresh failed with status:', response.status);
         return null;
       }
 
@@ -127,8 +125,7 @@ export async function authenticatedFetch(
   }
   
   if (!token) {
-    // Instead of throwing, try the request without auth (some endpoints might not require it)
-    console.warn('No authentication token available, attempting request without auth');
+    // Silent fallback - no console spam
     return await fetch(url, options);
   }
 
@@ -139,16 +136,12 @@ export async function authenticatedFetch(
 
   let response = await fetch(url, { ...options, headers });
 
-  // If 401, try refreshing token once and retry
+  // If 401, try refreshing token once and retry (silent)
   if (response.status === 401) {
     const newToken = await refreshAccessToken();
     if (newToken) {
       headers['Authorization'] = `Bearer ${newToken}`;
       response = await fetch(url, { ...options, headers });
-    } else {
-      // If refresh failed, try without auth as last resort
-      console.warn('Token refresh failed, attempting request without auth');
-      response = await fetch(url, options);
     }
   }
 

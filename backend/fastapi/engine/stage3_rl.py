@@ -624,7 +624,9 @@ class RLConflictResolver:
             conflicts, 
             timetable_data, 
             self.rl_agent, 
-            self.progress_tracker
+            self.progress_tracker,
+            job_id=job_id,
+            redis_client=redis_client_global
         )
         
         # Verify resolution
@@ -825,8 +827,8 @@ def _update_rl_progress(progress_tracker, current_episode: int, total_episodes: 
     except Exception as e:
         logger.debug(f"Failed to update RL progress: {e}")
 
-def resolve_conflicts_with_enhanced_rl(conflicts, timetable_data, rl_agent=None, progress_tracker=None):
-    """RAM-safe parallel batch RL conflict resolution - ACTUALLY RESOLVES CONFLICTS"""
+def resolve_conflicts_with_enhanced_rl(conflicts, timetable_data, rl_agent=None, progress_tracker=None, job_id=None, redis_client=None):
+    """RAM-safe parallel batch RL conflict resolution - ACTUALLY RESOLVES CONFLICTS + instant cancellation"""
     
     if rl_agent is None:
         rl_agent = ContextAwareRLAgent()
@@ -846,8 +848,27 @@ def resolve_conflicts_with_enhanced_rl(conflicts, timetable_data, rl_agent=None,
     
     # Use ThreadPoolExecutor for parallel conflict processing
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    import time
+    last_cancel_check = time.time()
+    
+    def _check_cancellation_rl():
+        """Quick cancellation check for RL"""
+        try:
+            if redis_client and job_id:
+                cancel_flag = redis_client.get(f"cancel:job:{job_id}")
+                return cancel_flag is not None and cancel_flag
+        except:
+            pass
+        return False
     
     for episode in range(0, max_episodes, batch_size):
+        # Check cancellation FREQUENTLY (every 0.5s) for instant response
+        current_time = time.time()
+        if current_time - last_cancel_check > 0.5:
+            if _check_cancellation_rl():
+                logger.info(f"RL stopped at episode {episode} (instant cancellation)")
+                return resolved
+            last_cancel_check = current_time
         if not remaining_conflicts:
             logger.info(f"✅ All conflicts resolved at episode {episode}")
             break

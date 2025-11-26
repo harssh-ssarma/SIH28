@@ -3,9 +3,59 @@
 import { useState, useEffect } from 'react'
 import DashboardLayout from '@/components/dashboard-layout'
 
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const TIME_SLOTS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00']
+
+function TimetableGrid({ schedule }: { schedule: any[] }) {
+  if (!schedule || schedule.length === 0) {
+    return (
+      <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+        <p>No timetable data available</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse">
+        <thead>
+          <tr>
+            <th className="border border-gray-300 dark:border-gray-700 p-2 bg-gray-100 dark:bg-gray-800 text-xs font-medium">Time</th>
+            {DAYS.map(day => (
+              <th key={day} className="border border-gray-300 dark:border-gray-700 p-2 bg-gray-100 dark:bg-gray-800 text-xs font-medium">{day}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {TIME_SLOTS.map(time => (
+            <tr key={time}>
+              <td className="border border-gray-300 dark:border-gray-700 p-2 text-xs font-medium text-gray-600 dark:text-gray-400">{time}</td>
+              {DAYS.map(day => {
+                const slot = schedule.find(s => s.day === day && s.time_slot?.startsWith(time))
+                return (
+                  <td key={`${day}-${time}`} className="border border-gray-300 dark:border-gray-700 p-2">
+                    {slot ? (
+                      <div className="text-xs space-y-1">
+                        <div className="font-medium text-gray-800 dark:text-gray-200">{slot.subject_code}</div>
+                        <div className="text-gray-600 dark:text-gray-400">{slot.faculty_name}</div>
+                        <div className="text-gray-500 dark:text-gray-500">{slot.room_number}</div>
+                      </div>
+                    ) : null}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function StudentTimetable() {
   const [schedule, setSchedule] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [student, setStudent] = useState<any>(null)
 
   useEffect(() => {
@@ -14,17 +64,27 @@ export default function StudentTimetable() {
 
   const fetchSchedule = async () => {
     try {
+      setLoading(true)
+      setError(null)
       const token = localStorage.getItem('token')
       const res = await fetch('http://localhost:8000/api/timetable/student/me/', {
         headers: { Authorization: `Bearer ${token}` },
       })
+      
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+      }
+      
       const data = await res.json()
       if (data.success) {
-        setSchedule(data.slots)
+        setSchedule(data.slots || [])
         setStudent(data.student)
+      } else {
+        setError(data.message || 'Failed to load timetable')
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch schedule:', error)
+      setError(error.message || 'Network error')
     } finally {
       setLoading(false)
     }
@@ -35,8 +95,23 @@ export default function StudentTimetable() {
       <DashboardLayout role="student">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
-            <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
             <p className="text-gray-600 dark:text-gray-400">Loading schedule...</p>
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  if (error) {
+    return (
+      <DashboardLayout role="student">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="text-red-600 dark:text-red-400 mb-4">⚠️</div>
+            <p className="text-gray-800 dark:text-gray-200 font-medium mb-2">Failed to load timetable</p>
+            <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">{error}</p>
+            <button onClick={fetchSchedule} className="btn-primary">Retry</button>
           </div>
         </div>
       </DashboardLayout>

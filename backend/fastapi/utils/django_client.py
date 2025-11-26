@@ -108,9 +108,19 @@ class DjangoAPIClient:
             courses = []
             unique_students = set()  # Track unique students across all courses
             enrollment_counts = []  # Track enrollment per offering
+            
             for row in rows:
                 try:
-                    student_ids = [str(sid) for sid in (row.get('student_ids') or []) if sid is not None]
+                    student_ids_raw = row.get('student_ids')
+                    
+                    # PostgreSQL returns array as string like "{uuid1,uuid2}", parse it
+                    if student_ids_raw and isinstance(student_ids_raw, str):
+                        # Remove curly braces and split by comma
+                        student_ids_raw = student_ids_raw.strip('{}').split(',') if student_ids_raw != '{}' else []
+                    elif not student_ids_raw:
+                        student_ids_raw = []
+                    
+                    student_ids = [str(sid).strip() for sid in student_ids_raw if sid and str(sid).strip()]
                     enrollment_counts.append(len(student_ids))
                     unique_students.update(student_ids)  # Add to unique set
                     

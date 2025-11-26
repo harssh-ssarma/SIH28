@@ -512,12 +512,18 @@ class GeneticAlgorithmOptimizer:
         best_fitness = self.fitness(best_solution)
         no_improvement_count = 0
         
+        import time
+        last_cancel_check = time.time()
+        
         for generation in range(self.generations):
-            # Check cancellation or stop flag
-            if self._stop_flag or (job_id and self._check_cancellation()):
-                logger.info(f"GA stopped at generation {generation}")
-                self._cleanup_gpu()
-                return best_solution
+            # Check cancellation FREQUENTLY (every 0.5s) for instant response
+            current_time = time.time()
+            if current_time - last_cancel_check > 0.5:  # Check every 0.5 seconds
+                if self._stop_flag or (job_id and self._check_cancellation()):
+                    logger.info(f"GA stopped at generation {generation} (instant cancellation)")
+                    self._cleanup_gpu()
+                    return best_solution
+                last_cancel_check = current_time
             # FORCE GPU usage - fallback only on critical error
             if self.use_gpu:
                 try:

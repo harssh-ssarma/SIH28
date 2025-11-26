@@ -45,13 +45,17 @@ class AdaptiveCPSATSolver:
         rooms: List[Room],
         time_slots: List[TimeSlot],
         faculty: Dict[str, Faculty],
-        max_cluster_size: int = 12
+        max_cluster_size: int = 12,
+        job_id: str = None,
+        redis_client = None
     ):
         self.courses = courses
         self.rooms = rooms
         self.time_slots = time_slots
         self.faculty = faculty
         self.max_cluster_size = max_cluster_size
+        self.job_id = job_id
+        self.redis_client = redis_client
         
         # Auto-detect CPU cores for parallel solving
         import multiprocessing
@@ -60,38 +64,79 @@ class AdaptiveCPSATSolver:
         
     def solve_cluster(self, cluster: List[Course], timeout: float = None) -> Optional[Dict]:
         """
-        Ultra-fast cluster solving with aggressive shortcuts
+        Ultra-fast cluster solving with aggressive shortcuts + cancellation support
         """
+        logger.info(f"\n{'='*80}")
+        logger.info(f"[CP-SAT DEBUG] Starting cluster with {len(cluster)} courses")
+        logger.info(f"[CP-SAT DEBUG] Available: {len(self.rooms)} rooms, {len(self.time_slots)} time slots")
+        
+        # Check cancellation before starting
+        if self._check_cancellation():
+            logger.info(f"[CP-SAT DEBUG] ❌ Job cancelled before cluster solve")
+            return None
+        
         # SHORTCUT 1: Skip large clusters immediately
         if len(cluster) > self.max_cluster_size:
+            logger.warning(f"[CP-SAT DEBUG] ❌ Cluster too large: {len(cluster)} > {self.max_cluster_size}")
             return None
         
         # SHORTCUT 2: Ultra-fast feasibility (< 50ms)
+        logger.info(f"[CP-SAT DEBUG] Running feasibility check...")
         if not self._ultra_fast_feasibility(cluster):
+            logger.warning(f"[CP-SAT DEBUG] ❌ Failed feasibility check")
             return None
+        logger.info(f"[CP-SAT DEBUG] ✅ Passed feasibility check")
         
         # SHORTCUT 3: Try only 2 strategies (not 3)
-        for strategy in self.STRATEGIES[:2]:
+        for idx, strategy in enumerate(self.STRATEGIES[:2]):
+            # Check cancellation between strategies
+            if self._check_cancellation():
+                logger.info(f"[CP-SAT DEBUG] ❌ Job cancelled during strategy {idx+1}")
+                return None
+            
+            logger.info(f"[CP-SAT DEBUG] Trying strategy {idx+1}/2: {strategy['name']}")
             solution = self._try_cpsat_with_strategy(cluster, strategy)
             if solution:
+                logger.info(f"[CP-SAT DEBUG] ✅ Strategy {strategy['name']} succeeded with {len(solution)} assignments")
                 return solution
+            logger.warning(f"[CP-SAT DEBUG] ❌ Strategy {strategy['name']} failed")
         
+        logger.error(f"[CP-SAT DEBUG] ❌ All strategies failed for cluster")
         return None
+    
+    def _check_cancellation(self) -> bool:
+        """Check if job has been cancelled (sync for CP-SAT threads)"""
+        try:
+            if self.redis_client and self.job_id:
+                cancel_flag = self.redis_client.get(f"cancel:job:{self.job_id}")
+                return cancel_flag is not None and cancel_flag
+        except Exception as e:
+            logger.debug(f"Cancellation check failed: {e}")
+        return False
     
     def _ultra_fast_feasibility(self, cluster: List[Course]) -> bool:
         """Ultra-fast feasibility check (< 50ms) - only critical checks"""
+        logger.info(f"[CP-SAT FEASIBILITY] Checking {len(cluster)} courses")
+        
         # Check only first 5 courses and first 10 slots/rooms
-        for course in cluster[:5]:
+        for idx, course in enumerate(cluster[:5]):
             available = 0
+            students = len(course.student_ids)
+            duration = course.duration
+            logger.info(f"[CP-SAT FEASIBILITY] Course {idx+1}: {students} students, duration={duration}")
+            
             for t_slot in self.time_slots[:10]:
                 for room in self.rooms[:10]:
-                    if len(course.student_ids) <= room.capacity:
+                    if students <= room.capacity:
                         available += 1
-                        if available >= course.duration:
+                        if available >= duration:
                             break
-                if available >= course.duration:
+                if available >= duration:
                     break
-            if available < course.duration:
+            
+            logger.info(f"[CP-SAT FEASIBILITY] Course {idx+1}: found {available} valid slots (needs {duration})")
+            if available < duration:
+                logger.warning(f"[CP-SAT FEASIBILITY] ❌ Course {idx+1} insufficient slots: {available} < {duration}")
                 return False
         
         # Quick faculty overload check
@@ -100,9 +145,13 @@ class AdaptiveCPSATSolver:
         for course in cluster:
             faculty_load[course.faculty_id] += course.duration
         
-        if max(faculty_load.values(), default=0) > len(self.time_slots):
+        max_load = max(faculty_load.values(), default=0)
+        logger.info(f"[CP-SAT FEASIBILITY] Max faculty load: {max_load} (limit: {len(self.time_slots)})")
+        if max_load > len(self.time_slots):
+            logger.warning(f"[CP-SAT FEASIBILITY] ❌ Faculty overloaded: {max_load} > {len(self.time_slots)}")
             return False
         
+        logger.info(f"[CP-SAT FEASIBILITY] ✅ All checks passed")
         return True
     
     def _quick_feasibility_check(self, cluster: List[Course]) -> bool:
@@ -164,8 +213,13 @@ class AdaptiveCPSATSolver:
     
     def _try_cpsat_with_strategy(self, cluster: List[Course], strategy: Dict) -> Optional[Dict]:
         """
-        Try CP-SAT with specific strategy and memory management
+        Try CP-SAT with specific strategy and memory management + instant cancellation
         """
+        # Check cancellation before starting
+        if self._check_cancellation():
+            logger.info(f"[CP-SAT] Cancelled before strategy execution")
+            return None
+        
         # Precompute valid domains
         valid_domains = self._precompute_valid_domains(cluster)
         if not valid_domains:
@@ -183,6 +237,30 @@ class AdaptiveCPSATSolver:
         solver.parameters.symmetry_level = 0  # Disable symmetry detection
         solver.parameters.search_branching = cp_model.PORTFOLIO_SEARCH
         solver.parameters.optimize_with_core = False
+        
+        # CRITICAL: Add cancellation callback for instant stop
+        if self.job_id and self.redis_client:
+            class CancellationCallback(cp_model.CpSolverSolutionCallback):
+                def __init__(self, redis_client, job_id):
+                    cp_model.CpSolverSolutionCallback.__init__(self)
+                    self.redis_client = redis_client
+                    self.job_id = job_id
+                    self._cancelled = False
+                
+                def on_solution_callback(self):
+                    # Check cancellation every solution found
+                    try:
+                        cancel_flag = self.redis_client.get(f"cancel:job:{self.job_id}")
+                        if cancel_flag:
+                            self._cancelled = True
+                            self.StopSearch()  # Stop OR-Tools immediately
+                            logger.info(f"[CP-SAT] Solver stopped by cancellation callback")
+                    except:
+                        pass
+            
+            callback = CancellationCallback(self.redis_client, self.job_id)
+        else:
+            callback = None
         
         # Create variables (use generator to save memory)
         variables = {}
@@ -219,8 +297,30 @@ class AdaptiveCPSATSolver:
                 model, variables, cluster, strategy['student_priority']
             )
         
-        # Solve
-        status = solver.Solve(model)
+        # Solve with cancellation callback
+        logger.info(f"[CP-SAT SOLVE] Starting solver with {len(variables)} variables, timeout={strategy['timeout']}s")
+        if callback:
+            status = solver.Solve(model, callback)
+        else:
+            status = solver.Solve(model)
+        
+        # Check if cancelled
+        if callback and callback._cancelled:
+            logger.info(f"[CP-SAT SOLVE] ❌ CANCELLED by user")
+            variables.clear()
+            del valid_domains
+            return None
+        
+        # Detailed status reporting
+        status_names = {
+            cp_model.OPTIMAL: "OPTIMAL",
+            cp_model.FEASIBLE: "FEASIBLE",
+            cp_model.INFEASIBLE: "INFEASIBLE",
+            cp_model.MODEL_INVALID: "MODEL_INVALID",
+            cp_model.UNKNOWN: "UNKNOWN"
+        }
+        status_name = status_names.get(status, f"UNKNOWN_STATUS_{status}")
+        logger.info(f"[CP-SAT SOLVE] Solver finished: {status_name} in {solver.WallTime():.2f}s")
         
         if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
             solution = {}
@@ -236,14 +336,21 @@ class AdaptiveCPSATSolver:
             variables.clear()
             del valid_domains
             
-            logger.info(f"CP-SAT ({self.num_workers} workers) found solution with {len(solution)} assignments in {solver.WallTime():.2f}s")
+            logger.info(f"[CP-SAT SOLVE] ✅ SUCCESS: {len(solution)} assignments in {solver.WallTime():.2f}s")
+            logger.info(f"[CP-SAT SOLVE] Coverage: {len(solution)}/{len(cluster)} courses ({len(solution)/len(cluster)*100:.1f}%)")
             return solution
         
         # Clear on failure
         variables.clear()
         del valid_domains
         
-        logger.warning(f"CP-SAT failed with status: {status}")
+        logger.error(f"[CP-SAT SOLVE] ❌ FAILED: {status_name}")
+        if status == cp_model.INFEASIBLE:
+            logger.error(f"[CP-SAT SOLVE] Model is INFEASIBLE - constraints cannot be satisfied")
+            logger.error(f"[CP-SAT SOLVE] Possible causes:")
+            logger.error(f"[CP-SAT SOLVE]   1. Room/time slot constraints disabled but still causing issues")
+            logger.error(f"[CP-SAT SOLVE]   2. Faculty conflicts too restrictive")
+            logger.error(f"[CP-SAT SOLVE]   3. Student conflicts creating impossible scenarios")
         return None
     
     def _precompute_valid_domains(self, cluster: List[Course]) -> Dict:
@@ -251,52 +358,70 @@ class AdaptiveCPSATSolver:
         Pre-filter valid (time, room) pairs
         Reduces search space by 70-80%
         """
+        logger.info(f"[CP-SAT DOMAINS] Computing valid domains for {len(cluster)} courses")
         valid_domains = {}
         total_valid_pairs = 0
         
         # Pre-compute room features for faster lookup
         room_features = {r.room_id: set(getattr(r, 'features', [])) for r in self.rooms}
         
-        for course in cluster:
+        for course_idx, course in enumerate(cluster):
             course_features = set(getattr(course, 'required_features', []))
             student_count = len(course.student_ids)
             faculty_avail = None
             
+            logger.info(f"[CP-SAT DOMAINS] Course {course_idx+1}/{len(cluster)}: {student_count} students, features={course_features}")
+            
             if course.faculty_id in self.faculty:
                 faculty_avail = set(getattr(self.faculty[course.faculty_id], 'available_slots', []))
+                logger.info(f"[CP-SAT DOMAINS]   Faculty available slots: {len(faculty_avail) if faculty_avail else 'all'}")
             
             for session in range(course.duration):
                 valid_pairs = []
+                rejected_capacity = 0
+                rejected_features = 0
+                rejected_faculty = 0
                 
                 for t_slot in self.time_slots:
                     # Faculty availability check
                     if faculty_avail and t_slot.slot_id not in faculty_avail:
+                        rejected_faculty += len(self.rooms)
                         continue
                     
                     for room in self.rooms:
-                        # CRITICAL: Department matching constraint
-                        course_dept = getattr(course, 'department_id', None)
-                        room_dept = getattr(room, 'dept_id', None) or getattr(room, 'department_id', None)
-                        if course_dept and room_dept and course_dept != room_dept:
-                            continue
+                        # TEMPORARY: Disable strict department matching to allow cross-department rooms
+                        # TODO: Fix database - ensure all departments have rooms assigned
+                        # course_dept = getattr(course, 'department_id', None)
+                        # room_dept = getattr(room, 'dept_id', None) or getattr(room, 'department_id', None)
+                        # if course_dept and room_dept and course_dept != room_dept:
+                        #     continue
                         
                         # Quick capacity check
                         if student_count > room.capacity:
+                            rejected_capacity += 1
                             continue
                         
                         # Feature compatibility (using pre-computed sets)
                         if course_features and not course_features.issubset(room_features.get(room.room_id, set())):
+                            rejected_features += 1
                             continue
                         
                         valid_pairs.append((t_slot.slot_id, room.room_id))
                 
                 valid_domains[(course.course_id, session)] = valid_pairs
                 total_valid_pairs += len(valid_pairs)
+                
+                logger.info(f"[CP-SAT DOMAINS]   Session {session}: {len(valid_pairs)} valid pairs")
+                logger.info(f"[CP-SAT DOMAINS]   Rejected: capacity={rejected_capacity}, features={rejected_features}, faculty={rejected_faculty}")
+                
+                if len(valid_pairs) == 0:
+                    logger.error(f"[CP-SAT DOMAINS]   ❌ NO VALID PAIRS for course {course_idx+1} session {session}!")
         
         # Clear temporary data
         del room_features
         
-        logger.info(f"Computed {total_valid_pairs} valid domain pairs for {len(cluster)} courses")
+        logger.info(f"[CP-SAT DOMAINS] ✅ Total: {total_valid_pairs} valid domain pairs for {len(cluster)} courses")
+        logger.info(f"[CP-SAT DOMAINS] Average: {total_valid_pairs/len(cluster):.1f} pairs per course")
         return valid_domains
     
     def _add_faculty_constraints(self, model, variables, cluster):

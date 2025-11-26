@@ -142,7 +142,7 @@ class TimetableGenerationSaga:
         # Select strategy based on hardware + user preference
         from engine.strategy_selector import get_strategy_selector
         from engine.resource_monitor import ResourceMonitor
-        from engine.progress_tracker import EnterpriseProgressTracker, ProgressUpdateTask
+        from utils.progress_tracker import EnterpriseProgressTracker, ProgressUpdateTask
         import gc
         
         global hardware_profile, redis_client_global
@@ -362,11 +362,16 @@ class TimetableGenerationSaga:
             await client.close()
     
     async def _stage1_louvain_clustering(self, job_id: str, request_data: dict):
-        """Stage 1: Louvain clustering with hardware-adaptive configuration"""
+        """Stage 1: Louvain clustering with hardware-adaptive configuration + cancellation"""
         from engine.stage1_clustering import LouvainClusterer
         from engine.orchestrator import get_orchestrator
         from utils.memory_cleanup import get_memory_usage, aggressive_cleanup
         import gc
+        
+        # Check cancellation before starting
+        if await self._check_cancellation(job_id):
+            logger.info(f"[STAGE1] Job {job_id} cancelled before clustering")
+            raise asyncio.CancelledError("Job cancelled by user before clustering")
         
         # Get hardware-adaptive config
         global hardware_profile
@@ -389,6 +394,11 @@ class TimetableGenerationSaga:
             courses,
             clusterer
         )
+        
+        # Check cancellation after clustering
+        if await self._check_cancellation(job_id):
+            logger.info(f"[STAGE1] Job {job_id} cancelled after clustering")
+            raise asyncio.CancelledError("Job cancelled by user after clustering")
         
         del clusterer
         gc.collect()
@@ -455,6 +465,11 @@ class TimetableGenerationSaga:
         if max_parallel == 1:
             # Sequential for very low memory
             for idx, (cluster_id, cluster_courses) in enumerate(list(clusters.items())):
+                # Check cancellation during sequential CP-SAT
+                if await self._check_cancellation(job_id):
+                    logger.info(f"[STAGE2] Job {job_id} cancelled during sequential CP-SAT")
+                    raise asyncio.CancelledError("Job cancelled by user during CP-SAT")
+                
                 try:
                     if len(cluster_courses) > max_courses_per_cluster:
                         cluster_courses = cluster_courses[:max_courses_per_cluster]
@@ -495,6 +510,14 @@ class TimetableGenerationSaga:
                     futures[future] = cluster_id
                 
                 for future in as_completed(futures):
+                    # Check cancellation during CP-SAT
+                    if await self._check_cancellation(job_id):
+                        logger.info(f"[STAGE2] Job {job_id} cancelled during CP-SAT, stopping all workers")
+                        # Cancel all pending futures
+                        for f in futures:
+                            f.cancel()
+                        raise asyncio.CancelledError("Job cancelled by user during CP-SAT")
+                    
                     cluster_id = futures[future]
                     try:
                         solution = future.result(timeout=base_timeout)
@@ -520,20 +543,50 @@ class TimetableGenerationSaga:
         total_courses = sum(len(courses) for courses in clusters.values())
         success_rate = (len(all_solutions) / total_courses * 100) if total_courses > 0 else 0
         
-        # CHECK: Cancel if CP-SAT success rate is too low (< 10%)
-        # Rationale: If CP-SAT can't schedule at least 10% of courses, there's a fundamental issue
-        # GA/RL can't fix fundamental constraint violations, only optimize valid solutions
-        if success_rate < 10:
-            logger.error(f"[STAGE2] ❌ CP-SAT success rate too low: {success_rate:.1f}% ({len(all_solutions)}/{total_courses})")
-            logger.error("[STAGE2] Likely causes: department mismatch, insufficient rooms, invalid time slots")
-            raise asyncio.CancelledError(f"CP-SAT success rate {success_rate:.1f}% below minimum threshold (10%)")
+        logger.info(f"\n{'='*80}")
+        logger.info(f"[CP-SAT SUMMARY] Final Results:")
+        logger.info(f"[CP-SAT SUMMARY] Total clusters: {total_clusters}")
+        logger.info(f"[CP-SAT SUMMARY] Total courses: {total_courses}")
+        logger.info(f"[CP-SAT SUMMARY] Assignments made: {len(all_solutions)}")
+        logger.info(f"[CP-SAT SUMMARY] Success rate: {success_rate:.1f}%")
+        logger.info(f"[CP-SAT SUMMARY] Unscheduled courses: {total_courses - len(all_solutions)}")
+        logger.info(f"{'='*80}\n")
         
-        # Log success
-        logger.info(f"[STAGE2] ✅ CP-SAT success: {len(all_solutions)}/{total_courses} assignments ({success_rate:.1f}%)")
-        if success_rate < 50:
-            logger.warning(f"[STAGE2] ⚠️ Low success rate ({success_rate:.1f}%) - GA/RL will attempt to improve")
+        # Decision thresholds with detailed recommendations
+        # THRESHOLD: 60% - CP-SAT must schedule at least 60% of courses to continue
+        if success_rate < 60:
+            logger.error(f"[CP-SAT DECISION] ❌ ABORT: Success rate {success_rate:.1f}% < 60% threshold")
+            logger.error(f"[CP-SAT DECISION] CP-SAT is not performing adequately")
+            logger.error(f"[CP-SAT DECISION] Likely causes:")
+            logger.error(f"[CP-SAT DECISION]   1. Room/course/faculty department matching disabled but still failing")
+            logger.error(f"[CP-SAT DECISION]   2. Insufficient rooms for course sizes")
+            logger.error(f"[CP-SAT DECISION]   3. Time slots not properly generated")
+            logger.error(f"[CP-SAT DECISION]   4. Faculty availability too restrictive")
+            logger.error(f"[CP-SAT DECISION]   5. Student conflicts creating impossible scenarios")
+            logger.error(f"[CP-SAT DECISION] ")
+            logger.error(f"[CP-SAT DECISION] 🔄 RECOMMENDATION: Switch to Genetic Algorithm")
+            logger.error(f"[CP-SAT DECISION] GA can handle looser constraints and find approximate solutions")
+            logger.error(f"[CP-SAT DECISION] GA uses population-based search to explore solution space better")
+            raise asyncio.CancelledError(f"CP-SAT success rate {success_rate:.1f}% below minimum threshold (60%). Switch to Genetic Algorithm.")
+        elif success_rate < 85:
+            logger.info(f"[CP-SAT DECISION] ✅ GOOD: Success rate {success_rate:.1f}% (60-85% range)")
+            logger.info(f"[CP-SAT DECISION] CP-SAT performing well")
+            logger.info(f"[CP-SAT DECISION] RECOMMENDATION: GA/RL will optimize remaining courses")
+        else:
+            logger.info(f"[CP-SAT DECISION] ✅ EXCELLENT: Success rate {success_rate:.1f}% (>85%)")
+            logger.info(f"[CP-SAT DECISION] CP-SAT performing optimally")
+            logger.info(f"[CP-SAT DECISION] RECOMMENDATION: GA/RL will fine-tune quality metrics")
         
-        return {'schedule': all_solutions, 'quality_score': 0, 'conflicts': [], 'execution_time': 0}
+        # Store success rate for later analysis
+        return {
+            'schedule': all_solutions,
+            'quality_score': 0,
+            'conflicts': [],
+            'execution_time': 0,
+            'cpsat_success_rate': success_rate,
+            'cpsat_total_courses': total_courses,
+            'cpsat_scheduled': len(all_solutions)
+        }
     
     def _solve_cluster_safe(self, cluster_id, courses, rooms, time_slots, faculty):
         """Solve single cluster with adaptive CP-SAT + Greedy hybrid"""
@@ -729,10 +782,15 @@ class TimetableGenerationSaga:
         return mock_schedule
     
     async def _stage2_ga_optimization(self, job_id: str, request_data: dict):
-        """Stage 2B: GPU Tensor GA - 90%+ GPU utilization with memory management"""
+        """Stage 2B: GPU Tensor GA - 90%+ GPU utilization with memory management + cancellation"""
         import gc
         import torch
         from utils.memory_cleanup import get_memory_usage, aggressive_cleanup
+        
+        # Check cancellation before starting GA
+        if await self._check_cancellation(job_id):
+            logger.info(f"[STAGE2B] Job {job_id} cancelled before GA")
+            raise asyncio.CancelledError("Job cancelled by user before GA")
         
         # Check memory before GA
         mem_before = get_memory_usage()
@@ -862,11 +920,16 @@ class TimetableGenerationSaga:
             return cpsat_result
     
     async def _stage3_rl_conflict_resolution(self, job_id: str, request_data: dict):
-        """Stage 3: RL conflict resolution with memory management"""
+        """Stage 3: RL conflict resolution with memory management + cancellation"""
         from engine.stage3_rl import RLConflictResolver
         from engine.orchestrator import get_orchestrator
         from utils.memory_cleanup import get_memory_usage, aggressive_cleanup
         import gc
+        
+        # Check cancellation before starting RL
+        if await self._check_cancellation(job_id):
+            logger.info(f"[STAGE3] Job {job_id} cancelled before RL")
+            raise asyncio.CancelledError("Job cancelled by user before RL")
         
         # Check memory before RL
         mem_before = get_memory_usage()

@@ -1,336 +1,307 @@
 """
-Progress Tracker for Algorithm Instrumentation
-ENTERPRISE PATTERN: Real-time progress reporting with percentage + ETA
+Enterprise Progress Tracker - Google/Microsoft Style
+Smooth, consistent progress based on overall time, not stage completion
 """
-import redis
-import json
 import time
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
-from collections import deque
-from models.progress_models import ProgressUpdate, GenerationStage
-from config import settings
+import asyncio
 import logging
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+import json
 
 logger = logging.getLogger(__name__)
 
 
-class ProgressTracker:
+class EnterpriseProgressTracker:
     """
-    Track algorithm progress with percentage and ETA estimation.
-
-    ENTERPRISE PATTERN: Instrumented algorithm progress
-    - Reports percentage completion
-    - Estimates time remaining (ETA)
-    - Tracks phase transitions
-    - Maintains moving average for accurate ETA
-    - Publishes to Redis Pub/Sub for real-time streaming
+    Time-based Virtual Progress Smoothing (Chrome/TensorFlow/Steam style)
+    - Smooth progress updates every 100ms regardless of algorithm state
+    - Based on expected stage durations, not internal algorithm steps
+    - Never stuck, never jumps backward
+    - Works perfectly with blocking algorithms (CP-SAT, GA, RL)
     """
-
-    def __init__(self, job_id: str, redis_client: redis.Redis, redis_publisher=None):
+    
+    def __init__(self, job_id: str, estimated_total_seconds: int, redis_client):
         self.job_id = job_id
         self.redis_client = redis_client
-        self.redis_publisher = redis_publisher
+        
+        # Time-based tracking
         self.start_time = time.time()
-        self.redis_key = f"{settings.REDIS_PROGRESS_PREFIX}{job_id}"
-
-        # Progress tracking
-        self.current_phase = "Initializing"
-        self.current_progress = 0.0
-
-        # Phase weights (sum to 100%)
-        self.phases = {
-            'initialization': {'weight': 5, 'progress': 0},
-            'clustering': {'weight': 15, 'progress': 0},
-            'constraint_solving': {'weight': 50, 'progress': 0},
-            'optimization': {'weight': 25, 'progress': 0},
-            'finalization': {'weight': 5, 'progress': 0},
+        self.last_progress = 0.0
+        
+        # Stage configuration with expected durations (seconds)
+        # Weights: load=5%, cluster=10%, cpsat=50%, ga=25%, rl=8%, final=2%
+        self.stage_config = {
+            'load_data': {'weight': 5, 'expected_time': 2},     # 0% → 5%
+            'clustering': {'weight': 10, 'expected_time': 3},   # 5% → 15%
+            'cpsat': {'weight': 50, 'expected_time': 10},       # 15% → 65%
+            'ga': {'weight': 25, 'expected_time': 10},          # 65% → 90%
+            'rl': {'weight': 8, 'expected_time': 3},            # 90% → 98%
+            'finalize': {'weight': 2, 'expected_time': 2}       # 98% → 100%
         }
-
-        # ETA estimation (moving average)
-        self.iteration_times = deque(maxlen=20)  # Last 20 iterations
-        self.last_update = time.time()
-
-        # Statistics
-        self.total_iterations = 0
-        self.completed_iterations = 0
-
-        # Initialize progress
-        self.update(
-            stage="initializing",
-            progress=0.0,
-            step="Starting timetable generation"
-        )
-
-    def set_phase(self, phase_name: str, total_steps: int = 100) -> None:
-        """Set current algorithm phase with total steps."""
-        if phase_name not in self.phases:
-            logger.warning(f"Unknown phase: {phase_name}")
-            return
-
-        self.current_phase = phase_name
-        self.phases[phase_name]['total_steps'] = total_steps
-        self.phases[phase_name]['completed_steps'] = 0
-
-        logger.info(f"Phase transition: {phase_name} (total steps: {total_steps})")
-        self._publish_update()
-
-    def update_phase_progress(self, step: int, status_message: Optional[str] = None) -> None:
-        """Update progress within current phase."""
-        phase = self.phases[self.current_phase]
-        total_steps = phase.get('total_steps', 100)
-
-        # Calculate phase progress
-        phase_progress = min(100.0, (step / total_steps) * 100)
-        phase['progress'] = phase_progress
-        phase['completed_steps'] = step
-
-        # Calculate overall progress (weighted sum)
-        overall_progress = sum(
-            p['weight'] * p['progress'] / 100.0
-            for p in self.phases.values()
-        )
-
-        self.current_progress = min(99.0, overall_progress)
-
-        # Track iteration time for ETA
+        
+        # Current stage tracking
+        self.current_stage = 'load_data'
+        self.stage_start_time = self.start_time
+        self.stage_start_progress = 0.0
+        
+        # Work-based tracking (for measurable stages)
+        self.stage_items_total = 0
+        self.stage_items_done = 0
+        
+        logger.info(f"[PROGRESS] Time-based virtual progress tracker initialized for {job_id}")
+    
+    def set_stage(self, stage_name: str, total_items: int = 0):
+        """Set current stage with optional work tracking - NO JUMP"""
+        if stage_name in self.stage_config:
+            # Calculate expected stage start progress
+            stage_order = ['load_data', 'clustering', 'cpsat', 'ga', 'rl', 'finalize']
+            if stage_name in stage_order:
+                idx = stage_order.index(stage_name)
+                expected_start = sum(self.stage_config[s]['weight'] for s in stage_order[:idx])
+            else:
+                expected_start = 0
+            
+            # CRITICAL: Use current progress as start if it's higher (no backward jump)
+            self.stage_start_progress = max(expected_start, self.last_progress)
+            
+            self.current_stage = stage_name
+            self.stage_start_time = time.time()
+            
+            # Work-based tracking
+            self.stage_items_total = total_items
+            self.stage_items_done = 0
+            
+            if total_items > 0:
+                logger.info(f"[PROGRESS] Stage: {stage_name} (start: {self.stage_start_progress:.1f}%, items: {total_items})")
+            else:
+                logger.info(f"[PROGRESS] Stage: {stage_name} (start: {self.stage_start_progress:.1f}%, time-based)")
+    
+    def update_work_progress(self, items_done: int):
+        """Update work-based progress (for CP-SAT clusters, GA generations, RL episodes)"""
+        self.stage_items_done = items_done
+    
+    def mark_stage_complete(self):
+        """Mark current stage as completed - NO JUMP, just log"""
+        # Don't force jump - let work-based or time-based progress naturally reach end
+        logger.info(f"[PROGRESS] Stage {self.current_stage} completed at {self.last_progress:.1f}%")
+        
+        # Reset work tracking for next stage
+        self.stage_items_total = 0
+        self.stage_items_done = 0
+    
+    def calculate_smooth_progress(self) -> float:
+        """
+        HYBRID Progress Tracking - FIXED sticking and jumping
+        - Use ACTUAL work completion when available
+        - Fall back to time-based smoothing
+        - ALWAYS increment (never stick)
+        """
+        stage_config = self.stage_config.get(self.current_stage, {'weight': 0, 'expected_time': 1})
+        stage_weight = stage_config['weight']
+        
+        # HYBRID: Use actual work if available, otherwise use time
+        if self.stage_items_total > 0:
+            # Work-based progress (CP-SAT clusters, GA generations, RL episodes)
+            work_completion = min(1.0, self.stage_items_done / self.stage_items_total)
+            stage_progress = work_completion * stage_weight
+        else:
+            # Time-based progress (for stages without measurable work)
+            now = time.time()
+            stage_elapsed = now - self.stage_start_time
+            stage_expected_time = stage_config['expected_time']
+            
+            raw_progress = stage_elapsed / stage_expected_time
+            
+            # Smooth asymptotic approach
+            if raw_progress < 1.0:
+                smooth_progress = raw_progress
+            else:
+                # Slow down but keep moving
+                overtime = raw_progress - 1.0
+                smooth_progress = 0.99 - 0.99 * (0.5 ** overtime)
+            
+            stage_progress = smooth_progress * stage_weight
+        
+        # Map to overall progress
+        current_progress = self.stage_start_progress + stage_progress
+        
+        # CRITICAL FIX: ALWAYS increment, never stick
         now = time.time()
-        iteration_time = now - self.last_update
-        self.iteration_times.append(iteration_time)
-        self.last_update = now
-
-        self.completed_iterations = step
-
-        # Publish update (throttled to every 1 second)
-        if now - getattr(self, '_last_publish', 0) >= 1.0:
-            self._publish_update(status_message)
-            self._last_publish = now
-
-    def estimate_eta(self) -> int:
-        """Estimate time remaining in seconds."""
-        if not self.iteration_times or self.current_progress == 0:
-            return 0
-
-        avg_time_per_iteration = sum(self.iteration_times) / len(self.iteration_times)
-
-        # Calculate remaining steps
-        phase = self.phases[self.current_phase]
-        total_steps = phase.get('total_steps', 100)
-        completed_steps = phase.get('completed_steps', 0)
-        remaining_steps_in_phase = total_steps - completed_steps
-
-        remaining_steps_total = remaining_steps_in_phase
-        current_phase_passed = False
-
-        for phase_name, phase_data in self.phases.items():
-            if phase_name == self.current_phase:
-                current_phase_passed = True
-                continue
-            if current_phase_passed:
-                remaining_steps_total += phase_data.get('total_steps', 100)
-
-        eta_seconds = remaining_steps_total * avg_time_per_iteration
-        return max(0, int(eta_seconds))
-
-    def _publish_update(self, status_message: Optional[str] = None) -> None:
-        """Publish progress update to Redis Pub/Sub."""
-        eta_seconds = self.estimate_eta()
-        elapsed_seconds = int(time.time() - self.start_time)
-
-        progress_data = {
-            'job_id': self.job_id,
-            'progress': round(self.current_progress, 2),
-            'phase': self.current_phase,
-            'status': status_message or f"Processing {self.current_phase}...",
-            'eta_seconds': eta_seconds,
-            'elapsed_seconds': elapsed_seconds,
-            'estimated_completion': (
-                datetime.utcnow() + timedelta(seconds=eta_seconds)
-            ).isoformat() if eta_seconds > 0 else None,
-        }
-
-        # Store in Redis (for HTTP polling fallback)
+        time_since_last_update = now - getattr(self, '_last_update_time', now)
+        self._last_update_time = now
+        
+        # Minimum increment based on time (0.05% per 100ms = smooth)
+        min_increment = 0.05 * (time_since_last_update / 0.1)
+        
+        if current_progress <= self.last_progress:
+            # Force increment if stuck
+            current_progress = self.last_progress + min_increment
+        elif current_progress - self.last_progress < min_increment:
+            # Ensure minimum increment
+            current_progress = self.last_progress + min_increment
+        
+        # Cap at 98% until explicitly completed
+        current_progress = min(98.0, current_progress)
+        
+        # Update last_progress
+        self.last_progress = current_progress
+        
+        return self.last_progress
+    
+    def calculate_eta(self) -> tuple[int, str]:
+        """Adaptive ETA based on actual progress rate"""
+        elapsed = time.time() - self.start_time
+        
+        # Use actual progress rate for accurate ETA
+        if self.last_progress > 1:
+            # Calculate time per percent based on actual progress
+            time_per_percent = elapsed / self.last_progress
+            remaining_percent = 100 - self.last_progress
+            remaining = int(time_per_percent * remaining_percent)
+        else:
+            # Early stage: use expected total time
+            remaining = 30
+        
+        eta = (datetime.now(timezone.utc) + timedelta(seconds=remaining)).isoformat()
+        return remaining, eta
+    
+    async def update(self, message: str, force_progress: Optional[int] = None):
+        """
+        Update progress with smooth interpolation
+        
+        Args:
+            message: Status message to display
+            force_progress: Force specific progress (for 100% completion)
+        """
+        if not self.redis_client:
+            return
+        
         try:
+            # Calculate smooth progress (float for smooth updates)
+            if force_progress is not None:
+                progress = force_progress
+                self.last_progress = float(progress)
+            else:
+                progress_float = self.calculate_smooth_progress()
+                progress = int(progress_float)  # Convert to int for display
+            
+            # Calculate ETA
+            remaining_seconds, eta = self.calculate_eta()
+            
+            # Build progress data
+            progress_data = {
+                'job_id': self.job_id,
+                'progress': progress,
+                'progress_percent': progress,
+                'status': 'completed' if progress >= 100 else 'running',
+                'stage': message,
+                'message': message,
+                'time_remaining_seconds': remaining_seconds if progress < 100 else 0,
+                'eta_seconds': remaining_seconds if progress < 100 else 0,
+                'eta': eta if progress < 100 else datetime.now(timezone.utc).isoformat(),
+                'timestamp': datetime.now(timezone.utc).timestamp()
+            }
+            
+            # Store in Redis
             self.redis_client.setex(
-                self.redis_key,
-                settings.PROGRESS_EXPIRE_SECONDS,
+                f"progress:job:{self.job_id}",
+                3600,
                 json.dumps(progress_data)
             )
-        except Exception as e:
-            logger.error(f"Failed to store progress in Redis: {e}")
-
-        # Publish to Pub/Sub channel
-        if self.redis_publisher:
-            try:
-                self.redis_publisher.publish_progress(self.job_id, progress_data)
-            except Exception as e:
-                logger.error(f"Failed to publish progress: {e}")
-
-        logger.debug(
-            f"Job {self.job_id}: {self.current_progress:.1f}% "
-            f"(Phase: {self.current_phase}, ETA: {eta_seconds}s)"
-        )
-
-    def update(
-        self,
-        stage: str = None,
-        progress: float = None,
-        step: str = None,
-        details: Optional[Dict] = None
-    ):
-        """Legacy update method for backward compatibility."""
-        if stage:
-            # Map legacy stages to new phases
-            stage_map = {
-                'initializing': 'initialization',
-                'clustering': 'clustering',
-                'solving': 'constraint_solving',
-                'optimizing': 'optimization',
-                'finalizing': 'finalization',
-            }
-            mapped_phase = stage_map.get(stage, 'initialization')
-
-            if mapped_phase != self.current_phase:
-                self.set_phase(mapped_phase)
-
-        if progress is not None:
-            # Convert percentage to step within phase
-            phase = self.phases[self.current_phase]
-            total_steps = phase.get('total_steps', 100)
-            step_num = int((progress / 100.0) * total_steps)
-            self.update_phase_progress(step_num, step)
-
-        try:
-            # Also maintain legacy Redis format
-            current_data = self.redis_client.get(self.redis_key)
-            if current_data:
-                current = json.loads(current_data)
-            else:
-                current = {
-                    "job_id": self.job_id,
-                    "stage": "initializing",
-                    "progress_percent": 0.0,
-                    "current_step": "Starting",
-                    "time_elapsed_seconds": 0.0,
-                    "estimated_time_remaining_seconds": None,
-                    "details": {}
-                }
-
-            if stage:
-                current["stage"] = stage
-            if progress is not None:
-                current["progress_percent"] = progress
-            if step:
-                current["current_step"] = step
-            if details:
-                current["details"] = details
-
-            elapsed = time.time() - self.start_time
-            current["time_elapsed_seconds"] = round(elapsed, 2)
-
-            eta = self.estimate_eta()
-            current["estimated_time_remaining_seconds"] = eta
-
-            # Save to Redis with expiration
-            self.redis_client.setex(
-                self.redis_key,
-                settings.PROGRESS_EXPIRE_SECONDS,
-                json.dumps(current)
+            
+            # Publish for real-time updates
+            self.redis_client.publish(
+                f"progress:{self.job_id}",
+                json.dumps(progress_data)
             )
-
-            logger.debug(f"Progress updated: {progress:.1f}% - {step}")
-
+            
+            logger.debug(f"[PROGRESS] {self.job_id}: {progress}% - {message} (ETA: {remaining_seconds}s)")
+            
         except Exception as e:
-            logger.error(f"Failed to update progress: {e}")
-
-    def get_progress(self) -> Optional[ProgressUpdate]:
-        """Get current progress"""
+            logger.error(f"[PROGRESS] Update failed: {e}")
+    
+    async def complete(self, message: str = "Timetable generation completed"):
+        """Mark job as 100% complete"""
+        await self.update(message, force_progress=100)
+        logger.info(f"[PROGRESS] {self.job_id}: Completed in {time.time() - self.start_time:.1f}s")
+    
+    async def fail(self, error_message: str):
+        """Mark job as failed"""
+        if not self.redis_client:
+            return
+        
         try:
-            data = self.redis_client.get(self.redis_key)
-            if data:
-                return ProgressUpdate(**json.loads(data))
-            return None
-        except Exception as e:
-            logger.error(f"Failed to get progress: {e}")
-            return None
-
-    def update_context_metrics(self, context_data: Dict[str, Any]):
-        """Update progress with context engine metrics"""
-        try:
-            current_data = self.redis_client.get(self.redis_key)
-            if current_data:
-                current = json.loads(current_data)
-                current["context_metrics"] = context_data
-
-                self.redis_client.setex(
-                    self.redis_key,
-                    settings.PROGRESS_EXPIRE_SECONDS,
-                    json.dumps(current)
-                )
-
-                if self.redis_publisher:
-                    self.redis_publisher.publish_context_update(self.job_id, context_data)
-
-        except Exception as e:
-            logger.error(f"Failed to update context metrics: {e}")
-
-    def update_cluster_progress(self, completed_clusters: int, total_clusters: int, cluster_metrics: List[Dict]):
-        """Update progress for cluster-based processing"""
-        try:
-            cluster_progress = {
-                "completed_clusters": completed_clusters,
-                "total_clusters": total_clusters,
-                "cluster_metrics": cluster_metrics,
-                "completion_rate": completed_clusters / total_clusters if total_clusters > 0 else 0
+            progress_data = {
+                'job_id': self.job_id,
+                'progress': 0,
+                'status': 'failed',
+                'stage': 'Failed',
+                'message': error_message,
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
-
-            current_data = self.redis_client.get(self.redis_key)
-            if current_data:
-                current = json.loads(current_data)
-                current["cluster_progress"] = cluster_progress
-
-                self.redis_client.setex(
-                    self.redis_key,
-                    settings.PROGRESS_EXPIRE_SECONDS,
-                    json.dumps(current)
-                )
-
+            
+            self.redis_client.setex(
+                f"progress:job:{self.job_id}",
+                3600,
+                json.dumps(progress_data)
+            )
+            
+            logger.error(f"[PROGRESS] {self.job_id}: Failed - {error_message}")
+            
         except Exception as e:
-            logger.error(f"Failed to update cluster progress: {e}")
+            logger.error(f"[PROGRESS] Fail update failed: {e}")
 
-    def complete(self, result: Optional[Dict[str, Any]] = None, success: bool = True, error: Optional[str] = None):
-        """Mark job as complete and publish final status."""
-        self.current_progress = 100.0
-        elapsed = int(time.time() - self.start_time)
 
-        logger.info(f"Job {self.job_id} completed in {elapsed}s")
-
-        if success:
-            stage = GenerationStage.COMPLETED
-
-            if self.redis_publisher:
-                self.redis_publisher.publish_completion(
-                    self.job_id,
-                    status='completed',
-                    result={
-                        **(result or {}),
-                        'elapsed_seconds': elapsed,
-                    }
-                )
-        else:
-            stage = GenerationStage.FAILED
-
-            if self.redis_publisher:
-                self.redis_publisher.publish_completion(
-                    self.job_id,
-                    status='failed',
-                    error=error
-                )
-
-        # Legacy update
-        self.update(
-            stage=stage.value,
-            progress=100.0 if success else -1.0,
-            step="Generation complete" if success else f"Failed: {error}",
-            details={"success": success, "error": error, "result": result}
-        )
+class ProgressUpdateTask:
+    """Background task to update progress every 2 seconds"""
+    
+    def __init__(self, tracker: EnterpriseProgressTracker):
+        self.tracker = tracker
+        self.running = False
+        self.task = None
+    
+    async def start(self):
+        """Start background progress updates"""
+        self.running = True
+        self.task = asyncio.create_task(self._update_loop())
+        logger.info(f"[PROGRESS] Started background updates for {self.tracker.job_id}")
+    
+    async def stop(self):
+        """Stop background progress updates"""
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        logger.info(f"[PROGRESS] Stopped background updates for {self.tracker.job_id}")
+    
+    async def _update_loop(self):
+        """Update progress every 100ms for smooth real-time tracking"""
+        try:
+            update_count = 0
+            while self.running:
+                # Build message with work progress if available
+                stage_name = self.tracker.current_stage.replace('_', ' ').title()
+                
+                if self.tracker.stage_items_total > 0:
+                    # Show work progress
+                    message = f"{stage_name}: {self.tracker.stage_items_done}/{self.tracker.stage_items_total}"
+                else:
+                    # Generic message
+                    message = f"Processing: {stage_name}"
+                
+                await self.tracker.update(message)
+                update_count += 1
+                
+                # Log every 10 updates (every 1 second) for debugging
+                if update_count % 10 == 0:
+                    logger.debug(f"[PROGRESS] {self.tracker.last_progress:.1f}% - {message}")
+                
+                await asyncio.sleep(0.1)  # Update every 100ms for ultra-smooth progress
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"[PROGRESS] Update loop error: {e}")
