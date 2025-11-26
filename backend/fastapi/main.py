@@ -154,7 +154,8 @@ class TimetableGenerationSaga:
             logger.info(f"Using strategy: {self.strategy.profile_name}")
         else:
             self.strategy = None
-            estimated_time = 90  # Realistic 1.5 minutes based on actual runtime
+            # Realistic estimate: load(2s) + cluster(3s) + cpsat(10s) + ga(10s) + rl(3s) = 28s
+            estimated_time = 35  # 35 seconds realistic estimate with buffer
         
         # Initialize enterprise progress tracker
         self.progress_tracker = EnterpriseProgressTracker(job_id, estimated_time, redis_client_global)
@@ -400,10 +401,10 @@ class TimetableGenerationSaga:
         all_solutions = {}
         total_clusters = len(clusters)
         
-        # Set stage (background task will handle progress updates)
-        self.progress_tracker.set_stage('cpsat')
-        completed = 0
+        # Set stage with total clusters for work-based progress
+        self.progress_tracker.set_stage('cpsat', total_items=total_clusters)
         
+        completed = 0
         if max_parallel == 1:
             # Sequential for very low memory
             for idx, (cluster_id, cluster_courses) in enumerate(list(clusters.items())):
@@ -421,11 +422,13 @@ class TimetableGenerationSaga:
                     if solution:
                         all_solutions.update(solution)
                     
-                    gc.collect()
                     completed += 1
+                    self.progress_tracker.update_work_progress(completed)
+                    gc.collect()
                 except Exception as e:
                     logger.error(f"Cluster {cluster_id} failed: {e}")
                     completed += 1
+                    self.progress_tracker.update_work_progress(completed)
                     gc.collect()
         else:
             # Parallel with ThreadPoolExecutor (shares memory, no pickle issues)
@@ -451,13 +454,18 @@ class TimetableGenerationSaga:
                         if solution:
                             all_solutions.update(solution)
                         completed += 1
+                        self.progress_tracker.update_work_progress(completed)
                     except Exception as e:
                         logger.error(f"Cluster {cluster_id} failed: {e}")
                         completed += 1
+                        self.progress_tracker.update_work_progress(completed)
                 
                 gc.collect()
         
-        logger.info(f"[STAGE2] Completed: {len(all_solutions)} assignments from {completed} clusters")
+        # Mark stage as complete (jump to stage end)
+        self.progress_tracker.mark_stage_complete()
+        
+        logger.info(f"[STAGE2] Completed: {len(all_solutions)} assignments from {len(clusters)} clusters")
         
         # FALLBACK: If no solutions found, generate mock timetable
         if len(all_solutions) == 0:
@@ -681,6 +689,8 @@ class TimetableGenerationSaga:
         logger.info(f"[STAGE2B] Starting Island Model GA with {len(initial_schedule)} initial assignments")
         self.progress_tracker.set_stage('ga')
         
+        # Time-based progress will handle smooth updates during GA
+        
         try:
             # Prepare data
             courses = data['load_data']['courses']
@@ -806,6 +816,9 @@ class TimetableGenerationSaga:
                 # CRITICAL: Stop GA immediately after completion
                 ga_optimizer.stop()
                 
+                # Mark stage as complete
+                self.progress_tracker.mark_stage_complete()
+                
                 final_fitness = ga_optimizer.fitness(optimized_schedule)
                 
                 logger.info(f"[STAGE2B] GA complete: fitness={final_fitness:.4f}")
@@ -873,6 +886,8 @@ class TimetableGenerationSaga:
         logger.info(f"[STAGE3] Starting RL conflict resolution with {len(schedule)} assignments")
         self.progress_tracker.set_stage('rl')
         
+        # Time-based progress will handle smooth updates during RL
+        
         try:
             # Quick conflict detection
             load_data = data['load_data']
@@ -917,6 +932,9 @@ class TimetableGenerationSaga:
             
             # Verify resolution
             remaining_conflicts = self._detect_conflicts(resolved_schedule, load_data)
+            
+            # Mark stage as complete
+            self.progress_tracker.mark_stage_complete()
             
             logger.info(f"[STAGE3] RL complete: {len(conflicts)} → {len(remaining_conflicts)} conflicts")
             

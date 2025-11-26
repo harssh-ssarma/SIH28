@@ -226,14 +226,14 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 100,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-    # Rate Limiting (Industry-level security)
-    "DEFAULT_THROTTLE_CLASSES": [
+    # Rate Limiting (Disabled for development, enable in production)
+    "DEFAULT_THROTTLE_CLASSES": [] if DEBUG else [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",  # Anonymous users: 100 requests per hour
-        "user": "1000/hour",  # Authenticated users: 1000 requests per hour
+        "anon": "1000/hour",  # Anonymous users: 1000 requests per hour
+        "user": "10000/hour",  # Authenticated users: 10000 requests per hour
     },
 }
 
