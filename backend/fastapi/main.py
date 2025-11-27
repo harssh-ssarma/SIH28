@@ -181,23 +181,15 @@ class TimetableGenerationSaga:
         """Execute saga with compensation on failure"""
         self.job_data[job_id] = {'status': 'running', 'results': {}}
         
-        # Select strategy based on hardware + user preference
-        from engine.strategy_selector import get_strategy_selector
+        # Use hardware-adaptive config directly
         from engine.resource_monitor import ResourceMonitor
         from utils.progress_tracker import EnterpriseProgressTracker, ProgressUpdateTask
         import gc
         
         global hardware_profile, redis_client_global
-        if hardware_profile:
-            selector = get_strategy_selector()
-            quality_mode = request_data.get('quality_mode', 'balanced')
-            self.strategy = selector.select(hardware_profile, quality_mode)
-            estimated_time = self.strategy.expected_time_minutes * 60
-            logger.info(f"Using strategy: {self.strategy.profile_name}")
-        else:
-            self.strategy = None
-            # Realistic estimate: load(2s) + cluster(3s) + cpsat(10s) + ga(10s) + rl(3s) = 28s
-            estimated_time = 35  # 35 seconds realistic estimate with buffer
+        # Use hardware-adaptive config directly
+        optimal_config = get_optimal_config(hardware_profile) if hardware_profile else None
+        estimated_time = optimal_config['expected_time_minutes'] * 60 if optimal_config else 35
         
         # Initialize enterprise progress tracker
         self.progress_tracker = EnterpriseProgressTracker(job_id, estimated_time, redis_client_global)
@@ -209,30 +201,20 @@ class TimetableGenerationSaga:
         
         async def progressive_downgrade_70():
             """Level 1: 70% RAM - Reduce sample size"""
-            logger.warning("[WARN] LEVEL 1 (70% RAM): Reducing sample sizes")
+            logger.warning("[WARN] LEVEL 1 (70% RAM): Forcing garbage collection")
             gc.collect()
-            if hasattr(self, 'strategy') and self.strategy:
-                self.strategy.sample_size = max(50, self.strategy.sample_size // 2)
-                logger.info(f"Reduced sample_size to {self.strategy.sample_size}")
         
         async def progressive_downgrade_80():
-            """Level 2: 80% RAM - Reduce population"""
-            logger.warning("[WARN] LEVEL 2 (80% RAM): Reducing GA population")
+            """Level 2: 80% RAM - Aggressive cleanup"""
+            logger.warning("[WARN] LEVEL 2 (80% RAM): Aggressive memory cleanup")
             gc.collect()
-            if hasattr(self, 'strategy') and self.strategy:
-                self.strategy.ga_population = max(5, self.strategy.ga_population // 2)
-                self.strategy.ga_islands = max(1, self.strategy.ga_islands // 2)
-                logger.info(f"Reduced pop={self.strategy.ga_population}, islands={self.strategy.ga_islands}")
+            gc.collect()
         
         async def progressive_downgrade_90():
-            """Level 3: 90% RAM - Minimum configuration"""
-            logger.error("[ERROR] LEVEL 3 (90% RAM): Emergency minimum configuration")
-            gc.collect()
-            if hasattr(self, 'strategy') and self.strategy:
-                self.strategy.ga_population = 3
-                self.strategy.ga_generations = 3
-                self.strategy.ga_islands = 1
-                logger.info(f"Emergency: pop=3, gen=3, islands=1")
+            """Level 3: 90% RAM - Emergency cleanup"""
+            logger.error("[ERROR] LEVEL 3 (90% RAM): Emergency memory cleanup")
+            from utils.memory_cleanup import aggressive_cleanup
+            aggressive_cleanup()
         
         async def critical_abort():
             """Level 4: 95% RAM - Abort"""
@@ -1389,7 +1371,7 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
     except asyncio.CancelledError:
         logger.warning(f"[ENTERPRISE] Job {job_id} was cancelled")
         
-        # Update cancellation status
+        # Update cancellation status and cleanup Redis
         if redis_client_global:
             cancel_data = {
                 'job_id': job_id,
@@ -1400,7 +1382,9 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
             redis_client_global.setex(f"progress:job:{job_id}", 3600, json.dumps(cancel_data))
+            redis_client_global.publish(f"progress:{job_id}", json.dumps(cancel_data))  # Notify WebSocket
             redis_client_global.delete(f"cancel:job:{job_id}")  # Cleanup flag
+            redis_client_global.delete(f"start_time:job:{job_id}")  # Cleanup start time
         
         await call_django_callback(job_id, 'cancelled', error='Cancelled by user')
         
@@ -1656,7 +1640,7 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
     except asyncio.TimeoutError:
         logger.error(f"[ENTERPRISE] Job {job_id} timed out after 10 minutes")
         
-        # Update timeout progress
+        # Update timeout progress and cleanup Redis
         if redis_client_global:
             timeout_data = {
                 'job_id': job_id,
@@ -1667,6 +1651,9 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
             redis_client_global.setex(f"progress:job:{job_id}", 3600, json.dumps(timeout_data))
+            redis_client_global.publish(f"progress:{job_id}", json.dumps(timeout_data))  # Notify WebSocket
+            redis_client_global.delete(f"cancel:job:{job_id}")  # Cleanup flag
+            redis_client_global.delete(f"start_time:job:{job_id}")  # Cleanup start time
         
         await call_django_callback(job_id, 'failed', error='Generation timed out')
         
@@ -1684,7 +1671,7 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
         import traceback
         logger.error(traceback.format_exc())
         
-        # Update error progress
+        # Update error progress and cleanup Redis
         if redis_client_global:
             error_data = {
                 'job_id': job_id,
@@ -1695,6 +1682,9 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
             redis_client_global.setex(f"progress:job:{job_id}", 3600, json.dumps(error_data))
+            redis_client_global.publish(f"progress:{job_id}", json.dumps(error_data))  # Notify WebSocket
+            redis_client_global.delete(f"cancel:job:{job_id}")  # Cleanup flag
+            redis_client_global.delete(f"start_time:job:{job_id}")  # Cleanup start time
         
         await call_django_callback(job_id, 'failed', error=str(e))
         
@@ -1896,15 +1886,12 @@ async def generate_variants_enterprise(request: GenerationRequest):
     try:
         job_id = request.job_id or f"enterprise_{int(datetime.now(timezone.utc).timestamp())}"
         
-        # Calculate estimated time based on strategy
+        # Calculate estimated time from hardware config
         estimated_time_seconds = 300  # Default 5 minutes
         if hardware_profile:
-            from engine.strategy_selector import get_strategy_selector
-            selector = get_strategy_selector()
-            quality_mode = request.quality_mode or 'balanced'
-            strategy = selector.select(hardware_profile, quality_mode)
-            estimated_time_seconds = strategy.expected_time_minutes * 60
-            logger.info(f"Estimated time: {strategy.expected_time_minutes} min ({strategy.profile_name})")
+            optimal_config = get_optimal_config(hardware_profile)
+            estimated_time_seconds = optimal_config['expected_time_minutes'] * 60
+            logger.info(f"Estimated time: {optimal_config['expected_time_minutes']} min ({optimal_config['tier']} tier)")
         
         # Initialize progress and start time
         if redis_client_global:

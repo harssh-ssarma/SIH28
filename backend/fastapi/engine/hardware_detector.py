@@ -564,6 +564,16 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
     
     logger.info(f"[MEMORY] Pressure: {memory_pressure:.1f}%, Budget: {memory_budget_gb:.1f}GB, Max pop: {max_population}, Max gen: {max_generations}")
     
+    # Determine tier based on total RAM with safety override
+    if total_ram < 8:
+        tier = "potato"
+    elif total_ram < 16:
+        tier = "laptop"
+    elif total_ram < 32:
+        tier = "workstation"
+    else:
+        tier = "server"
+    
     # STAGE 1: LOUVAIN CLUSTERING
     if tier == "potato":
         stage1 = {
