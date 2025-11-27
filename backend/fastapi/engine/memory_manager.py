@@ -56,6 +56,10 @@ class StreamingPopulation:
             individual = self.perturbation_fn(self.initial_solution)
             yield individual
     
+    def generate(self):
+        """Alias for __iter__ for compatibility"""
+        return self.__iter__()
+    
     def evaluate_streaming(self, fitness_fn) -> List[tuple]:
         results = []
         for i, individual in enumerate(self):

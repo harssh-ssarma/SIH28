@@ -189,24 +189,30 @@ class GeneticAlgorithmOptimizer:
         if self.valid_domains is not None:
             return  # Already built
         
-        logger.info(f"[GA] Building valid domains for {len(self.courses)} courses...")
-        self.valid_domains = {}
-        
-        for course in self.courses:
-            for session in range(course.duration):
-                valid_pairs = []
-                for t_slot in self.time_slots:
-                    for room in self.rooms:
-                        if len(course.student_ids) > room.capacity:
-                            continue
-                        if hasattr(course, 'required_features') and course.required_features:
-                            if not all(feat in getattr(room, 'features', []) for feat in course.required_features):
+        try:
+            logger.info(f"[GA] Building valid domains for {len(self.courses)} courses...")
+            self.valid_domains = {}
+            
+            for course in self.courses:
+                for session in range(course.duration):
+                    valid_pairs = []
+                    for t_slot in self.time_slots:
+                        for room in self.rooms:
+                            if len(course.student_ids) > room.capacity:
                                 continue
-                        valid_pairs.append((t_slot.slot_id, room.room_id))
-                
-                self.valid_domains[(course.course_id, session)] = valid_pairs
-        
-        logger.info(f"[GA] Valid domains built: {len(self.valid_domains)} entries")
+                            if hasattr(course, 'required_features') and course.required_features:
+                                if not all(feat in getattr(room, 'features', []) for feat in course.required_features):
+                                    continue
+                            valid_pairs.append((t_slot.slot_id, room.room_id))
+                    
+                    self.valid_domains[(course.course_id, session)] = valid_pairs
+            
+            logger.info(f"[GA] Valid domains built: {len(self.valid_domains)} entries")
+        except Exception as e:
+            logger.error(f"[GA] Failed to build valid domains: {e}")
+            # Fallback: empty dict to prevent None errors
+            self.valid_domains = {}
+            raise
     
     def initialize_population(self):
         """Initialize population - GPU VRAM offloading if available"""
@@ -219,6 +225,9 @@ class GeneticAlgorithmOptimizer:
         """GPU: Store entire population in VRAM (300MB RAM -> VRAM)"""
         import torch
         import psutil
+        
+        # CRITICAL: Build valid domains first
+        self._build_valid_domains()
         
         # CRITICAL: Store population as GPU tensors, NOT Python dicts
         mem_before = psutil.virtual_memory()
