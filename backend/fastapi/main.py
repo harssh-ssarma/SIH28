@@ -2324,38 +2324,6 @@ def _estimate_processing_time(profile: HardwareProfile) -> dict:
         "confidence": "high" if profile.cpu_cores >= 4 else "medium"
     }
 
-# Cleanup duplicate files on startup
-@app.on_event("startup")
-async def cleanup_duplicates():
-    """Clean up duplicate/unused files"""
-    import os
-    
-    duplicate_files = [
-        "api/generation.py",
-        "engine/distributed_scheduler.py", 
-        "engine/gpu_scheduler.py",
-        "engine/incremental_scheduler.py",
-        "engine/variant_generator.py",
-        "tasks/timetable_tasks.py"
-    ]
-    
-    for file_path in duplicate_files:
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                logger.info(f"[CLEANUP] Removed duplicate file: {file_path}")
-        except Exception as e:
-            logger.debug(f"[CLEANUP] Could not remove {file_path}: {e}")
-    
-    # Remove empty directories
-    empty_dirs = ["api", "tasks"]
-    for dir_path in empty_dirs:
-        try:
-            if os.path.exists(dir_path) and not os.listdir(dir_path):
-                os.rmdir(dir_path)
-                logger.info(f"[CLEANUP] Removed empty directory: {dir_path}")
-        except Exception as e:
-            logger.debug(f"[CLEANUP] Could not remove directory {dir_path}: {e}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)
