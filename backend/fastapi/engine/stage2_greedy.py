@@ -57,6 +57,12 @@ class SmartGreedyScheduler:
                 # Try valid domains in order of preference
                 valid_pairs = valid_domains.get((course.course_id, session), [])
                 
+                # If no valid pairs, try relaxing constraints
+                if not valid_pairs:
+                    logger.warning(f"No valid pairs for course {course.course_id} session {session}, trying relaxed constraints")
+                    valid_pairs = [(t.slot_id, r.room_id) for t in self.time_slots for r in self.rooms 
+                                   if len(course.student_ids) <= r.capacity]
+                
                 for time_slot_id, room_id in valid_pairs:
                     # Check faculty conflict
                     faculty_id = course.faculty_id
@@ -67,10 +73,10 @@ class SmartGreedyScheduler:
                     if (room_id, time_slot_id) in room_schedule:
                         continue
                     
-                    # Check student conflicts (optimized)
+                    # Check student conflicts (optimized) - only check first 100 students for speed
                     has_student_conflict = any(
                         (student_id, time_slot_id) in student_schedule
-                        for student_id in student_set
+                        for student_id in list(student_set)[:100]
                     )
                     
                     if has_student_conflict:

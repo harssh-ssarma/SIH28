@@ -208,9 +208,9 @@ class GeneticAlgorithmOptimizer:
         if hasattr(self, 'progress_tracker') and self.progress_tracker:
             self._update_init_progress(1, self.population_size)
         
-        # FAST perturbation: only change 5% of assignments (not 15%)
+        # MINIMAL perturbation: only change 2% of assignments to save memory
         num_keys = len(self.initial_solution)
-        num_changes = max(1, int(num_keys * 0.05))  # 5% for faster init
+        num_changes = max(1, int(num_keys * 0.02))  # 2% for memory efficiency
         keys_list = list(self.initial_solution.keys())
         
         # Add perturbed versions (reuse objects) with progress
@@ -670,12 +670,16 @@ class GeneticAlgorithmOptimizer:
             del old_population
             del fitness_scores
             
-            # GOOGLE/LINUX: Aggressive GC in streaming mode
+            # CRITICAL: Force GC every generation to prevent memory exhaustion
             import gc
-            if self.streaming_mode:
-                gc.collect()
-            elif generation % 5 == 0:
-                gc.collect()
+            gc.collect()
+            
+            # Clear cache every 5 generations
+            if generation % 5 == 0:
+                with self._cache_lock:
+                    self.fitness_cache.clear()
+                    if self.gpu_fitness_cache:
+                        self.gpu_fitness_cache.clear()
             
             # Update progress EVERY generation for smooth progress bar
             mode = "GPU" if self.use_gpu else "CPU"
