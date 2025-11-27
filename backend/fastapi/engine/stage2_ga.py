@@ -715,7 +715,13 @@ class GeneticAlgorithmOptimizer:
             return result
         
         # Initialize population (GPU or CPU)
+        logger.info(f"[GA] Initializing population (use_gpu={self.use_gpu}, streaming={self.streaming_mode})")
         self.initialize_population()
+        
+        # Log memory after initialization
+        import psutil
+        mem = psutil.virtual_memory()
+        logger.info(f"[GA] After init: RAM {mem.used/(1024**3):.1f}GB / {mem.total/(1024**3):.1f}GB ({mem.percent:.1f}%)")
         
         best_solution = self.initial_solution
         best_fitness = self.fitness(best_solution)
@@ -733,10 +739,17 @@ class GeneticAlgorithmOptimizer:
                     self._cleanup_gpu()
                     return best_solution
                 last_cancel_check = current_time
+            # Log memory before fitness
+            import psutil
+            mem_before = psutil.virtual_memory()
+            
             # FORCE GPU usage - fallback only on critical error
             if self.use_gpu:
                 try:
+                    logger.info(f"[GA] Gen {generation}: Calling GPU batch fitness (pop in VRAM)")
                     fitness_scores = self._gpu_batch_fitness()
+                    mem_after = psutil.virtual_memory()
+                    logger.info(f"[GA] Gen {generation}: Fitness done. RAM: {mem_before.percent:.1f}% → {mem_after.percent:.1f}% (Δ{mem_after.percent - mem_before.percent:+.1f}%)")
                 except Exception as e:
                     logger.error(f"[ERROR] GPU fitness FAILED: {e}, falling back to CPU")
                     self.use_gpu = False
@@ -1283,13 +1296,17 @@ class GeneticAlgorithmOptimizer:
             return [(sol, self.fitness(sol)) for sol in self.population]
     
     def _gpu_batch_fitness_vram(self) -> List[Tuple[Dict, float]]:
-        """GPU: Fitness evaluation with population in VRAM (fastest) - STREAMING conversion"""
+        """GPU: Fitness evaluation with population in VRAM (fastest) - ZERO RAM mode"""
         import torch
         import gc
+        import psutil
         
         try:
-            # CRITICAL: Convert individuals ONE AT A TIME to avoid RAM exhaustion
-            fitness_results = []
+            # CRITICAL: Store ONLY fitness values, not dicts (50 floats = 400 bytes vs 50 dicts = 1000MB)
+            fitness_values = []
+            
+            mem_start = psutil.virtual_memory()
+            logger.info(f"[GPU-VRAM] Starting fitness for {self.population_tensor.shape[0]} individuals. RAM: {mem_start.percent:.1f}%")
             
             for i in range(self.population_tensor.shape[0]):
                 # Convert single individual from VRAM to dict
@@ -1306,17 +1323,54 @@ class GeneticAlgorithmOptimizer:
                 # Calculate fitness for this individual
                 fitness_val = self.fitness(individual_dict)
                 
-                # Store result
-                fitness_results.append((individual_dict, fitness_val))
+                # CRITICAL: Store ONLY fitness value (not dict!)
+                fitness_values.append(fitness_val)
                 
-                # CRITICAL: Delete individual immediately to free RAM
+                # Delete dict immediately
                 del individual_dict
                 
                 # Force GC every 5 individuals
                 if i % 5 == 4:
                     gc.collect(generation=0)
             
-            return fitness_results
+            mem_end = psutil.virtual_memory()
+            logger.info(f"[GPU-VRAM] Fitness complete. RAM: {mem_start.percent:.1f}% → {mem_end.percent:.1f}% (Δ{mem_end.percent - mem_start.percent:+.1f}%)")
+            
+            # CRITICAL: Return lazy wrapper that reconstructs dicts on-demand
+            # This avoids keeping all 50 dicts in RAM
+            class LazyFitnessResults:
+                def __init__(self, population_tensor, population_keys, time_hash_to_slot, room_hash_to_id, fitness_values):
+                    self.population_tensor = population_tensor
+                    self.population_keys = population_keys
+                    self.time_hash_to_slot = time_hash_to_slot
+                    self.room_hash_to_id = room_hash_to_id
+                    self.fitness_values = fitness_values
+                
+                def __getitem__(self, idx):
+                    # Reconstruct dict from VRAM only when accessed
+                    individual_dict = {}
+                    for j, key in enumerate(self.population_keys):
+                        time_hash = self.population_tensor[idx, j, 0].item()
+                        room_hash = self.population_tensor[idx, j, 1].item()
+                        time_slot = self.time_hash_to_slot.get(time_hash, time_hash)
+                        room_id = self.room_hash_to_id.get(room_hash, room_hash)
+                        individual_dict[key] = (time_slot, room_id)
+                    return (individual_dict, self.fitness_values[idx])
+                
+                def __len__(self):
+                    return len(self.fitness_values)
+                
+                def __iter__(self):
+                    for i in range(len(self)):
+                        yield self[i]
+            
+            return LazyFitnessResults(
+                self.population_tensor,
+                self.population_keys,
+                self.time_hash_to_slot,
+                self.room_hash_to_id,
+                fitness_values
+            )
         except Exception as e:
             logger.error(f"[GPU] VRAM fitness failed: {e}, falling back to CPU")
             self.use_gpu = False
