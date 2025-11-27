@@ -91,15 +91,16 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "django.middleware.gzip.GZipMiddleware",  # PERFORMANCE: Compress responses
+    "django.middleware.http.ConditionalGetMiddleware",  # PERFORMANCE: ETag support
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "core.csrf_middleware.APICSRFExemptMiddleware",  # Custom: Exempts /api/ endpoints
+    "core.csrf_middleware.APICSRFExemptMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    # Custom logging middleware
     "core.middleware.RequestResponseLoggingMiddleware",
     "core.middleware.APIMetricsMiddleware",
 ]
@@ -150,10 +151,10 @@ else:
             "HOST": os.getenv("DB_HOST"),
             "PORT": os.getenv("DB_PORT", "5432"),
             "ATOMIC_REQUESTS": True,
-            "CONN_MAX_AGE": 600,
+            "CONN_MAX_AGE": 600,  # PERFORMANCE: Connection pooling
             "OPTIONS": {
-                "sslmode": "require",  # Required for Neon database
-                "connect_timeout": 10,
+                "sslmode": "require",
+                "connect_timeout": 5,  # PERFORMANCE: Faster timeout
             },
         }
     }
@@ -211,8 +212,8 @@ AUTH_USER_MODEL = "academics.User"
 # REST Framework Settings
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "core.authentication.JWTCookieAuthentication",  # 🔐 Custom JWT from HttpOnly cookies
-        "rest_framework_simplejwt.authentication.JWTAuthentication",  # Fallback for Authorization header
+        "core.authentication.JWTCookieAuthentication",
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -224,16 +225,15 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "PAGE_SIZE": 100,
+    "PAGE_SIZE": 50,  # PERFORMANCE: Reduced from 100 to 50
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-    # Rate Limiting (Disabled for development, enable in production)
     "DEFAULT_THROTTLE_CLASSES": [] if DEBUG else [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "1000/hour",  # Anonymous users: 1000 requests per hour
-        "user": "10000/hour",  # Authenticated users: 10000 requests per hour
+        "anon": "1000/hour",
+        "user": "10000/hour",
     },
 }
 

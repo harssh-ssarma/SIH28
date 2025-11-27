@@ -34,12 +34,35 @@ export default function AdminTimetablesPage() {
 
   useEffect(() => {
     loadTimetableData()
-    loadFacultyData()
     loadRunningJobs()
     
+    // Don't load faculty on initial render - only load when user scrolls to faculty section
+    // This is Google/Microsoft pattern for fast page loads
+    
     const interval = setInterval(loadRunningJobs, 3000)
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+    }
   }, [])
+  
+  // Lazy load faculty when faculty section becomes visible
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && facultyAvailability.length === 0) {
+          loadFacultyData()
+        }
+      },
+      { threshold: 0.1 }
+    )
+    
+    const facultySection = document.getElementById('faculty-section')
+    if (facultySection) {
+      observer.observe(facultySection)
+    }
+    
+    return () => observer.disconnect()
+  }, [facultyAvailability.length])
 
   const loadTimetableData = async () => {
     try {
@@ -63,10 +86,21 @@ export default function AdminTimetablesPage() {
 
   const loadFacultyData = async () => {
     try {
-      const faculty = await fetchFacultyAvailability({
-        department_id: user?.department,
-        organization_id: user?.organization,
-      })
+      // Enterprise optimization: Only fetch 20 faculty initially, load more on demand
+      const response = await fetch(
+        `${API_BASE}/faculty/?organization=${user?.organization}&page=1&page_size=20`,
+        { credentials: 'include' }
+      )
+      if (!response.ok) {
+        setFacultyAvailability([])
+        return
+      }
+      const data = await response.json()
+      const faculty = (data.results || []).map((f: any) => ({
+        id: f.faculty_id,
+        name: `${f.first_name} ${f.last_name}`.trim(),
+        available: f.is_active
+      }))
       setFacultyAvailability(faculty)
     } catch (err) {
       console.error('Failed to load faculty:', err)
@@ -472,7 +506,7 @@ export default function AdminTimetablesPage() {
           </div>
 
           {/* Right Column: Faculty Availability (1/3 width) */}
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1" id="faculty-section">
             <div className="card sticky top-6">
               <div className="card-header">
                 <div className="flex items-center gap-3">
@@ -501,7 +535,13 @@ export default function AdminTimetablesPage() {
               </div>
 
               <div className="max-h-[calc(100vh-200px)] overflow-y-auto space-y-2">
-                {facultyAvailability.filter(f => f.name).map(faculty => (
+                {facultyAvailability.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="loading-spinner w-6 h-6 mx-auto mb-2"></div>
+                    <p className="text-xs text-gray-500">Loading faculty...</p>
+                  </div>
+                ) : (
+                  facultyAvailability.filter(f => f.name).map(faculty => (
                   <div key={faculty.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <div className="w-8 h-8 bg-[#2196F3]/10 dark:bg-[#2196F3]/20 rounded-full flex items-center justify-center flex-shrink-0">
@@ -532,7 +572,8 @@ export default function AdminTimetablesPage() {
                       />
                     </button>
                   </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           </div>

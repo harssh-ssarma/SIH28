@@ -121,6 +121,7 @@ export default function TimetableReviewPage() {
   const [activeVariant, setActiveVariant] = useState<TimetableVariant | null>(null)
   const [viewMode, setViewMode] = useState<'comparison' | 'detail'>('comparison')
   const [selectedDay, setSelectedDay] = useState(0)
+  const [departmentFilter, setDepartmentFilter] = useState<string>('all')
 
   useEffect(() => {
     if (workflowId) {
@@ -141,7 +142,9 @@ export default function TimetableReviewPage() {
 
       if (!workflowRes.ok) {
         if (workflowRes.status === 401 || workflowRes.status === 403) {
-          throw new Error('Authentication required. Please log in again.')
+          // Session expired - redirect to login
+          router.push('/login?redirect=' + encodeURIComponent(window.location.pathname))
+          return
         }
         throw new Error(`Failed to load workflow (${workflowRes.status})`)
       }
@@ -538,9 +541,52 @@ export default function TimetableReviewPage() {
         {activeVariant && viewMode === 'detail' && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Variant {activeVariant.variant_number} - Detailed View
-              </h2>
+              <div className="flex items-center gap-4">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Variant {activeVariant.variant_number} - Detailed View
+                </h2>
+                <select
+                  value={departmentFilter}
+                  onChange={async (e) => {
+                    const deptId = e.target.value
+                    setDepartmentFilter(deptId)
+                    
+                    // Fetch filtered data from Django API
+                    if (deptId !== 'all' && activeVariant) {
+                      try {
+                        const response = await authenticatedFetch(
+                          `${API_BASE}/timetable/variants/${activeVariant.id}/department_view/?department_id=${deptId}&job_id=${activeVariant.job_id}`,
+                          { credentials: 'include' }
+                        )
+                        
+                        if (response.ok) {
+                          const data = await response.json()
+                          setActiveVariant({
+                            ...activeVariant,
+                            timetable_entries: data.timetable_entries
+                          })
+                        }
+                      } catch (err) {
+                        console.error('Failed to fetch department view:', err)
+                      }
+                    } else {
+                      // Reset to full variant
+                      const fullVariant = variants.find(v => v.id === activeVariant.id)
+                      if (fullVariant) setActiveVariant(fullVariant)
+                    }
+                  }}
+                  className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                >
+                  <option value="all">All Departments</option>
+                  {Array.from(new Set(
+                    (variants.find(v => v.id === activeVariant.id)?.timetable_entries || [])
+                      .map(e => e.department_id)
+                      .filter(Boolean)
+                  )).map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+              </div>
               <button
                 onClick={() => setViewMode('comparison')}
                 className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"

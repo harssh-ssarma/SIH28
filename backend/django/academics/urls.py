@@ -11,6 +11,14 @@ from .timetable_views import (
 )
 from .workflow_views import TimetableWorkflowViewSet, TimetableVariantViewSet
 from .timetable_config_views import TimetableConfigurationViewSet
+from .views_optimized import (
+    fast_generation_jobs,
+    fast_faculty,
+    fast_departments,
+    fast_courses,
+    fast_students,
+    fast_rooms,
+)
 from .views import (
     BatchViewSet,
     BuildingViewSet,
@@ -78,4 +86,11 @@ urlpatterns = [
     path("auth/me", current_user_view, name="current-user-no-slash"),
     # Dashboard stats
     path("dashboard/stats/", dashboard_stats, name="dashboard-stats"),
+    # PERFORMANCE: Ultra-fast endpoints
+    path("fast/jobs/", fast_generation_jobs, name="fast-jobs"),
+    path("fast/faculty/", fast_faculty, name="fast-faculty"),
+    path("fast/departments/", fast_departments, name="fast-departments"),
+    path("fast/courses/", fast_courses, name="fast-courses"),
+    path("fast/students/", fast_students, name="fast-students"),
+    path("fast/rooms/", fast_rooms, name="fast-rooms"),
 ]

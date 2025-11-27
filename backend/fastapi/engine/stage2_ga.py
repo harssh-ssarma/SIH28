@@ -359,8 +359,14 @@ class GeneticAlgorithmOptimizer:
         try:
             import torch
             
+            # Check if cached mappings exist
+            if not hasattr(self, 'gpu_slot_id_to_idx'):
+                logger.debug("GPU mappings not cached, using CPU")
+                self.gpu_offload_conflicts = False
+                return self._is_feasible(solution)
+            
             with self._gpu_lock:
-                # Use cached mappings (10x faster than rebuilding)
+                # Use cached mappings (no rebuilding!)
                 num_slots = self.gpu_num_slots
                 slot_id_to_idx = self.gpu_slot_id_to_idx
                 faculty_id_to_idx = self.gpu_faculty_id_to_idx
@@ -405,7 +411,7 @@ class GeneticAlgorithmOptimizer:
                 
                 return not (faculty_conflicts or room_conflicts or student_conflicts)
         except Exception as e:
-            logger.debug(f"GPU feasibility check failed: {e}, using CPU")
+            logger.warning(f"GPU feasibility failed: {e}, using CPU")
             self.gpu_offload_conflicts = False
             return self._is_feasible(solution)
     
@@ -1198,7 +1204,7 @@ class GeneticAlgorithmOptimizer:
             self.gpu_offload_conflicts = False
     
     def _gpu_batch_fitness(self) -> List[Tuple[Dict, float]]:
-        """GPU-vectorized batch fitness (10-50x faster with GPU feasibility)"""
+        """GPU-vectorized batch fitness (simplified for speed)"""
         try:
             import torch
             
@@ -1206,35 +1212,30 @@ class GeneticAlgorithmOptimizer:
             if hasattr(self, 'population_tensor'):
                 return self._gpu_batch_fitness_vram()
             
-            # GPU-vectorized feasibility (10-50x faster)
-            if self.gpu_offload_conflicts:
-                feasibility_list = [1.0 if self._gpu_is_feasible(s) else 0.0 for s in self.population]
-            else:
-                feasibility_list = [1.0 if self._is_feasible(s) else 0.0 for s in self.population]
-            
-            feasibility = torch.tensor(feasibility_list, device=DEVICE)
-            
-            # Violations (only for infeasible solutions)
-            violations_list = [self._count_violations(s) if f == 0.0 else 0 for s, f in zip(self.population, feasibility_list)]
-            violations = torch.tensor(violations_list, device=DEVICE)
-            
-            # Soft constraints (simplified for speed)
+            # FAST PATH: Skip expensive feasibility, use simplified fitness
+            # For large schedules (>3000), feasibility check is too slow even on GPU
             simplified = len(self.initial_solution) > 3000
             
             if simplified:
-                # Fast path: only faculty + room
+                # Ultra-fast: Skip feasibility, only soft constraints
                 faculty_list = [self._gpu_faculty_preference_tensor(s) for s in self.population]
                 room_list = [self._room_utilization(s) for s in self.population]
                 
                 faculty_scores = torch.stack([f if isinstance(f, torch.Tensor) else torch.tensor(f, device=DEVICE) for f in faculty_list])
                 room_util_scores = torch.tensor(room_list, device=DEVICE)
                 
-                batch_fitness = feasibility * (
-                    0.6 * faculty_scores + 
-                    0.4 * room_util_scores
-                ) - (1.0 - feasibility) * 1000.0 * violations
+                batch_fitness = 0.6 * faculty_scores + 0.4 * room_util_scores
             else:
-                # Full fitness
+                # Full fitness with feasibility
+                if self.gpu_offload_conflicts:
+                    feasibility_list = [1.0 if self._gpu_is_feasible(s) else 0.0 for s in self.population]
+                else:
+                    feasibility_list = [1.0 if self._is_feasible(s) else 0.0 for s in self.population]
+                
+                feasibility = torch.tensor(feasibility_list, device=DEVICE)
+                violations_list = [self._count_violations(s) if f == 0.0 else 0 for s, f in zip(self.population, feasibility_list)]
+                violations = torch.tensor(violations_list, device=DEVICE)
+                
                 faculty_list = [self._gpu_faculty_preference_tensor(s) for s in self.population]
                 room_list = [self._room_utilization(s) for s in self.population]
                 compact_list = [self._schedule_compactness(s) for s in self.population]

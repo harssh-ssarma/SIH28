@@ -1385,7 +1385,8 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
                     'faculty_name': getattr(faculty, 'faculty_name', 'TBA') if faculty else 'TBA',
                     'room_number': getattr(room, 'room_name', 'N/A'),
                     'batch_name': dept_name,
-                    'department_id': dept_id  # For filtering by department
+                    'department_id': dept_name,  # Use name instead of UUID for filtering
+                    'department_uuid': str(dept_id)  # Keep UUID for backend reference
                 })
         
         logger.info(f"[ENTERPRISE] Generated {len(timetable_entries)} timetable entries")
@@ -1547,7 +1548,8 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
                                     'faculty_name': getattr(faculty, 'faculty_name', 'TBA') if faculty else 'TBA',
                                     'room_number': getattr(room, 'room_name', 'N/A'),
                                     'batch_name': dept_name,
-                                    'department_id': dept_id
+                                    'department_id': dept_name,  # Use name instead of UUID
+                                    'department_uuid': str(dept_id)  # Keep UUID for backend
                                 })
                         
                         variant['timetable_entries'] = timetable_entries
@@ -1685,7 +1687,8 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
             
             # 4. Aggressive cleanup (GPU + 3-pass GC)
             cleanup_stats = aggressive_cleanup()
-            logger.info(f"[CLEANUP] Freed {cleanup_stats['freed_mb']:.1f}MB, collected {cleanup_stats['gc_collected']} objects")
+            gc_count = cleanup_stats.get('gc_collected', 0)
+            logger.info(f"[CLEANUP] Freed {cleanup_stats['freed_mb']:.1f}MB, collected {gc_count} objects")
             
             # 5. Cleanup Redis cancellation flag
             if redis_client_global:

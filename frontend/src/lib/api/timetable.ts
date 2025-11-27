@@ -208,33 +208,44 @@ export async function fetchFacultyAvailability(filters?: {
   department_id?: string
   organization_id?: string
 }): Promise<FacultyAvailability[]> {
-  const params = new URLSearchParams()
-  if (filters?.department_id) params.append('department', filters.department_id)
-  if (filters?.organization_id) params.append('organization', filters.organization_id)
+  try {
+    const params = new URLSearchParams()
+    if (filters?.department_id) params.append('department', filters.department_id)
+    if (filters?.organization_id) params.append('organization', filters.organization_id)
 
-  const response = await fetch(
-    `${DJANGO_API_BASE}/faculty/?${params.toString()}`,
-    getFetchOptions()
-  )
+    const response = await fetch(
+      `${DJANGO_API_BASE}/faculty/?${params.toString()}`,
+      getFetchOptions()
+    )
 
-  const data = await handleResponse<any>(response)
-  // Handle both paginated {results: [], count: X} and direct array responses
-  const faculty = Array.isArray(data) ? data : data.results || []
-
-  // Transform to FacultyAvailability format
-  return faculty.map((f: any) => {
-    // Construct full name from first_name, middle_name, last_name
-    const nameParts = [f.first_name, f.middle_name, f.last_name].filter(Boolean)
-    const fullName = nameParts.join(' ') || f.faculty_name || 'Unknown'
-    
-    return {
-      id: f.faculty_id || f.id,
-      name: fullName,
-      available: f.is_active !== false, // Assume active faculty are available
-      email: f.email,
-      department: f.department?.dept_name,
+    // If 401 Unauthorized, return empty array (session expired)
+    if (response.status === 401) {
+      console.warn('Authentication required - session may have expired')
+      return []
     }
-  })
+
+    const data = await handleResponse<any>(response)
+    // Handle both paginated {results: [], count: X} and direct array responses
+    const faculty = Array.isArray(data) ? data : data.results || []
+
+    // Transform to FacultyAvailability format
+    return faculty.map((f: any) => {
+      // Construct full name from first_name, middle_name, last_name
+      const nameParts = [f.first_name, f.middle_name, f.last_name].filter(Boolean)
+      const fullName = nameParts.join(' ') || f.faculty_name || 'Unknown'
+      
+      return {
+        id: f.faculty_id || f.id,
+        name: fullName,
+        available: f.is_active !== false, // Assume active faculty are available
+        email: f.email,
+        department: f.department?.dept_name,
+      }
+    })
+  } catch (error) {
+    console.error('Failed to fetch faculty:', error)
+    return []
+  }
 }
 
 export async function updateFacultyAvailability(
