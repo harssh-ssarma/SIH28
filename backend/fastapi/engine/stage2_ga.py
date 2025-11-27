@@ -180,39 +180,28 @@ class GeneticAlgorithmOptimizer:
         else:
             logger.info(f"GA using single-core CPU (RAM-safe mode)")
         
-        # Build valid domains (lazy - only when needed)
-        self.valid_domains = None  # Will be built on first access
-        logger.info(f"[GA] Init complete. Valid domains will be built lazily.")
+        # On-demand domain computation (no pre-computation!)
+        logger.info(f"[GA] Init complete. Valid domains computed on-demand (zero pre-computation).")
     
-    def _build_valid_domains(self):
-        """Lazy build valid (time, room) pairs - only compute when needed"""
-        if self.valid_domains is not None:
-            return  # Already built
+    def _get_valid_domain(self, course_id: str, session: int) -> List[Tuple]:
+        """On-demand: Compute valid (time, room) pairs for a single course session"""
+        # Find course
+        course = next((c for c in self.courses if c.course_id == course_id), None)
+        if not course:
+            return []
         
-        try:
-            logger.info(f"[GA] Building valid domains for {len(self.courses)} courses...")
-            self.valid_domains = {}
-            
-            for course in self.courses:
-                for session in range(course.duration):
-                    valid_pairs = []
-                    for t_slot in self.time_slots:
-                        for room in self.rooms:
-                            if len(course.student_ids) > room.capacity:
-                                continue
-                            if hasattr(course, 'required_features') and course.required_features:
-                                if not all(feat in getattr(room, 'features', []) for feat in course.required_features):
-                                    continue
-                            valid_pairs.append((t_slot.slot_id, room.room_id))
-                    
-                    self.valid_domains[(course.course_id, session)] = valid_pairs
-            
-            logger.info(f"[GA] Valid domains built: {len(self.valid_domains)} entries")
-        except Exception as e:
-            logger.error(f"[GA] Failed to build valid domains: {e}")
-            # Fallback: empty dict to prevent None errors
-            self.valid_domains = {}
-            raise
+        # Compute valid pairs on-the-fly (no pre-computation!)
+        valid_pairs = []
+        for t_slot in self.time_slots:
+            for room in self.rooms:
+                if len(course.student_ids) > room.capacity:
+                    continue
+                if hasattr(course, 'required_features') and course.required_features:
+                    if not all(feat in getattr(room, 'features', []) for feat in course.required_features):
+                        continue
+                valid_pairs.append((t_slot.slot_id, room.room_id))
+        
+        return valid_pairs
     
     def initialize_population(self):
         """Initialize population - GPU VRAM offloading if available"""
@@ -225,9 +214,6 @@ class GeneticAlgorithmOptimizer:
         """GPU: Store entire population in VRAM (300MB RAM -> VRAM)"""
         import torch
         import psutil
-        
-        # CRITICAL: Build valid domains first
-        self._build_valid_domains()
         
         # CRITICAL: Store population as GPU tensors, NOT Python dicts
         mem_before = psutil.virtual_memory()
@@ -267,7 +253,7 @@ class GeneticAlgorithmOptimizer:
             change_indices = torch.randint(0, num_assignments, (num_changes,), device=DEVICE)
             for change_idx in change_indices:
                 key = keys_list[change_idx.item()]
-                valid_pairs = self.valid_domains.get(key, [])
+                valid_pairs = self._get_valid_domain(key[0], key[1])  # On-demand
                 if valid_pairs:
                     new_pair = random.choice(valid_pairs)
                     time_hash = hash(new_pair[0]) % 10000
@@ -318,15 +304,13 @@ class GeneticAlgorithmOptimizer:
     
     def _perturb_solution(self, solution: Dict) -> Dict:
         """Perturb solution by changing 5-10% of assignments (fast)"""
-        self._build_valid_domains()  # Lazy build
-        
         perturbed = solution.copy()  # Proper copy
         keys = list(perturbed.keys())
         num_changes = max(1, int(len(keys) * 0.08))  # 8% for speed
         
         for _ in range(num_changes):
             key = random.choice(keys)
-            valid_pairs = self.valid_domains.get(key, [])
+            valid_pairs = self._get_valid_domain(key[0], key[1])  # On-demand
             if valid_pairs:
                 perturbed[key] = random.choice(valid_pairs)
         
@@ -647,15 +631,13 @@ class GeneticAlgorithmOptimizer:
     
     def smart_mutation(self, solution: Dict) -> Dict:
         """CPU: Constraint-preserving mutation"""
-        self._build_valid_domains()  # Lazy build
-        
         mutated = solution.copy()
         
         keys_to_mutate = random.sample(list(mutated.keys()), 
                                        max(1, int(len(mutated) * self.mutation_rate)))
         
         for key in keys_to_mutate:
-            valid_pairs = self.valid_domains.get(key, [])
+            valid_pairs = self._get_valid_domain(key[0], key[1])  # On-demand
             if valid_pairs:
                 mutated[key] = random.choice(valid_pairs)
         
