@@ -647,22 +647,36 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
         }
     
     # STAGE 2B: GENETIC ALGORITHM (SOFT CONSTRAINTS)
-    # CRITICAL: GPU only if VRAM >= 8GB AND population >= 100
-    use_gpu_ga = has_gpu and gpu_vram >= 8 and total_ram >= 24
+    # CRITICAL: GPU only if VRAM >= 2GB (enough for population offloading)
+    use_gpu_ga = has_gpu and gpu_vram >= 2
     
     if tier == "potato":
+        # ULTRA-SAFE: Streaming GA with population of 5 (only 20MB × 5 = 100MB total)
         stage2b = {
-            'algorithm': 'hill_climbing',
-            'skip_ga': True,
-            'iterations': 50,
-            'neighbor_strategy': 'single_swap',
-            'use_gpu': False
+            'algorithm': 'streaming_ga',
+            'population': 5,  # Ultra-safe for <8GB RAM
+            'generations': 15,  # Fewer generations
+            'islands': 1,
+            'parallel_fitness': False,
+            'parallel_mode': 'sequential',
+            'fitness_workers': 1,
+            'fitness_evaluation': 'streaming',
+            'sample_students': 30,  # Reduced sampling
+            'fitness_cache': False,
+            'early_stopping': True,
+            'early_stop_patience': 3,
+            'use_gpu': False,  # No GPU on potato systems
+            'memory_limit_gb': memory_budget_gb,
+            'streaming_mode': True,
+            'skip_ga': False  # Don't skip, use streaming
         }
     elif tier == "laptop":
         # GOOGLE STYLE: Use calculated memory budget, not fixed caps
+        # CRITICAL: Cap population at 10 for streaming mode (1 individual in RAM at a time)
+        safe_population = 10 if not use_gpu_ga else max_population
         stage2b = {
             'algorithm': 'streaming_ga',  # Stream-based, not batch
-            'population': max_population,
+            'population': safe_population,
             'generations': max_generations,
             'islands': 1,
             'parallel_fitness': False,
@@ -673,15 +687,17 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
             'fitness_cache': False,  # No cache to save memory
             'early_stopping': True,
             'early_stop_patience': 3,
-            'use_gpu': False,
+            'use_gpu': use_gpu_ga,  # Use GPU if available
             'memory_limit_gb': memory_budget_gb,  # Pass budget to GA
             'streaming_mode': True  # Enable streaming
         }
     elif tier == "workstation":
         # LINUX STYLE: Use memory budget, enable parallel if pressure < 60%
+        # CRITICAL: Cap population at 20 for streaming mode without GPU
+        safe_population = min(max_population, 20) if not use_gpu_ga else max_population
         stage2b = {
             'algorithm': 'streaming_ga',
-            'population': max_population,
+            'population': safe_population,
             'generations': max_generations,
             'islands': 1 if memory_pressure > 60 else 2,
             'parallel_mode': 'sequential' if memory_pressure > 60 else 'thread',
