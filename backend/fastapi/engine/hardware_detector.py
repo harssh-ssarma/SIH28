@@ -598,26 +598,26 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
             'use_gpu': gpu_vram >= 8
         }
     
-    # STAGE 2A: CP-SAT (HARD CONSTRAINTS)
+    # STAGE 2A: CP-SAT (HARD CONSTRAINTS) - FIXED TIMEOUTS
     if tier == "potato":
         stage2a = {
-            'primary_solver': 'greedy',
-            'cpsat_usage': 'fallback_only',
-            'timeout': 0.5,
-            'parallel_clusters': 1,
-            'student_constraints': 'minimal',
-            'student_limit': 10,
+            'primary_solver': 'cpsat_standard',
+            'cpsat_usage': 'primary',
+            'timeout': 30,  # Increased from 0.5s
+            'parallel_clusters': max(2, cpu_cores // 2),  # At least 2 parallel
+            'student_constraints': 'ALL',  # Changed from minimal
+            'student_limit': 1000,  # Increased from 10
             'quick_feasibility': True,
             'skip_threshold': 0.3,
             'fallback': 'greedy'
         }
     elif tier == "laptop":
         stage2a = {
-            'primary_solver': 'cpsat_aggressive',
-            'timeout': 1,
+            'primary_solver': 'cpsat_standard',
+            'timeout': 60,  # Increased from 1s
             'parallel_clusters': min(4, cpu_cores - 2),
-            'student_constraints': 'hierarchical',
-            'student_limit': 50,
+            'student_constraints': 'ALL',  # Changed from hierarchical
+            'student_limit': 5000,  # Increased from 50
             'quick_feasibility': True,
             'feasibility_timeout': 0.1,
             'fallback': 'greedy',
@@ -625,11 +625,11 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
         }
     elif tier == "workstation":
         stage2a = {
-            'primary_solver': 'cpsat_standard',
-            'timeout': 2,
+            'primary_solver': 'cpsat_full',
+            'timeout': 90,  # Increased from 2s
             'parallel_clusters': min(8, cpu_cores - 4),
-            'student_constraints': 'hierarchical',
-            'student_limit': 100,
+            'student_constraints': 'ALL',  # Changed from hierarchical
+            'student_limit': 10000,  # Increased from 100
             'quick_feasibility': True,
             'cpsat_workers_per_cluster': 4,
             'progressive_timeout': True
@@ -637,10 +637,10 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
     else:  # server
         stage2a = {
             'primary_solver': 'cpsat_full',
-            'timeout': 3,
+            'timeout': 120,  # Increased from 3s
             'parallel_clusters': min(16, cpu_cores - 8),
-            'student_constraints': 'hierarchical',
-            'student_limit': 200,
+            'student_constraints': 'ALL',  # Changed from hierarchical
+            'student_limit': 20000,  # Increased from 200
             'quick_feasibility': False,
             'cpsat_workers_per_cluster': 8,
             'use_hints': True

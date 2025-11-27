@@ -10,13 +10,20 @@ from django.utils import timezone
 from django.core.cache import cache
 
 from .models import GenerationJob
+from core.rbac import (
+    CanViewTimetable,
+    CanManageTimetable,
+    CanApproveTimetable,
+    DepartmentAccessPermission,
+    has_department_access
+)
 
 logger = logging.getLogger(__name__)
 
 
 class TimetableWorkflowViewSet(viewsets.ViewSet):
     """Timetable workflow management"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanViewTimetable]
     
     def retrieve(self, request, pk=None):
         """Get workflow details by ID - FAST VERSION"""
@@ -41,9 +48,9 @@ class TimetableWorkflowViewSet(viewsets.ViewSet):
         except GenerationJob.DoesNotExist:
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
     
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, CanApproveTimetable])
     def approve(self, request, pk=None):
-        """Approve timetable workflow"""
+        """Approve timetable workflow (Registrar only)"""
         try:
             job = GenerationJob.objects.get(id=pk)
             comments = request.data.get('comments', '')
@@ -65,9 +72,9 @@ class TimetableWorkflowViewSet(viewsets.ViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
     
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, CanApproveTimetable])
     def reject(self, request, pk=None):
-        """Reject timetable workflow"""
+        """Reject timetable workflow (Registrar only)"""
         try:
             job = GenerationJob.objects.get(id=pk)
             comments = request.data.get('comments', '')
@@ -99,14 +106,21 @@ class TimetableWorkflowViewSet(viewsets.ViewSet):
 
 class TimetableVariantViewSet(viewsets.ViewSet):
     """Timetable variant management"""
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, CanViewTimetable]
     
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated, DepartmentAccessPermission])
     def department_view(self, request, pk=None):
-        """Get variant filtered by department"""
+        """Get variant filtered by department (department-level access control)"""
         from .services import DepartmentViewService
         
         department_id = request.query_params.get('department_id', 'all')
+        
+        # Check department access
+        if department_id != 'all' and not has_department_access(request.user, department_id):
+            return Response(
+                {'error': 'Access denied to this department'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         
         try:
             # Get variant data
@@ -161,27 +175,20 @@ class TimetableVariantViewSet(viewsets.ViewSet):
         """FAST conversion - minimal processing"""
         day_map = {'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6}
         
-        # Skip UUID resolution - use existing names from FastAPI
-        seen = set()
+        # Convert all entries without deduplication
         result = []
-        
         for e in entries:
             day = day_map.get(e.get('day', 'Monday'), 0)
-            slot = e.get('time_slot', '')
-            room = e.get('room_number', '')
-            
-            key = (day, slot, room)
-            if key not in seen:
-                seen.add(key)
-                result.append({
-                    'day': day,
-                    'time_slot': slot,
-                    'subject_code': e.get('subject_code', ''),
-                    'subject_name': e.get('subject_name', ''),
-                    'faculty_name': e.get('faculty_name', ''),
-                    'room_number': room,
-                    'department_id': e.get('department_id', '')
-                })
+            result.append({
+                'day': day,
+                'time_slot': e.get('time_slot', ''),
+                'subject_code': e.get('subject_code', ''),
+                'subject_name': e.get('subject_name', ''),
+                'faculty_name': e.get('faculty_name', ''),
+                'room_number': e.get('room_number', ''),
+                'batch_name': e.get('batch_name', ''),
+                'department_id': e.get('department_id', '')
+            })
         
         return result
     

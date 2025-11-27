@@ -22,20 +22,20 @@ class AdaptiveCPSATSolver:
     
     STRATEGIES = [
         {
+            "name": "Full Solve",
+            "student_priority": "ALL",
+            "faculty_conflicts": True,
+            "room_capacity": True,
+            "timeout": 60,  # Increased from 2s to 60s
+            "max_constraints": 50000  # Increased from 3000
+        },
+        {
             "name": "Quick Solve",
             "student_priority": "CRITICAL",
             "faculty_conflicts": True,
             "room_capacity": True,
-            "timeout": 2,  # Ultra-fast: 2s (was 5s)
-            "max_constraints": 3000  # Limit constraints
-        },
-        {
-            "name": "Minimal",
-            "student_priority": None,
-            "faculty_conflicts": True,
-            "room_capacity": True,
-            "timeout": 1,  # Emergency: 1s only
-            "max_constraints": 1000
+            "timeout": 30,  # Increased from 1s to 30s
+            "max_constraints": 10000  # Increased from 1000
         }
     ]
     
@@ -45,7 +45,7 @@ class AdaptiveCPSATSolver:
         rooms: List[Room],
         time_slots: List[TimeSlot],
         faculty: Dict[str, Faculty],
-        max_cluster_size: int = 12,
+        max_cluster_size: int = 50,  # Increased from 12 to 50
         job_id: str = None,
         redis_client = None
     ):
@@ -492,18 +492,18 @@ class AdaptiveCPSATSolver:
     
     def _add_hierarchical_student_constraints(self, model, variables, cluster, priority: str):
         """
-        Hierarchical student constraint encoding
-        Reduces constraints by 90% while maintaining correctness
+        Student constraint encoding - ALL students get constraints
         """
         # Group students by conflict severity
         student_groups = self._group_students_by_conflicts(cluster)
         
         constraint_count = 0
-        max_constraints = 5000  # Enterprise limit
+        max_constraints = 50000  # Increased from 5000
         
-        if priority == "CRITICAL":
-            # Full constraints for critical students (5+ courses)
-            for student_id in student_groups["CRITICAL"]:
+        if priority == "ALL":
+            # Full constraints for ALL students
+            all_students = student_groups["CRITICAL"] + student_groups["HIGH"] + student_groups["LOW"]
+            for student_id in all_students:
                 if constraint_count >= max_constraints:
                     break
                 courses_list = [c for c in cluster if student_id in c.student_ids]
@@ -519,9 +519,9 @@ class AdaptiveCPSATSolver:
                         model.Add(sum(student_vars) <= 1)
                         constraint_count += 1
         
-        elif priority == "HIGH":
-            # Pairwise constraints for high priority (3-4 courses)
-            for student_id in student_groups["HIGH"]:
+        elif priority == "CRITICAL":
+            # Full constraints for critical students (5+ courses)
+            for student_id in student_groups["CRITICAL"]:
                 if constraint_count >= max_constraints:
                     break
                 courses_list = [c for c in cluster if student_id in c.student_ids]

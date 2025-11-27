@@ -637,7 +637,7 @@ class TimetableGenerationSaga:
                 rooms=rooms,
                 time_slots=time_slots,
                 faculty=faculty,
-                max_cluster_size=12
+                max_cluster_size=50  # Increased from 12
             )
             
             # Try CP-SAT with adaptive timeout
