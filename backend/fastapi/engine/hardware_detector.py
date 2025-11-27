@@ -676,8 +676,8 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
         if use_gpu_ga:
             stage2b = {
                 'algorithm': 'gpu_ga',
-                'population': max_population,  # Full population in VRAM
-                'generations': max_generations,
+                'population': 10,  # Reduced for speed
+                'generations': 5,  # Faster completion
                 'islands': 1,
                 'parallel_fitness': False,
                 'parallel_mode': 'sequential',
@@ -714,9 +714,9 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
         if use_gpu_ga:
             stage2b = {
                 'algorithm': 'gpu_ga',
-                'population': max_population,
-                'generations': max_generations,
-                'islands': 1 if memory_pressure > 60 else 2,
+                'population': 10,  # Reduced for speed
+                'generations': 5,  # Faster completion
+                'islands': 1,
                 'parallel_mode': 'sequential' if memory_pressure > 60 else 'thread',
                 'island_workers': 1,
                 'migration_frequency': 5,
