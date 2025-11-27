@@ -180,11 +180,16 @@ class GeneticAlgorithmOptimizer:
         else:
             logger.info(f"GA using single-core CPU (RAM-safe mode)")
         
-        # Build valid domains
-        self._build_valid_domains()
+        # Build valid domains (lazy - only when needed)
+        self.valid_domains = None  # Will be built on first access
+        logger.info(f"[GA] Init complete. Valid domains will be built lazily.")
     
     def _build_valid_domains(self):
-        """Pre-compute valid (time, room) pairs"""
+        """Lazy build valid (time, room) pairs - only compute when needed"""
+        if self.valid_domains is not None:
+            return  # Already built
+        
+        logger.info(f"[GA] Building valid domains for {len(self.courses)} courses...")
         self.valid_domains = {}
         
         for course in self.courses:
@@ -200,6 +205,8 @@ class GeneticAlgorithmOptimizer:
                         valid_pairs.append((t_slot.slot_id, room.room_id))
                 
                 self.valid_domains[(course.course_id, session)] = valid_pairs
+        
+        logger.info(f"[GA] Valid domains built: {len(self.valid_domains)} entries")
     
     def initialize_population(self):
         """Initialize population - GPU VRAM offloading if available"""
@@ -302,6 +309,8 @@ class GeneticAlgorithmOptimizer:
     
     def _perturb_solution(self, solution: Dict) -> Dict:
         """Perturb solution by changing 5-10% of assignments (fast)"""
+        self._build_valid_domains()  # Lazy build
+        
         perturbed = solution.copy()  # Proper copy
         keys = list(perturbed.keys())
         num_changes = max(1, int(len(keys) * 0.08))  # 8% for speed
@@ -629,6 +638,8 @@ class GeneticAlgorithmOptimizer:
     
     def smart_mutation(self, solution: Dict) -> Dict:
         """CPU: Constraint-preserving mutation"""
+        self._build_valid_domains()  # Lazy build
+        
         mutated = solution.copy()
         
         keys_to_mutate = random.sample(list(mutated.keys()), 
