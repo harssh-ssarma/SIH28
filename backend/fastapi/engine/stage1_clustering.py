@@ -19,6 +19,7 @@ class LouvainClusterer:
     
     def __init__(self, target_cluster_size: int = 10, edge_threshold: float = None):
         self.target_cluster_size = target_cluster_size
+        self.progress_tracker = None  # Set externally for progress updates
         # Adaptive edge threshold based on RAM
         if edge_threshold is None:
             import psutil
@@ -41,13 +42,16 @@ class LouvainClusterer:
         Cluster courses using Louvain community detection
         Returns: Dictionary mapping cluster_id -> list of courses
         """
-        # Build constraint graph
+        # Build constraint graph (with progress update)
+        logger.info(f"[STAGE1] Building constraint graph for {len(courses)} courses...")
         G = self._build_constraint_graph(courses)
         
-        # Run Louvain clustering
+        # Run Louvain clustering (with progress update)
+        logger.info(f"[STAGE1] Running Louvain community detection...")
         partition = self._run_louvain(G)
         
-        # Optimize cluster sizes
+        # Optimize cluster sizes (with progress update)
+        logger.info(f"[STAGE1] Optimizing cluster sizes...")
         final_clusters = self._optimize_cluster_sizes(partition, courses)
         
         logger.info(f"[STAGE1] Louvain clustering: {len(final_clusters)} clusters from {len(courses)} courses")

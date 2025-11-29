@@ -676,8 +676,8 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
         if use_gpu_ga:
             stage2b = {
                 'algorithm': 'gpu_ga',
-                'population': 10,  # Reduced for speed
-                'generations': 5,  # Faster completion
+                'population': 5,  # Further reduced for memory
+                'generations': 3,  # Faster completion
                 'islands': 1,
                 'parallel_fitness': False,
                 'parallel_mode': 'sequential',

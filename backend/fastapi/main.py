@@ -241,13 +241,13 @@ class TimetableGenerationSaga:
                 
                 logger.info(f"[SAGA] Job {job_id}: Executing {step_name}")
                 
-                # Adaptive timeout per stage
+                # Adaptive timeout per stage - INCREASED TO 15 MINUTES
                 if step_name == 'stage2_ga_optimization':
                     step_timeout = 900  # 15 minutes for GA (includes initialization)
                 elif step_name == 'stage2_cpsat_solving':
-                    step_timeout = 600  # 10 minutes for CP-SAT
+                    step_timeout = 900  # 15 minutes for CP-SAT
                 else:
-                    step_timeout = 600  # 10 minutes for data loading
+                    step_timeout = 900  # 15 minutes for data loading
                 
                 # Execute step with adaptive timeout
                 result = await asyncio.wait_for(
@@ -408,7 +408,9 @@ class TimetableGenerationSaga:
         
         self.progress_tracker.set_stage('clustering')
         
+        # Pass progress tracker to clusterer for real-time updates
         clusterer = LouvainClusterer(target_cluster_size=10)
+        clusterer.progress_tracker = self.progress_tracker
         clusters = await asyncio.to_thread(clusterer.cluster_courses, courses)
         
         # Check cancellation after clustering
@@ -503,11 +505,13 @@ class TimetableGenerationSaga:
                     
                     completed += 1
                     self.progress_tracker.update_work_progress(completed)
+                    logger.info(f"[CP-SAT] Cluster {completed}/{total_clusters} completed")
                     gc.collect()
                 except Exception as e:
                     logger.error(f"Cluster {cluster_id} failed: {e}")
                     completed += 1
                     self.progress_tracker.update_work_progress(completed)
+                    logger.info(f"[CP-SAT] Cluster {completed}/{total_clusters} failed")
                     gc.collect()
         else:
             # Parallel with ThreadPoolExecutor (shares memory, no pickle issues)
@@ -542,10 +546,12 @@ class TimetableGenerationSaga:
                             all_solutions.update(solution)
                         completed += 1
                         self.progress_tracker.update_work_progress(completed)
+                        logger.info(f"[CP-SAT] Cluster {completed}/{total_clusters} completed")
                     except Exception as e:
                         logger.error(f"Cluster {cluster_id} failed: {e}")
                         completed += 1
                         self.progress_tracker.update_work_progress(completed)
+                        logger.info(f"[CP-SAT] Cluster {completed}/{total_clusters} failed")
                 
                 gc.collect()
         
@@ -1308,12 +1314,9 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
         # Force cleanup before starting
         gc.collect()
         
-        # Execute saga with timeout
+        # Execute saga WITHOUT automatic timeout (removed 10-minute limit)
         saga = TimetableGenerationSaga()
-        results = await asyncio.wait_for(
-            saga.execute(job_id, request.dict()),
-            timeout=600  # 10 minutes total timeout
-        )
+        results = await saga.execute(job_id, request.dict())
     
     except asyncio.CancelledError:
         logger.warning(f"[ENTERPRISE] Job {job_id} was cancelled")

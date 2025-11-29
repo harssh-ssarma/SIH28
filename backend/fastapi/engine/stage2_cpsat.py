@@ -60,7 +60,7 @@ class AdaptiveCPSATSolver:
         # Auto-detect CPU cores for parallel solving
         import multiprocessing
         self.num_workers = min(8, multiprocessing.cpu_count())
-        logger.info(f"[GPU] CP-SAT using {self.num_workers} CPU cores for parallel solving")
+        logger.info(f"[CP-SAT] Using {self.num_workers} CPU cores for parallel solving")
         
     def solve_cluster(self, cluster: List[Course], timeout: float = None) -> Optional[Dict]:
         """

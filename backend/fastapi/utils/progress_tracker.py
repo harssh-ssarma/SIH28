@@ -31,16 +31,16 @@ class EnterpriseProgressTracker:
         self._progress_lock = asyncio.Lock()  # Thread-safe progress updates
         
         # Stage configuration with CORRECT weights based on actual execution times
-        # Total time: ~15 minutes = 900s
-        # load=2s, cluster=3s, cpsat=10s, ga=850s, rl=30s, final=5s
-        # Weights: load=0.2%, cluster=0.3%, cpsat=1.1%, ga=94.4%, rl=3.3%, final=0.6%
+        # Total time: ~15 minutes = 900s (INCREASED FROM 10 MINUTES)
+        # load=2s, cluster=5s, cpsat=60s, ga=750s, rl=75s, final=8s
+        # Weights adjusted for 15-minute timeout
         self.stage_config = {
             'load_data': {'weight': 2, 'expected_time': 2},      # 0% → 2%
-            'clustering': {'weight': 3, 'expected_time': 3},     # 2% → 5%
-            'cpsat': {'weight': 10, 'expected_time': 10},        # 5% → 15%
-            'ga': {'weight': 75, 'expected_time': 850},          # 15% → 90%
-            'rl': {'weight': 7, 'expected_time': 30},            # 90% → 97%
-            'finalize': {'weight': 3, 'expected_time': 5}        # 97% → 100%
+            'clustering': {'weight': 3, 'expected_time': 5},     # 2% → 5%
+            'cpsat': {'weight': 10, 'expected_time': 60},        # 5% → 15%
+            'ga': {'weight': 70, 'expected_time': 750},          # 15% → 85%
+            'rl': {'weight': 10, 'expected_time': 75},           # 85% → 95%
+            'finalize': {'weight': 5, 'expected_time': 8}        # 95% → 100%
         }
         
         # Current stage tracking
