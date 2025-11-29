@@ -427,9 +427,9 @@ LOGGING = {
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    # Token Lifetimes - SHORT expiry for security (Industry best practice)
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),  # 15 min (was 60)
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),     # 7 days with rotation
+    # Token Lifetimes - Extended for better UX (Enterprise: balance security & convenience)
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),     # 1 hour (auto-refresh in background)
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),    # 30 days (like Google/Microsoft)
     
     # Token Rotation & Blacklisting (CRITICAL for security)
     "ROTATE_REFRESH_TOKENS": False,              # Disabled due to UUID user_id
@@ -464,11 +464,13 @@ SIMPLE_JWT = {
 # INDUSTRY-LEVEL SECURITY SETTINGS
 # =============================
 
-# Session Security
+# Session Security (Enterprise: Long-lived sessions like Google/Microsoft)
 SESSION_COOKIE_SECURE = not DEBUG  # Use secure cookies in production (HTTPS only)
 SESSION_COOKIE_HTTPONLY = True  # Prevent JavaScript access to session cookies
 SESSION_COOKIE_SAMESITE = "Lax"  # CSRF protection
-SESSION_COOKIE_AGE = 86400  # 24 hours
+SESSION_COOKIE_AGE = 1209600  # 14 days (enterprise standard)
+SESSION_SAVE_EVERY_REQUEST = True  # Extend session on every request (keep-alive)
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False  # Persist across browser restarts
 
 # CSRF Protection
 # Note: Auth endpoints (login, logout, refresh) are CSRF-exempt because

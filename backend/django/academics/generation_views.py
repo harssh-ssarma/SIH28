@@ -133,21 +133,25 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
                 }
             )
 
-            # Push job to FastAPI for processing with priority
-            self._queue_generation_job(job, org_id, priority)
-
-            # Return job details
+            # Return IMMEDIATELY to frontend (don't wait for Celery/FastAPI)
             job_serializer = GenerationJobSerializer(job)
-            return Response(
-                {
-                    "success": True,
-                    "message": "Timetable generation started for all 127 departments",
-                    "job_id": str(job.id),
-                    "estimated_time": "8-11 minutes",
-                    "job": job_serializer.data,
-                },
-                status=status.HTTP_201_CREATED,
-            )
+            response_data = {
+                "success": True,
+                "message": "Timetable generation started for all 127 departments",
+                "job_id": str(job.id),
+                "estimated_time": "8-11 minutes",
+                "job": job_serializer.data,
+            }
+            
+            # Queue job AFTER returning response (async)
+            import threading
+            threading.Thread(
+                target=self._queue_generation_job,
+                args=(job, org_id, priority),
+                daemon=True
+            ).start()
+            
+            return Response(response_data, status=status.HTTP_201_CREATED)
 
         except Exception as e:
             logger.error(f"Error creating generation job: {str(e)}")
@@ -480,14 +484,28 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
                 logger.warning(f"Celery not available: {celery_error}. Using direct FastAPI call.")
                 try:
                     fastapi_url = os.getenv("FASTAPI_AI_SERVICE_URL", "http://localhost:8001")
-                    requests.post(
-                        f"{fastapi_url}/api/v1/optimize",
-                        json=job_data,
-                        timeout=10,
+                    
+                    # Call FastAPI with correct endpoint and NO timeout (returns immediately)
+                    response = requests.post(
+                        f"{fastapi_url}/api/generate_variants",
+                        json={
+                            "job_id": str(job.id),
+                            "organization_id": university_id,
+                            "semester": 1 if job.timetable_data.get('semester') == 'odd' else 2,
+                            "academic_year": job.timetable_data.get('academic_year'),
+                            "quality_mode": "balanced"
+                        },
+                        timeout=5  # Short timeout since FastAPI returns immediately
                     )
-                    logger.info(f"Triggered FastAPI generation for job {job.id} (direct)")
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        logger.info(f"FastAPI queued job {job.id}: {result.get('message')}")
+                    else:
+                        logger.error(f"FastAPI returned error: {response.status_code} - {response.text}")
+                        
                 except Exception as api_error:
-                    logger.error(f"FastAPI also unavailable: {api_error}")
+                    logger.error(f"FastAPI call failed: {api_error}")
                     # Keep job as pending - worker will pick it up later
                     logger.info(f"Job {job.id} queued in Redis, waiting for worker")
                 

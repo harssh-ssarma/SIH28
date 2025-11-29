@@ -128,25 +128,41 @@ class LouvainClusterer:
         return edges
     
     def _compute_constraint_weight(self, course_i: Course, course_j: Course) -> float:
-        """Compute weighted edge between courses with early termination"""
+        """CORRECTED: Student overlap based on SMALLER class (prevents splitting conflicting pairs)"""
         weight = 0.0
         
-        # Faculty sharing (high weight) - EARLY RETURN for strong edges
-        if getattr(course_i, 'faculty_id', None) == getattr(course_j, 'faculty_id', None):
-            return 10.0  # Early termination on strong edge
-        
-        # Student overlap (NEP 2020 critical)
+        # CRITICAL FIX: Use overlap relative to SMALLER class (most affected)
         students_i = set(getattr(course_i, 'student_ids', []))
         students_j = set(getattr(course_j, 'student_ids', []))
-        if students_i and students_j:
-            overlap = len(students_i & students_j) / max(len(students_i), len(students_j))
-            weight += 10.0 * overlap
         
-        # Department affinity
+        if students_i and students_j:
+            shared = len(students_i & students_j)
+            
+            if shared > 0:
+                # Use smaller class size as denominator (most impacted class)
+                min_size = min(len(students_i), len(students_j))
+                student_overlap_ratio = shared / min_size  # 0.0 to 1.0
+                
+                # AGGRESSIVE: 100x base weight + bonus for large overlaps
+                weight += 100.0 * student_overlap_ratio
+                
+                # BONUS: If >10 students share courses, add extra weight
+                if shared >= 10:
+                    weight += 50.0
+                
+                # BONUS: If >50% of smaller class overlaps, MUST cluster together
+                if student_overlap_ratio > 0.5:
+                    weight += 100.0
+        
+        # Faculty sharing (secondary)
+        if getattr(course_i, 'faculty_id', None) == getattr(course_j, 'faculty_id', None):
+            weight += 10.0
+        
+        # Department affinity (tertiary)
         if getattr(course_i, 'department_id', None) == getattr(course_j, 'department_id', None):
             weight += 5.0
         
-        # Room competition (same required features)
+        # Room competition (lowest)
         features_i = set(getattr(course_i, 'required_features', []))
         features_j = set(getattr(course_j, 'required_features', []))
         if features_i and features_j and features_i & features_j:

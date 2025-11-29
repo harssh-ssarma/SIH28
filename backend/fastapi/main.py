@@ -558,11 +558,85 @@ class TimetableGenerationSaga:
                             all_solutions.update(solution)
                         completed += 1
                         self.progress_tracker.update_work_progress(completed)
+                        
+                        # CRITICAL: Update tracker's last_progress to prevent GA from jumping backward
+                        progress_pct = int(5 + (completed / total_clusters * 55))  # CP-SAT is 5-60%
+                        self.progress_tracker.last_progress = float(progress_pct)
+                        
+                        # Force immediate Redis publish for smooth progress WITH ETA
+                        if redis_client_global:
+                            progress_msg = f"CP-SAT: Cluster {completed}/{total_clusters} ({progress_pct}%)"
+                            
+                            # Calculate ETA based on cluster completion rate
+                            start_time_str = redis_client_global.get(f"start_time:job:{job_id}")
+                            time_remaining_seconds = None
+                            eta = None
+                            if start_time_str and completed > 0:
+                                start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
+                                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                                avg_time_per_cluster = elapsed / completed
+                                remaining_clusters = total_clusters - completed
+                                time_remaining_seconds = int(avg_time_per_cluster * remaining_clusters * 1.2)
+                                eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
+                            
+                            progress_data = {
+                                'job_id': job_id,
+                                'progress': progress_pct,
+                                'status': 'running',
+                                'stage': 'cpsat',
+                                'message': progress_msg,
+                                'items_done': completed,
+                                'items_total': total_clusters,
+                                'time_remaining_seconds': time_remaining_seconds or 0,
+                                'eta_seconds': time_remaining_seconds or 0,
+                                'eta': eta,
+                                'timestamp': datetime.now(timezone.utc).isoformat()
+                            }
+                            redis_client_global.setex(f"progress:job:{job_id}", 3600, json.dumps(progress_data))
+                            redis_client_global.publish(f"progress:{job_id}", json.dumps(progress_data))
+                        
                         logger.info(f"[CP-SAT] Parallel: Cluster {completed}/{total_clusters} completed ({completed/total_clusters*100:.1f}%)")
                     except Exception as e:
                         logger.error(f"Cluster {cluster_id} failed: {e}")
                         completed += 1
                         self.progress_tracker.update_work_progress(completed)
+                        
+                        # CRITICAL: Update tracker's last_progress even on failure
+                        progress_pct = int(5 + (completed / total_clusters * 55))
+                        self.progress_tracker.last_progress = float(progress_pct)
+                        
+                        # Force immediate Redis publish even on failure WITH ETA
+                        if redis_client_global:
+                            progress_msg = f"CP-SAT: Cluster {completed}/{total_clusters} ({progress_pct}%)"
+                            
+                            # Calculate ETA based on cluster completion rate
+                            start_time_str = redis_client_global.get(f"start_time:job:{job_id}")
+                            time_remaining_seconds = None
+                            eta = None
+                            if start_time_str and completed > 0:
+                                start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
+                                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                                avg_time_per_cluster = elapsed / completed
+                                remaining_clusters = total_clusters - completed
+                                time_remaining_seconds = int(avg_time_per_cluster * remaining_clusters * 1.2)
+                                eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
+                            
+                            progress_data = {
+                                'job_id': job_id,
+                                'progress': progress_pct,
+                                'status': 'running',
+                                'stage': 'cpsat',
+                                'message': progress_msg,
+                                'items_done': completed,
+                                'items_total': total_clusters,
+                                'time_remaining_seconds': time_remaining_seconds or 0,
+                                'eta_seconds': time_remaining_seconds or 0,
+                                'eta': eta,
+                                'timestamp': datetime.now(timezone.utc).isoformat()
+                            }
+                            redis_client_global.setex(f"progress:job:{job_id}", 3600, json.dumps(progress_data))
+                            redis_client_global.publish(f"progress:{job_id}", json.dumps(progress_data))
+                        
                         logger.info(f"[CP-SAT] Parallel: Cluster {completed}/{total_clusters} failed ({completed/total_clusters*100:.1f}%)")
                 
                 gc.collect()
@@ -977,8 +1051,9 @@ class TimetableGenerationSaga:
             
             logger.info(f"[STAGE3] Config: algorithm={algorithm}, iterations={max_iter}, conflicts={len(conflicts)}")
             
-            # RL training with direct call (FIXED: use resolve_conflicts method)
-            resolved_schedule = await asyncio.to_thread(resolver.resolve_conflicts, schedule, job_id)
+            # CORRECTED: Pass clusters for global re-optimization
+            clusters = data.get('stage1_louvain_clustering', {})
+            resolved_schedule = await asyncio.to_thread(resolver.resolve_conflicts, schedule, job_id, clusters)
             
             # Verify resolution
             remaining_conflicts = self._detect_conflicts(resolved_schedule, load_data)
@@ -986,7 +1061,7 @@ class TimetableGenerationSaga:
             # Mark stage as complete
             self.progress_tracker.mark_stage_complete()
             
-            logger.info(f"[STAGE3] RL complete: {len(conflicts)} → {len(remaining_conflicts)} conflicts")
+            logger.info(f"[STAGE3] RL complete: {len(conflicts)} -> {len(remaining_conflicts)} conflicts")
             
             # Aggressive cleanup after RL
             cleanup_stats = aggressive_cleanup()

@@ -147,6 +147,11 @@ class GeneticAlgorithmOptimizer:
             if self.use_sample_fitness:
                 self.sample_size = hardware_config.get('sample_students', 50)
             logger.info(f"Hardware config applied: use_gpu={self.use_gpu}, pop={self.population_size}, gen={self.generations}, sample_fitness={self.use_sample_fitness}")
+        else:
+            # Fallback: auto-detect
+            self.use_gpu = TORCH_AVAILABLE and DEVICE is not None
+            self.gpu_offload_conflicts = self.use_gpu and gpu_offload_conflicts
+            logger.warning("No hardware config provided, using auto-detection")
         
         # Log fitness mode based on initial solution size
         if initial_solution:
@@ -157,11 +162,6 @@ class GeneticAlgorithmOptimizer:
                 logger.info(f"[GA] Using FAST fitness mode ({sol_size} assignments > 1500): 5 metrics, no feasibility")
             else:
                 logger.info(f"[GA] Using FULL fitness mode ({sol_size} assignments): 7 metrics with feasibility")
-        else:
-            # Fallback: auto-detect
-            self.use_gpu = TORCH_AVAILABLE and DEVICE is not None
-            self.gpu_offload_conflicts = self.use_gpu and gpu_offload_conflicts
-            logger.warning("No hardware config provided, using auto-detection")
         
         # GPU VRAM check before initialization
         if self.use_gpu:
@@ -1000,13 +1000,54 @@ class GeneticAlgorithmOptimizer:
             logger.debug(f"Failed to update GA progress: {e}")
     
     def _update_ga_progress_batch(self, current_gen: int, total_gen: int, fitness: float):
-        """Update progress using unified tracker - called every generation"""
+        """Update progress using unified tracker + direct Redis (smooth like CP-SAT)"""
         try:
             if not self.progress_tracker:
                 return
             
             # Update work progress (generations completed)
             self.progress_tracker.update_work_progress(current_gen)
+            
+            # ENTERPRISE: Direct Redis update like CP-SAT (smooth progress, no jumps)
+            import redis
+            import os
+            import json
+            from datetime import datetime, timezone, timedelta
+            
+            redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/1")
+            r = redis.from_url(redis_url, decode_responses=True)
+            
+            # GA is 15-85% (70% weight)
+            progress_pct = int(15 + (current_gen / total_gen * 70))
+            self.progress_tracker.last_progress = float(progress_pct)
+            
+            # Calculate ETA based on generation completion rate
+            start_time_str = r.get(f"start_time:job:{self.job_id}")
+            time_remaining_seconds = None
+            eta = None
+            if start_time_str and current_gen > 0:
+                start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
+                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                avg_time_per_gen = elapsed / (progress_pct / 100)  # Time per 1% progress
+                remaining_percent = 100 - progress_pct
+                time_remaining_seconds = int(avg_time_per_gen * remaining_percent)
+                eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
+            
+            progress_data = {
+                'job_id': self.job_id,
+                'progress': progress_pct,
+                'status': 'running',
+                'stage': 'ga',
+                'message': f"GA: Gen {current_gen}/{total_gen} ({progress_pct}%)",
+                'items_done': current_gen,
+                'items_total': total_gen,
+                'time_remaining_seconds': time_remaining_seconds or 0,
+                'eta_seconds': time_remaining_seconds or 0,
+                'eta': eta,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            r.setex(f"progress:job:{self.job_id}", 3600, json.dumps(progress_data))
+            r.publish(f"progress:{self.job_id}", json.dumps(progress_data))
         except Exception as e:
             # Silent fail - don't block GA
             pass

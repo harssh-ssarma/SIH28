@@ -599,10 +599,10 @@ class RLConflictResolver:
             self.rl_agent.expected_quality += 0.03  # +3% from co-enrollment
             logger.info(f"[OK] Co-enrollment computed: +3% quality boost (total: {self.rl_agent.expected_quality*100:.0f}%)")
     
-    def resolve_conflicts(self, schedule: Dict, job_id: str = None) -> Dict:
-        """Resolve conflicts in schedule using RL with Transfer Learning"""
+    def resolve_conflicts(self, schedule: Dict, job_id: str = None, clusters: Dict = None) -> Dict:
+        """CORRECTED: Use global repair as PRIMARY strategy (not fallback)"""
         self.job_id = job_id
-        logger.info(f"Starting RL conflict resolution with {len(schedule)} assignments")
+        logger.info(f"Starting GLOBAL conflict resolution with {len(schedule)} assignments")
         
         # Prepare timetable data
         timetable_data = {
@@ -620,26 +620,44 @@ class RLConflictResolver:
             logger.info("[OK] No conflicts detected")
             return schedule
         
-        logger.info(f"[WARN] Detected {len(conflicts)} conflicts, resolving...")
+        logger.info(f"[WARN] Detected {len(conflicts)} conflicts")
         
-        # ALWAYS use enhanced RL (no DQN - it's not resolving conflicts properly)
-        resolved = resolve_conflicts_with_enhanced_rl(
-            conflicts, 
-            timetable_data, 
-            self.rl_agent, 
-            self.progress_tracker,
-            job_id=job_id,
-            redis_client=redis_client_global
-        )
+        # Import redis_client
+        from main import redis_client_global
+        
+        # ALWAYS use global re-optimization (NOT RL!)
+        if clusters:
+            logger.info("[GLOBAL] Using super-clustering for conflict resolution")
+            resolved_schedule = resolve_conflicts_globally(
+                conflicts,
+                clusters,
+                timetable_data,
+                self.progress_tracker,
+                job_id=job_id,
+                redis_client=redis_client_global
+            )
+        else:
+            # Fallback: If no clusters provided (shouldn't happen)
+            logger.error("[ERROR] No clusters provided! Cannot use global repair")
+            logger.warning("[FALLBACK] Using enhanced RL (will be slow and less effective)")
+            resolved = resolve_conflicts_with_enhanced_rl(
+                conflicts, 
+                timetable_data, 
+                self.rl_agent, 
+                self.progress_tracker,
+                job_id=job_id,
+                redis_client=redis_client_global
+            )
+            resolved_schedule = timetable_data['current_solution']
         
         # Verify resolution
-        remaining_conflicts = self._detect_conflicts(timetable_data['current_solution'])
-        logger.info(f"[OK] RL resolved {len(conflicts) - len(remaining_conflicts)}/{len(conflicts)} conflicts")
+        remaining_conflicts = self._detect_conflicts(resolved_schedule)
+        logger.info(f"[OK] Resolved {len(conflicts) - len(remaining_conflicts)}/{len(conflicts)} conflicts")
         
         if remaining_conflicts:
-            logger.warning(f"[WARN] {len(remaining_conflicts)} conflicts remain unresolved")
+            logger.warning(f"[WARN] {len(remaining_conflicts)} conflicts remain")
         
-        return timetable_data['current_solution']
+        return resolved_schedule
     
     def _save_learned_knowledge(self):
         """Save learned Q-table and behavioral data for future use"""
@@ -816,14 +834,51 @@ class RLConflictResolver:
         return conflicts
 
 
-def _update_rl_progress(progress_tracker, current_episode: int, total_episodes: int, resolved: int, total_conflicts: int):
-    """Update RL progress using work-based tracking (sync method)"""
+def _update_rl_progress(progress_tracker, current_episode: int, total_episodes: int, resolved: int, total_conflicts: int, job_id: str = None, redis_client=None):
+    """Update RL progress with direct Redis updates (smooth like CP-SAT/GA)"""
     try:
         if not progress_tracker:
             return
         
         # Use work-based progress (sync method, no async calls)
         progress_tracker.update_work_progress(current_episode)
+        
+        # ENTERPRISE: Direct Redis update like CP-SAT/GA (smooth progress, no jumps)
+        if redis_client and job_id:
+            import json
+            from datetime import datetime, timezone, timedelta
+            
+            # RL is 85-95% (10% weight)
+            progress_pct = int(85 + (current_episode / total_episodes * 10))
+            progress_tracker.last_progress = float(progress_pct)
+            
+            # Calculate ETA based on episode completion rate
+            start_time_str = redis_client.get(f"start_time:job:{job_id}")
+            time_remaining_seconds = None
+            eta = None
+            if start_time_str and current_episode > 0:
+                start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
+                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                avg_time_per_episode = elapsed / (progress_pct / 100)
+                remaining_percent = 100 - progress_pct
+                time_remaining_seconds = int(avg_time_per_episode * remaining_percent)
+                eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
+            
+            progress_data = {
+                'job_id': job_id,
+                'progress': progress_pct,
+                'status': 'running',
+                'stage': 'rl',
+                'message': f"RL: Episode {current_episode}/{total_episodes} ({progress_pct}%)",
+                'items_done': current_episode,
+                'items_total': total_episodes,
+                'time_remaining_seconds': time_remaining_seconds or 0,
+                'eta_seconds': time_remaining_seconds or 0,
+                'eta': eta,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            redis_client.setex(f"progress:job:{job_id}", 3600, json.dumps(progress_data))
+            redis_client.publish(f"progress:{job_id}", json.dumps(progress_data))
         
         # Log EVERY batch for smooth progress (not just every 10)
         logger.info(f'[RL] Episode {current_episode}/{total_episodes}: {resolved}/{total_conflicts} conflicts resolved ({current_episode/total_episodes*100:.1f}%)')
@@ -865,8 +920,8 @@ def resolve_conflicts_with_enhanced_rl(conflicts, timetable_data, rl_agent=None,
             if redis_client and job_id:
                 cancel_flag = redis_client.get(f"cancel:job:{job_id}")
                 return cancel_flag is not None and cancel_flag
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Cancellation check failed: {e}")
         return False
     
     for episode in range(0, max_episodes, batch_size):
@@ -923,7 +978,7 @@ def resolve_conflicts_with_enhanced_rl(conflicts, timetable_data, rl_agent=None,
         
         # Progress update EVERY batch for smooth progress
         if progress_tracker:
-            _update_rl_progress(progress_tracker, episode, max_episodes, rl_agent.conflicts_resolved, initial_conflicts)
+            _update_rl_progress(progress_tracker, episode, max_episodes, rl_agent.conflicts_resolved, initial_conflicts, job_id, redis_client)
         
         # Periodic cleanup
         if episode % batch_size == 0:
@@ -970,3 +1025,279 @@ def _process_single_conflict_safe(conflict, timetable_data, rl_agent):
     except Exception as e:
         logger.debug(f"Single conflict processing failed: {e}")
         return None
+
+
+def resolve_conflicts_globally(conflicts: List[Dict], clusters: Dict, timetable_data: Dict,
+                              progress_tracker=None, job_id: str = None, redis_client=None) -> Dict:
+    """HYBRID: Global repair (super-clustering) + Bundle-Action RL for remaining conflicts"""
+    from engine.stage2_cpsat import AdaptiveCPSATSolver
+    
+    if not conflicts:
+        logger.info("[GLOBAL] No conflicts to resolve")
+        return timetable_data['current_solution']
+    
+    logger.info(f"[HYBRID] Starting hybrid conflict resolution for {len(conflicts)} conflicts")
+    
+    # Step 1: Build course-to-cluster mapping
+    course_to_cluster = {}
+    for cluster_id, cluster_courses in clusters.items():
+        for course in cluster_courses:
+            course_to_cluster[course.course_id] = cluster_id
+    
+    # Step 2: Identify conflict-heavy clusters
+    cluster_conflict_counts = defaultdict(int)
+    for conflict in conflicts:
+        course_id = conflict.get('course_id')
+        if course_id in course_to_cluster:
+            cluster_id = course_to_cluster[course_id]
+            cluster_conflict_counts[cluster_id] += 1
+    
+    # Step 3: Sort clusters by conflict density (top 10)
+    problem_clusters = sorted(
+        cluster_conflict_counts.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )[:10]
+    
+    logger.info(f"[GLOBAL] Identified {len(problem_clusters)} problem clusters")
+    
+    # Step 4: For each problem cluster, create super-cluster and re-solve
+    resolved_count = 0
+    for idx, (cluster_id, conflict_count) in enumerate(problem_clusters):
+        logger.info(f"[GLOBAL] Processing cluster {cluster_id} ({conflict_count} conflicts)")
+        
+        # Get cluster courses
+        cluster_courses = clusters.get(cluster_id, [])
+        if not cluster_courses:
+            continue
+        
+        # Find all students affected by conflicts in this cluster
+        affected_students = set()
+        for conflict in conflicts:
+            if course_to_cluster.get(conflict.get('course_id')) == cluster_id:
+                student_id = conflict.get('student_id')
+                if student_id:
+                    affected_students.add(student_id)
+        
+        # Find all courses these students are enrolled in (cross-cluster)
+        expanded_course_set = set(cluster_courses)
+        for student in affected_students:
+            for course in timetable_data['courses']:
+                if student in getattr(course, 'student_ids', []):
+                    expanded_course_set.add(course)
+        
+        logger.info(f"[GLOBAL] Super-cluster: {len(cluster_courses)} -> {len(expanded_course_set)} courses")
+        
+        # Step 5: Re-solve super-cluster with CP-SAT (has full student visibility)
+        try:
+            cpsat_solver = AdaptiveCPSATSolver(
+                courses=list(expanded_course_set),
+                rooms=timetable_data['rooms'],
+                time_slots=timetable_data['time_slots'],
+                faculty=timetable_data['faculty'],
+                max_cluster_size=len(expanded_course_set),
+                job_id=job_id,
+                redis_client=redis_client
+            )
+            
+            new_solution = cpsat_solver.solve_cluster(list(expanded_course_set), timeout=60)
+            
+            if new_solution and len(new_solution) > 0:
+                # Update global solution
+                for (course_id, session), (time_slot, room_id) in new_solution.items():
+                    timetable_data['current_solution'][(course_id, session)] = (time_slot, room_id)
+                
+                resolved_count += conflict_count
+                logger.info(f"[GLOBAL] Super-cluster {cluster_id} resolved {conflict_count} conflicts")
+            else:
+                logger.warning(f"[GLOBAL] Super-cluster {cluster_id} still infeasible")
+        
+        except Exception as e:
+            logger.error(f"[GLOBAL] Super-cluster {cluster_id} failed: {e}")
+        
+        # Update progress
+        if progress_tracker and redis_client and job_id:
+            _update_global_progress(progress_tracker, idx + 1, len(problem_clusters),
+                                   resolved_count, len(conflicts), job_id, redis_client)
+    
+    logger.info(f"[GLOBAL] Super-clustering resolved {resolved_count}/{len(conflicts)} conflicts")
+    
+    # Phase 2: Bundle-Action RL for remaining conflicts
+    remaining_conflicts = _detect_remaining_conflicts(timetable_data['current_solution'], timetable_data)
+    
+    if remaining_conflicts and len(remaining_conflicts) < 1000:
+        logger.info(f"[BUNDLE-RL] Starting bundle-action RL for {len(remaining_conflicts)} remaining conflicts")
+        bundle_resolved = resolve_with_bundle_actions(
+            remaining_conflicts,
+            timetable_data,
+            progress_tracker,
+            job_id,
+            redis_client
+        )
+        logger.info(f"[BUNDLE-RL] Resolved {bundle_resolved} additional conflicts")
+    
+    return timetable_data['current_solution']
+
+
+def _update_global_progress(progress_tracker, current: int, total: int, resolved: int,
+                           total_conflicts: int, job_id: str, redis_client):
+    """Update progress for global conflict resolution"""
+    try:
+        import json
+        from datetime import datetime, timezone, timedelta
+        
+        # Global repair is 85-95% (10% weight)
+        progress_pct = int(85 + (current / total * 10))
+        progress_tracker.last_progress = float(progress_pct)
+        
+        # Calculate ETA
+        start_time_str = redis_client.get(f"start_time:job:{job_id}")
+        time_remaining_seconds = None
+        eta = None
+        if start_time_str and current > 0:
+            start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
+            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+            avg_time_per_cluster = elapsed / (progress_pct / 100)
+            remaining_percent = 100 - progress_pct
+            time_remaining_seconds = int(avg_time_per_cluster * remaining_percent)
+            eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
+        
+        progress_data = {
+            'job_id': job_id,
+            'progress': progress_pct,
+            'status': 'running',
+            'stage': 'global_repair',
+            'message': f"Global Repair: Cluster {current}/{total} ({progress_pct}%)",
+            'items_done': current,
+            'items_total': total,
+            'time_remaining_seconds': time_remaining_seconds or 0,
+            'eta_seconds': time_remaining_seconds or 0,
+            'eta': eta,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        redis_client.setex(f"progress:job:{job_id}", 3600, json.dumps(progress_data))
+        redis_client.publish(f"progress:{job_id}", json.dumps(progress_data))
+        
+        logger.info(f"[GLOBAL] Cluster {current}/{total}: {resolved}/{total_conflicts} conflicts resolved")
+    except Exception as e:
+        logger.debug(f"Progress update failed: {e}")
+
+
+def _detect_remaining_conflicts(schedule: Dict, timetable_data: Dict) -> List[Dict]:
+    """Detect conflicts after global repair"""
+    conflicts = []
+    student_schedule = {}
+    
+    for (course_id, session), (time_slot, room_id) in schedule.items():
+        course = next((c for c in timetable_data['courses'] if c.course_id == course_id), None)
+        if not course:
+            continue
+        
+        for student_id in getattr(course, 'student_ids', []):
+            key = (student_id, time_slot)
+            if key in student_schedule:
+                conflicts.append({
+                    'type': 'student_conflict',
+                    'student_id': student_id,
+                    'time_slot': time_slot,
+                    'course_id': course_id,
+                    'conflicting_course': student_schedule[key]
+                })
+            else:
+                student_schedule[key] = course_id
+    
+    return conflicts
+
+
+class BundleAction:
+    """Multi-course bundle action that preserves student schedules"""
+    
+    def __init__(self, course_bundle: List, new_time_slot: int, timetable_data: Dict):
+        self.courses = course_bundle
+        self.new_slot = new_time_slot
+        self.timetable_data = timetable_data
+    
+    def is_valid(self) -> bool:
+        """Check if bundle can move together without conflicts"""
+        # Check faculty conflicts within bundle
+        faculty_ids = [c.faculty_id for c in self.courses]
+        if len(faculty_ids) != len(set(faculty_ids)):
+            return False
+        
+        # Check room availability
+        available_rooms = [r for r in self.timetable_data['rooms'] 
+                          if all(len(c.student_ids) <= r.capacity for c in self.courses)]
+        if len(available_rooms) < len(self.courses):
+            return False
+        
+        return True
+    
+    def execute(self, current_schedule: Dict) -> Optional[Dict]:
+        """Move all courses in bundle to new time slot"""
+        if not self.is_valid():
+            return None
+        
+        new_schedule = current_schedule.copy()
+        available_rooms = [r for r in self.timetable_data['rooms']]
+        
+        for idx, course in enumerate(self.courses):
+            if idx < len(available_rooms):
+                room = available_rooms[idx]
+                new_schedule[(course.course_id, 0)] = (self.new_slot, room.room_id)
+        
+        return new_schedule
+
+
+def resolve_with_bundle_actions(conflicts: List[Dict], timetable_data: Dict,
+                               progress_tracker=None, job_id: str = None, 
+                               redis_client=None) -> int:
+    """Resolve conflicts using bundle actions"""
+    import itertools
+    
+    resolved_count = 0
+    max_iterations = min(100, len(conflicts))
+    
+    for iteration in range(max_iterations):
+        if not conflicts:
+            break
+        
+        # Take first conflict
+        conflict = conflicts[0]
+        student_id = conflict['student_id']
+        
+        # Find all courses this student takes
+        student_courses = [c for c in timetable_data['courses'] 
+                          if student_id in getattr(c, 'student_ids', [])]
+        
+        if len(student_courses) < 2:
+            conflicts.pop(0)
+            continue
+        
+        # Generate bundle actions (2-3 courses)
+        best_action = None
+        for size in [2, 3]:
+            if size > len(student_courses):
+                continue
+            
+            for bundle in itertools.combinations(student_courses, size):
+                for time_slot in timetable_data['time_slots'][:10]:  # Try first 10 slots
+                    action = BundleAction(list(bundle), time_slot.slot_id, timetable_data)
+                    if action.is_valid():
+                        best_action = action
+                        break
+                if best_action:
+                    break
+            if best_action:
+                break
+        
+        # Execute best action
+        if best_action:
+            new_schedule = best_action.execute(timetable_data['current_solution'])
+            if new_schedule:
+                timetable_data['current_solution'] = new_schedule
+                resolved_count += 1
+                conflicts = _detect_remaining_conflicts(new_schedule, timetable_data)
+        else:
+            conflicts.pop(0)
+    
+    return resolved_count

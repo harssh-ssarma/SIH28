@@ -459,31 +459,24 @@ class AdaptiveCPSATSolver:
         return valid_domains
     
     def _add_faculty_constraints(self, model, variables, cluster):
-        """Faculty conflict prevention - SESSION-LEVEL constraints (CORRECT)"""
+        """Faculty conflict prevention - CORRECT: One faculty = one time slot = one room"""
         for faculty_id in set(c.faculty_id for c in cluster):
             faculty_courses = [c for c in cluster if c.faculty_id == faculty_id]
             
-            # SESSION-LEVEL: Faculty can't teach 2 different courses at same time
-            # But CAN teach multiple sessions of SAME course
             for t_slot in self.time_slots:
-                # Collect all session variables for this faculty at this time slot
-                all_session_vars = []
+                # CORRECT: Collect ALL assignments (any course, any session) for this faculty at this time
+                faculty_time_vars = []
+                
                 for course in faculty_courses:
                     for session in range(course.duration):
-                        session_vars = [
-                            variables[(course.course_id, session, t_slot.slot_id, r.room_id)]
-                            for r in self.rooms
-                            if (course.course_id, session, t_slot.slot_id, r.room_id) in variables
-                        ]
-                        if session_vars:
-                            # Each session can be assigned to at most 1 room
-                            # But we need to track which course this session belongs to
-                            all_session_vars.extend(session_vars)
+                        for room in self.rooms:
+                            var_key = (course.course_id, session, t_slot.slot_id, room.room_id)
+                            if var_key in variables:
+                                faculty_time_vars.append(variables[var_key])
                 
-                # Faculty can teach at most 1 session at this time slot
-                # (This allows same course to have multiple sessions, but not simultaneously)
-                if all_session_vars:
-                    model.Add(sum(all_session_vars) <= 1)
+                # Faculty can be in at most ONE room at this time (teaching at most one session of one course)
+                if faculty_time_vars:
+                    model.Add(sum(faculty_time_vars) <= 1)
     
     def _add_room_constraints(self, model, variables, cluster):
         """Room conflict prevention - SESSION-LEVEL (rooms can't be double-booked)"""
@@ -528,22 +521,17 @@ class AdaptiveCPSATSolver:
                     model.Add(sum(faculty_vars) <= max_load)
     
     def _add_hierarchical_student_constraints(self, model, variables, cluster, priority: str):
-        """
-        Student constraint encoding - ALL students get constraints
-        """
-        # Group students by conflict severity
+        """CORRECTED: ALL students MUST get constraints (no limit)"""
         student_groups = self._group_students_by_conflicts(cluster)
         
-        constraint_count = 0
-        max_constraints = 50000  # Increased from 5000
-        
         if priority == "ALL":
-            # Full constraints for ALL students
+            # CRITICAL: No constraint limit - add ALL student conflicts
             all_students = student_groups["CRITICAL"] + student_groups["HIGH"] + student_groups["LOW"]
+            
             for student_id in all_students:
-                if constraint_count >= max_constraints:
-                    break
                 courses_list = [c for c in cluster if student_id in c.student_ids]
+                
+                # For each time slot, student can take at most 1 course
                 for t_slot in self.time_slots:
                     student_vars = [
                         variables[(c.course_id, s, t_slot.slot_id, r.room_id)]
@@ -554,13 +542,12 @@ class AdaptiveCPSATSolver:
                     ]
                     if student_vars:
                         model.Add(sum(student_vars) <= 1)
-                        constraint_count += 1
+            
+            logger.info(f"Added {len(all_students)} student constraints (NO LIMIT - all students protected)")
         
         elif priority == "CRITICAL":
-            # Full constraints for critical students (5+ courses)
+            # Only critical students (5+ courses) - for speed
             for student_id in student_groups["CRITICAL"]:
-                if constraint_count >= max_constraints:
-                    break
                 courses_list = [c for c in cluster if student_id in c.student_ids]
                 for t_slot in self.time_slots:
                     student_vars = [
@@ -572,9 +559,8 @@ class AdaptiveCPSATSolver:
                     ]
                     if student_vars:
                         model.Add(sum(student_vars) <= 1)
-                        constraint_count += 1
-        
-        logger.info(f"Added {constraint_count} student constraints (priority: {priority})")
+            
+            logger.info(f"Added {len(student_groups['CRITICAL'])} CRITICAL student constraints (speed mode)")
     
     def _group_students_by_conflicts(self, cluster: List[Course]) -> Dict[str, List[str]]:
         """Group students by number of enrolled courses"""
@@ -596,3 +582,64 @@ class AdaptiveCPSATSolver:
         
         logger.info(f"Student groups: CRITICAL={len(groups['CRITICAL'])}, HIGH={len(groups['HIGH'])}, LOW={len(groups['LOW'])}")
         return groups
+    
+    def greedy_fallback(self, cluster: List[Course]) -> Dict:
+        """Greedy scheduling fallback when CP-SAT fails"""
+        logger.info(f"[GREEDY] Starting greedy fallback for {len(cluster)} courses")
+        schedule = {}
+        
+        # Sort courses by priority: large classes first, then by student count
+        sorted_courses = sorted(
+            cluster,
+            key=lambda c: (len(c.student_ids), len(getattr(c, 'required_features', []))),
+            reverse=True
+        )
+        
+        used_slots = set()
+        faculty_schedule = {}
+        room_schedule = {}
+        
+        for course in sorted_courses:
+            assigned = False
+            
+            for time_slot in self.time_slots:
+                if assigned:
+                    break
+                
+                # Check faculty availability
+                faculty_id = course.faculty_id
+                if (faculty_id, time_slot.slot_id) in faculty_schedule:
+                    continue
+                
+                for room in self.rooms:
+                    # Check room availability
+                    if (room.room_id, time_slot.slot_id) in room_schedule:
+                        continue
+                    
+                    # Check room capacity
+                    if len(course.student_ids) > room.capacity:
+                        continue
+                    
+                    # Check required features
+                    required_features = set(getattr(course, 'required_features', []))
+                    room_features = set(getattr(room, 'features', []))
+                    if required_features and not required_features.issubset(room_features):
+                        continue
+                    
+                    # Assign course
+                    key = (course.course_id, 0)
+                    value = (time_slot.slot_id, room.room_id)
+                    schedule[key] = value
+                    
+                    used_slots.add((time_slot.slot_id, room.room_id))
+                    faculty_schedule[(faculty_id, time_slot.slot_id)] = course.course_id
+                    room_schedule[(room.room_id, time_slot.slot_id)] = course.course_id
+                    
+                    assigned = True
+                    break
+            
+            if not assigned:
+                logger.warning(f"[GREEDY] Could not assign course {course.course_id}")
+        
+        logger.info(f"[GREEDY] Assigned {len(schedule)}/{len(cluster)} courses ({len(schedule)/len(cluster)*100:.1f}%)")
+        return schedule
