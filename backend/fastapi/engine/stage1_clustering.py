@@ -19,7 +19,7 @@ class LouvainClusterer:
     
     def __init__(self, target_cluster_size: int = 10, edge_threshold: float = None):
         self.target_cluster_size = target_cluster_size
-        self.progress_tracker = None  # Set externally for progress updates
+        self.progress_tracker = None  # Set externally for real-time progress updates
         self.job_id = None
         self.redis_client = None
         # Adaptive edge threshold based on RAM
@@ -49,8 +49,10 @@ class LouvainClusterer:
             raise InterruptedError("Job cancelled by user during clustering")
         
         # Build constraint graph (with progress update)
-        logger.info(f"[STAGE1] Building constraint graph for {len(courses)} courses...")
+        logger.debug(f"Building constraint graph for {len(courses)} courses...")
         self._update_progress("Building constraint graph...")
+        if self.progress_tracker:
+            self.progress_tracker.update_work_progress(3)
         G = self._build_constraint_graph(courses)
         
         # Check cancellation after graph building
@@ -58,8 +60,10 @@ class LouvainClusterer:
             raise InterruptedError("Job cancelled by user during clustering")
         
         # Run Louvain clustering (with progress update)
-        logger.info(f"[STAGE1] Running Louvain community detection...")
+        logger.debug(f"Running Louvain community detection...")
         self._update_progress("Running Louvain detection...")
+        if self.progress_tracker:
+            self.progress_tracker.update_work_progress(6)
         partition = self._run_louvain(G)
         
         # Check cancellation after Louvain
@@ -67,11 +71,13 @@ class LouvainClusterer:
             raise InterruptedError("Job cancelled by user during clustering")
         
         # Optimize cluster sizes (with progress update)
-        logger.info(f"[STAGE1] Optimizing cluster sizes...")
+        logger.debug(f"Optimizing cluster sizes...")
         self._update_progress("Optimizing cluster sizes...")
+        if self.progress_tracker:
+            self.progress_tracker.update_work_progress(10)
         final_clusters = self._optimize_cluster_sizes(partition, courses)
         
-        logger.info(f"[STAGE1] Louvain clustering: {len(final_clusters)} clusters from {len(courses)} courses")
+        logger.info(f"Created {len(final_clusters)} clusters from {len(courses)} courses")
         return final_clusters
     
     def _check_cancellation(self) -> bool:
@@ -80,7 +86,7 @@ class LouvainClusterer:
             if self.redis_client and self.job_id:
                 cancel_flag = self.redis_client.get(f"cancel:job:{self.job_id}")
                 if cancel_flag is not None and cancel_flag:
-                    logger.info(f"[STAGE1] Cancellation detected for job {self.job_id}")
+                    logger.warning(f"Clustering: Job cancelled - {self.job_id}")
                     return True
         except Exception as e:
             logger.debug(f"[STAGE1] Cancellation check failed: {e}")
@@ -99,7 +105,7 @@ class LouvainClusterer:
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }
                 self.redis_client.publish(f"progress:{self.job_id}", json.dumps(progress_data))
-                logger.info(f"[LOUVAIN] {message}")
+                logger.debug(f"{message}")
         except Exception as e:
             logger.debug(f"Progress update failed: {e}")
     
@@ -116,7 +122,7 @@ class LouvainClusterer:
         
         # Parallel edge computation (ThreadPoolExecutor to avoid pickle issues)
         num_workers = min(multiprocessing.cpu_count(), 8)
-        logger.info(f"Building constraint graph for {len(courses)} courses with {num_workers} workers...")
+        logger.debug(f"Building constraint graph for {len(courses)} courses with {num_workers} workers...")
         
         # Split courses into chunks for parallel processing
         chunk_size = max(1, len(courses) // num_workers)
@@ -135,7 +141,7 @@ class LouvainClusterer:
                 G.add_weighted_edges_from(edges)
                 edges_added += len(edges)
         
-        logger.info(f"Built graph: {len(G.nodes)} nodes, {edges_added} edges")
+        logger.debug(f"Built graph: {len(G.nodes)} nodes, {edges_added} edges")
         return G
     
     def _compute_edges_for_chunk(self, courses: List[Course], start: int, end: int) -> List[Tuple]:
@@ -208,7 +214,7 @@ class LouvainClusterer:
             
             # Calculate modularity
             modularity = community_louvain.modularity(partition, G, weight='weight')
-            logger.info(f"Louvain modularity: {modularity:.3f}")
+            logger.debug(f"Louvain modularity: {modularity:.3f}")
             
             return partition
             
@@ -290,6 +296,6 @@ class LouvainClusterer:
         # Log cluster size distribution
         sizes = [len(cluster) for cluster in final_clusters.values()]
         avg_size = sum(sizes) / len(sizes) if sizes else 0
-        logger.info(f"[NEP 2020] Cluster sizes: min={min(sizes) if sizes else 0}, max={max(sizes) if sizes else 0}, avg={avg_size:.1f}, total={len(final_clusters)}")
+        logger.info(f"Cluster sizes: min={min(sizes) if sizes else 0}, max={max(sizes) if sizes else 0}, avg={avg_size:.1f}")
         
         return final_clusters

@@ -208,7 +208,8 @@ class GeneticAlgorithmOptimizer:
         logger.info(f"[GA] Init complete. Valid domains computed on-demand with caching.")
     
     def _get_valid_domain(self, course_id: str, session: int) -> List[Tuple]:
-        """On-demand with caching: Compute valid (time, room) pairs per course"""
+        """On-demand with caching: Compute valid (time, room) pairs per course
+        NEP 2020: Uses department-specific time slots"""
         # Check cache first (course-level, not session-level)
         if course_id in self._domain_cache:
             return self._domain_cache[course_id]
@@ -218,9 +219,13 @@ class GeneticAlgorithmOptimizer:
         if not course:
             return []
         
+        # NEP 2020: Get department-specific time slots
+        course_dept_id = getattr(course, 'dept_id', None)
+        dept_slots = [t for t in self.time_slots if t.department_id == course_dept_id] if course_dept_id else self.time_slots
+        
         # Compute valid pairs (only once per course)
         valid_pairs = []
-        for t_slot in self.time_slots:
+        for t_slot in dept_slots:  # NEP 2020: Use department-specific slots
             for room in self.rooms:
                 if len(course.student_ids) > room.capacity:
                     continue
@@ -352,35 +357,45 @@ class GeneticAlgorithmOptimizer:
         if self.gpu_offload_conflicts:
             return self._gpu_is_feasible(solution)
         
+        # NEP 2020: Build slot_id to (day, period) mapping for cross-department conflicts
+        slot_to_time = {}
+        for t in self.time_slots:
+            slot_to_time[t.slot_id] = (t.day, t.period)
+        
         # CPU fallback
-        faculty_schedule = {}
-        room_schedule = {}
-        student_schedule = {}
+        faculty_schedule = {}  # (faculty_id, day, period) -> bool (wall-clock time)
+        room_schedule = {}      # (room_id, slot_id) -> bool (room conflicts are slot-specific)
+        student_schedule = {}   # (student_id, day, period) -> bool (wall-clock time)
         
         for (course_id, session), (time_slot, room_id) in solution.items():
             course = next((c for c in self.courses if c.course_id == course_id), None)
             if not course:
                 continue
             
-            # Faculty conflict
-            if (course.faculty_id, time_slot) in faculty_schedule:
-                return False
-            faculty_schedule[(course.faculty_id, time_slot)] = True
+            # Get wall-clock time for this slot
+            wall_time = slot_to_time.get(time_slot)
+            if not wall_time:
+                continue  # Skip if slot not found
             
-            # Room conflict
+            # NEP 2020: Faculty conflict - check wall-clock time (can't teach CS Mon 9-10 AND Physics Mon 9-10)
+            if (course.faculty_id, wall_time[0], wall_time[1]) in faculty_schedule:
+                return False
+            faculty_schedule[(course.faculty_id, wall_time[0], wall_time[1])] = True
+            
+            # Room conflict - still slot-specific (rooms belong to departments)
             if (room_id, time_slot) in room_schedule:
                 return False
             room_schedule[(room_id, time_slot)] = True
             
-            # Student conflicts (sample if enabled)
+            # NEP 2020: Student conflicts - check wall-clock time (cross-department conflicts)
             students_to_check = course.student_ids
             if self.use_sample_fitness and self.sample_students:
                 students_to_check = [s for s in course.student_ids if s in self.sample_students]
             
             for student_id in students_to_check:
-                if (student_id, time_slot) in student_schedule:
+                if (student_id, wall_time[0], wall_time[1]) in student_schedule:
                     return False
-                student_schedule[(student_id, time_slot)] = True
+                student_schedule[(student_id, wall_time[0], wall_time[1])] = True
         
         return True
     
@@ -976,78 +991,26 @@ class GeneticAlgorithmOptimizer:
         except:
             return False
     
-    def _update_ga_progress(self, job_id: str, current_gen: int, total_gen: int, fitness: float):
-        """Update GA progress in Redis (called every 5 gens)"""
-        try:
-            import redis
-            import os
-            import json
-            from datetime import datetime, timezone
-            redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/1")
-            r = redis.from_url(redis_url, decode_responses=True)
-            # GA is 65-80% of total progress
-            ga_progress = 65 + int((current_gen / total_gen) * 15)
-            progress_data = {
-                'job_id': job_id,
-                'progress': ga_progress,
-                'status': 'running',
-                'stage': f'GA Gen {current_gen}/{total_gen}',
-                'message': f'Optimizing with GA: Gen {current_gen}/{total_gen} (fitness: {fitness:.2f})',
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-            r.setex(f"progress:job:{job_id}", 3600, json.dumps(progress_data))
-        except Exception as e:
-            logger.debug(f"Failed to update GA progress: {e}")
+    # Removed _update_ga_progress - duplicate/conflicting with EnterpriseProgressTracker
+    # All progress updates now use _update_ga_progress_batch which calls progress_tracker.update_work_progress()
     
     def _update_ga_progress_batch(self, current_gen: int, total_gen: int, fitness: float):
-        """Update progress using unified tracker + direct Redis (smooth like CP-SAT)"""
+        """Update progress using unified tracker ONLY - NO direct assignments"""
         try:
             if not self.progress_tracker:
                 return
             
-            # Update work progress (generations completed)
+            # TENSORFLOW-STYLE: ONLY update work progress
+            # The progress_tracker.calculate_smooth_progress() handles:
+            # - Smooth acceleration when behind
+            # - No jumps between stages
+            # - Proper stage boundaries (60% -> 85%)
             self.progress_tracker.update_work_progress(current_gen)
             
-            # ENTERPRISE: Direct Redis update like CP-SAT (smooth progress, no jumps)
-            import redis
-            import os
-            import json
-            from datetime import datetime, timezone, timedelta
+            # DO NOT set last_progress directly - this breaks smooth acceleration!
+            # DO NOT calculate manual progress percentages - tracker handles it!
+            # Background task updates Redis automatically from progress_tracker state
             
-            redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/1")
-            r = redis.from_url(redis_url, decode_responses=True)
-            
-            # GA is 15-85% (70% weight)
-            progress_pct = int(15 + (current_gen / total_gen * 70))
-            self.progress_tracker.last_progress = float(progress_pct)
-            
-            # Calculate ETA based on generation completion rate
-            start_time_str = r.get(f"start_time:job:{self.job_id}")
-            time_remaining_seconds = None
-            eta = None
-            if start_time_str and current_gen > 0:
-                start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
-                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-                avg_time_per_gen = elapsed / (progress_pct / 100)  # Time per 1% progress
-                remaining_percent = 100 - progress_pct
-                time_remaining_seconds = int(avg_time_per_gen * remaining_percent)
-                eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
-            
-            progress_data = {
-                'job_id': self.job_id,
-                'progress': progress_pct,
-                'status': 'running',
-                'stage': 'ga',
-                'message': f"GA: Gen {current_gen}/{total_gen} ({progress_pct}%)",
-                'items_done': current_gen,
-                'items_total': total_gen,
-                'time_remaining_seconds': time_remaining_seconds or 0,
-                'eta_seconds': time_remaining_seconds or 0,
-                'eta': eta,
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-            r.setex(f"progress:job:{self.job_id}", 3600, json.dumps(progress_data))
-            r.publish(f"progress:{self.job_id}", json.dumps(progress_data))
         except Exception as e:
             # Silent fail - don't block GA
             pass

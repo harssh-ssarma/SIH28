@@ -192,16 +192,14 @@ class TimetableGenerationSaga:
         estimated_time = optimal_config['expected_time_minutes'] * 60 if optimal_config else 35
         
         # Initialize enterprise progress tracker starting at 0%
+        # Constructor automatically sends initial progress with ETA to Redis
         self.progress_tracker = EnterpriseProgressTracker(job_id, estimated_time, redis_client_global)
         self.progress_tracker.last_progress = 0.0  # Start at 0%
         self.progress_task = ProgressUpdateTask(self.progress_tracker)
         
-        # Send initial progress update with ETA BEFORE starting background task
-        await self.progress_tracker.update("Starting timetable generation", force_progress=0)
-        
         # Start automatic background updates IMMEDIATELY for smooth progress
         await self.progress_task.start()
-        logger.info(f"[PROGRESS] Background task started at 0% for job {job_id}")
+        logger.info(f"[PROGRESS] Background task started at 0% for job {job_id} with initial ETA")
         
         # Start resource monitoring with emergency downgrade
         monitor = ResourceMonitor()
@@ -314,8 +312,8 @@ class TimetableGenerationSaga:
         """Stage 0: Load and validate data with hardware detection"""
         from utils.django_client import DjangoAPIClient
         
-        # Set stage for progress tracking
-        self.progress_tracker.set_stage('load_data')
+        # Set stage for progress tracking with 5 total items (courses, faculty, rooms, time_slots, students)
+        self.progress_tracker.set_stage('load_data', total_items=5)
         
         # Detect hardware and get optimal config
         global hardware_profile, adaptive_executor
@@ -329,17 +327,25 @@ class TimetableGenerationSaga:
         
         # Hardware info logged (background task handles progress)
         
-        client = DjangoAPIClient()
+        global redis_client_global
+        client = DjangoAPIClient(redis_client=redis_client_global)
         try:
-            org_id = request_data['organization_id']
+            # Resolve org_name to org_id if needed
+            org_identifier = request_data['organization_id']
+            org_id = client.resolve_org_id(org_identifier)
             semester = request_data['semester']
             
-            # CRITICAL FIX: Extract time_config from request
-            time_config = request_data.get('time_config')
+            # FETCH TIME_CONFIG FROM DATABASE (with caching)
+            time_config = await client.fetch_time_config(org_id)
             if time_config:
-                logger.info(f"[DATA] Using time_config from Django: {time_config}")
+                logger.info(f"[CONFIG] Using DB config: {time_config['working_days']} days, {time_config['slots_per_day']} slots/day")
             else:
-                logger.warning("[DATA] No time_config in request, using defaults")
+                # Fallback to request data or defaults
+                time_config = request_data.get('time_config')
+                if time_config:
+                    logger.warning("[CONFIG] Using config from request (not in DB)")
+                else:
+                    logger.warning("[CONFIG] No config in DB or request, using defaults")
             
             # Load data in parallel (optimized for hardware)
             if hardware_profile.cpu_cores >= 4:
@@ -349,16 +355,37 @@ class TimetableGenerationSaga:
                 time_slots_task = client.fetch_time_slots(org_id, time_config)  # Pass time_config
                 students_task = client.fetch_students(org_id)
                 
-                courses, faculty, rooms, time_slots, students = await asyncio.gather(
-                    courses_task, faculty_task, rooms_task, time_slots_task, students_task
-                )
+                # Fetch in sequence to update progress smoothly
+                courses = await courses_task
+                self.progress_tracker.update_work_progress(1)
+                
+                faculty = await faculty_task
+                self.progress_tracker.update_work_progress(2)
+                
+                rooms = await rooms_task
+                self.progress_tracker.update_work_progress(3)
+                
+                time_slots = await time_slots_task
+                self.progress_tracker.update_work_progress(4)
+                
+                students = await students_task
+                self.progress_tracker.update_work_progress(5)
             else:
                 # Sequential loading for low-end hardware
                 courses = await client.fetch_courses(org_id, semester)
+                self.progress_tracker.update_work_progress(1)
+                
                 faculty = await client.fetch_faculty(org_id)
+                self.progress_tracker.update_work_progress(2)
+                
                 rooms = await client.fetch_rooms(org_id)
+                self.progress_tracker.update_work_progress(3)
+                
                 time_slots = await client.fetch_time_slots(org_id, time_config)  # Pass time_config
+                self.progress_tracker.update_work_progress(4)
+                
                 students = await client.fetch_students(org_id)
+                self.progress_tracker.update_work_progress(5)
             
             # Validate data
             if not courses or len(courses) < 5:
@@ -441,6 +468,16 @@ class TimetableGenerationSaga:
         
         # Mark stage complete for smooth transition
         self.progress_tracker.mark_stage_complete()
+        
+        # VERIFICATION: Count unique courses across clusters
+        all_course_ids = []
+        for cluster_courses in clusters.values():
+            all_course_ids.extend([c.course_id for c in cluster_courses])
+        unique_courses = len(set(all_course_ids))
+        total_in_clusters = len(all_course_ids)
+        logger.info(f"[STAGE1] Clustering result: {len(courses)} original -> {unique_courses} unique in clusters ({total_in_clusters} total entries)")
+        if total_in_clusters != unique_courses:
+            logger.warning(f"[STAGE1] Course duplication detected: {total_in_clusters - unique_courses} duplicates across clusters")
         
         # Check cancellation after clustering
         if await self._check_cancellation(job_id):
@@ -586,15 +623,10 @@ class TimetableGenerationSaga:
                         completed += 1
                         self.progress_tracker.update_work_progress(completed)
                         
-                        # Update work progress for smooth tracking (background task handles Redis)
-                        self.progress_tracker.update_work_progress(completed)
-                        
                         logger.info(f"[CP-SAT] Parallel: Cluster {completed}/{total_clusters} completed ({completed/total_clusters*100:.1f}%)")
                     except Exception as e:
                         logger.error(f"Cluster {cluster_id} failed: {e}")
                         completed += 1
-                        
-                        # Update work progress even on failure - background tracker handles all Redis updates
                         self.progress_tracker.update_work_progress(completed)
                         
                         logger.info(f"[CP-SAT] Parallel: Cluster {completed}/{total_clusters} failed ({completed/total_clusters*100:.1f}%)")
@@ -609,15 +641,19 @@ class TimetableGenerationSaga:
         logger.info(f"[STAGE2] Completed: {len(all_solutions)} assignments, freed {cleanup_stats['freed_mb']:.1f}MB")
         
         # Calculate CP-SAT success metrics (courses not sessions)
-        total_courses = sum(len(courses) for courses in clusters.values())
+        # Count unique course IDs to avoid double-counting across clusters
+        all_course_ids_in_clusters = set()
+        for cluster_courses in clusters.values():
+            all_course_ids_in_clusters.update([c.course_id for c in cluster_courses])
+        total_unique_courses = len(all_course_ids_in_clusters)
         scheduled_courses = len(set(cid for (cid, _) in all_solutions.keys()))
-        success_rate = (scheduled_courses / total_courses * 100) if total_courses > 0 else 0
+        success_rate = (scheduled_courses / total_unique_courses * 100) if total_unique_courses > 0 else 0
         
         logger.info(f"\n{'='*80}")
         logger.info(f"[CP-SAT SUMMARY] Final Results:")
         scheduled_courses = len(set(cid for (cid, _) in all_solutions.keys()))
-        logger.info(f"[CP-SAT SUMMARY] Clusters: {total_clusters}, Courses: {total_courses}")
-        logger.info(f"[CP-SAT SUMMARY] Scheduled: {scheduled_courses}/{total_courses} courses ({len(all_solutions)} sessions)")
+        logger.info(f"[CP-SAT SUMMARY] Clusters: {total_clusters}, Unique Courses: {total_unique_courses}")
+        logger.info(f"[CP-SAT SUMMARY] Scheduled: {scheduled_courses}/{total_unique_courses} courses ({len(all_solutions)} sessions)")
         logger.info(f"[CP-SAT SUMMARY] Success rate: {success_rate:.1f}%")
         logger.info(f"{'='*80}\n")
         
@@ -663,7 +699,7 @@ class TimetableGenerationSaga:
             'conflicts': [],
             'execution_time': 0,
             'cpsat_success_rate': success_rate,
-            'cpsat_total_courses': total_courses,
+            'cpsat_total_courses': total_unique_courses,
             'cpsat_scheduled': len(all_solutions)
         }
     
@@ -865,24 +901,27 @@ class TimetableGenerationSaga:
             return cpsat_result
         
         logger.info(f"[STAGE2B] GPU Tensor GA: {len(initial_schedule)} assignments")
-        self.progress_tracker.set_stage('ga')
+        
+        # Get GA config first to know total generations for progress tracking
+        global hardware_profile
+        optimal_config = get_optimal_config(hardware_profile) if hardware_profile else {}
+        ga_config = optimal_config.get('stage2b_ga', {'population': 12, 'generations': 18, 'islands': 1, 'use_gpu': False, 'fitness_mode': 'full'})
+        
+        # Use stage2_ga.py which has hardware-flexible implementation (GPU/CPU)
+        pop = ga_config.get('population', 12)
+        gen = ga_config.get('generations', 18)
+        islands = ga_config.get('islands', 1)
+        
+        # Set stage with total generations for work-based progress
+        self.progress_tracker.set_stage('ga', total_items=gen)
+        
+        logger.info(f"[STAGE2B] CPU GA: pop={pop}, gen={gen}, islands={islands}")
         
         try:
             courses = data['load_data']['courses']
             rooms = data['load_data']['rooms']
             time_slots = data['load_data']['time_slots']
             faculty = data['load_data']['faculty']
-            
-            # Use hardware-optimal config
-            global hardware_profile
-            optimal_config = get_optimal_config(hardware_profile) if hardware_profile else {}
-            ga_config = optimal_config.get('stage2b_ga', {'population': 12, 'generations': 18, 'islands': 1, 'use_gpu': False, 'fitness_mode': 'full'})
-            
-            # Use stage2_ga.py which has hardware-flexible implementation (GPU/CPU)
-            pop = ga_config.get('population', 12)
-            gen = ga_config.get('generations', 18)
-            islands = ga_config.get('islands', 1)
-            logger.info(f"[STAGE2B] CPU GA: pop={pop}, gen={gen}, islands={islands}")
             from engine.stage2_ga import GeneticAlgorithmOptimizer
             
             ga_optimizer = GeneticAlgorithmOptimizer(
@@ -959,9 +998,6 @@ class TimetableGenerationSaga:
             return ga_result
         
         logger.info(f"[STAGE3] Starting RL conflict resolution with {len(schedule)} assignments")
-        self.progress_tracker.set_stage('rl')
-        
-        # Time-based progress will handle smooth updates during RL
         
         try:
             # Quick conflict detection
@@ -987,6 +1023,9 @@ class TimetableGenerationSaga:
             max_iter = stage3_config.get('max_iterations', 100)
             use_gpu_rl = stage3_config.get('use_gpu', False)
             algorithm = stage3_config.get('algorithm', 'q_learning')
+            
+            # Set stage with total iterations for work-based progress
+            self.progress_tracker.set_stage('rl', total_items=max_iter)
             
             resolver = RLConflictResolver(
                 courses=load_data['courses'],
@@ -1147,25 +1186,7 @@ class TimetableGenerationSaga:
             logger.error(f"[CANCEL] Error checking cancellation: {e}")
         return False
     
-    async def _update_progress_final(self, job_id: str, progress: int, status: str, message: str):
-        """Update final progress status"""
-        global redis_client_global
-        try:
-            if redis_client_global:
-                progress_data = {
-                    'job_id': job_id,
-                    'progress': progress,
-                    'status': status,
-                    'stage': status.capitalize(),
-                    'message': message,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }
-                redis_client_global.setex(f"progress:job:{job_id}", 3600, json.dumps(progress_data))
-                logger.info(f"[PROGRESS] Final status set: {job_id} -> {status}")
-        except Exception as e:
-            logger.error(f"[PROGRESS] Failed to set final status: {e}")
-    
-    # Removed unused _update_progress function - EnterpriseProgressTracker handles all progress updates
+    # Removed unused _update_progress_final - EnterpriseProgressTracker.complete() and .fail() handle all final status updates
 
 
 
@@ -2230,6 +2251,103 @@ def _estimate_processing_time(profile: HardwareProfile) -> dict:
         "strategy": profile.optimal_strategy.value,
         "confidence": "high" if profile.cpu_cores >= 4 else "medium"
     }
+
+
+# ==================== CACHE MANAGEMENT ENDPOINTS ====================
+
+@app.post("/api/cache/invalidate")
+async def invalidate_cache(request: dict):
+    """
+    Invalidate cache when frontend updates data.
+    
+    Request body:
+    {
+        "organization_id": "uuid",
+        "resource_type": "courses|faculty|rooms|students|time_slots|config|all",
+        "semester": 1  // optional, for courses
+    }
+    """
+    try:
+        global redis_client_global
+        from utils.django_client import DjangoAPIClient
+        
+        client = DjangoAPIClient(redis_client=redis_client_global)
+        org_id = request.get('organization_id')
+        resource_type = request.get('resource_type', 'all')
+        
+        if not org_id:
+            raise HTTPException(status_code=400, detail="organization_id is required")
+        
+        if resource_type == 'all':
+            # Invalidate all resources for this org
+            await client.cache_manager.invalidate_pattern(f"*:{org_id}:*")
+            logger.info(f"[CACHE] Invalidated ALL cache for org {org_id}")
+            return {"status": "success", "message": f"All cache invalidated for org {org_id}"}
+        
+        # Invalidate specific resource
+        if resource_type == 'courses':
+            semester = request.get('semester')
+            await client.cache_manager.invalidate('courses', org_id, semester=semester)
+        else:
+            await client.cache_manager.invalidate(resource_type, org_id)
+        
+        logger.info(f"[CACHE] Invalidated {resource_type} cache for org {org_id}")
+        return {
+            "status": "success",
+            "message": f"{resource_type} cache invalidated",
+            "organization_id": org_id
+        }
+        
+    except Exception as e:
+        logger.error(f"[CACHE] Invalidation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/cache/stats")
+async def get_cache_stats(organization_id: Optional[str] = None):
+    """Get cache statistics"""
+    try:
+        global redis_client_global
+        from utils.django_client import DjangoAPIClient
+        
+        client = DjangoAPIClient(redis_client=redis_client_global)
+        stats = client.cache_manager.get_stats()
+        
+        return {
+            "status": "success",
+            "stats": stats,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"[CACHE] Stats error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/cache/warm")
+async def warm_cache(request: dict):
+    """Pre-load cache with frequently accessed data"""
+    try:
+        global redis_client_global
+        from utils.django_client import DjangoAPIClient
+        
+        client = DjangoAPIClient(redis_client=redis_client_global)
+        org_id = request.get('organization_id')
+        
+        if not org_id:
+            raise HTTPException(status_code=400, detail="organization_id is required")
+        
+        result = await client.cache_manager.warm_cache(org_id, client)
+        
+        return {
+            "status": "success",
+            "message": "Cache warmed successfully",
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"[CACHE] Warming error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

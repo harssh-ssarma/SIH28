@@ -32,12 +32,12 @@ class EnterpriseProgressTracker:
         
         # User-friendly stage names (hide technical details)
         self.stage_display_names = {
-            'load_data': 'Loading courses and students',
-            'clustering': 'Analyzing course groups',
-            'cpsat': 'Creating initial schedule',
-            'ga': 'Optimizing quality',
-            'rl': 'Resolving conflicts',
-            'finalize': 'Finalizing timetable'
+            'load_data': 'Loading Data',
+            'clustering': 'Assigning Courses',
+            'cpsat': 'Scheduling Classes',
+            'ga': 'Optimizing Schedule',
+            'rl': 'Resolving Conflicts',
+            'finalize': 'Finalizing Timetable'
         }
         
         # Stage configuration with ABSOLUTE cumulative progress boundaries
@@ -62,36 +62,71 @@ class EnterpriseProgressTracker:
         self.stage_items_total = 0
         self.stage_items_done = 0
         
-        # Initialize ETA tracking variables
+        # Initialize ETA tracking variables - MUST be set before first update
         self._smoothed_eta = estimated_total_seconds
         self._last_eta_update = self.start_time
         self._last_eta_value = estimated_total_seconds
         self._last_update_time = self.start_time
         
+        # Send initial progress to Redis immediately with ETA
+        self._send_initial_progress()
+        
         logger.info(f"[PROGRESS] Time-based virtual progress tracker initialized for {job_id} (ETA: {estimated_total_seconds}s)")
     
+    def _send_initial_progress(self):
+        """Send initial progress with ETA to Redis immediately (synchronous)"""
+        if not self.redis_client:
+            return
+        
+        try:
+            # Calculate initial ETA
+            remaining_seconds = self._smoothed_eta
+            eta = (datetime.now(timezone.utc) + timedelta(seconds=remaining_seconds)).isoformat()
+            
+            # Get initial stage display name
+            stage_display = self.stage_display_names.get(self.current_stage, 'Initializing')
+            
+            # Send initial progress data
+            progress_data = {
+                'job_id': self.job_id,
+                'progress': 0,
+                'progress_percent': 0,
+                'status': 'running',
+                'stage': stage_display,
+                'message': f'Starting: {stage_display}',
+                'time_remaining_seconds': remaining_seconds,
+                'eta_seconds': remaining_seconds,
+                'eta': eta,
+                'timestamp': datetime.now(timezone.utc).timestamp()
+            }
+            
+            # Store in Redis with 1 hour TTL
+            self.redis_client.setex(
+                f"progress:job:{self.job_id}",
+                3600,
+                json.dumps(progress_data)
+            )
+            
+            # Publish for real-time updates
+            self.redis_client.publish(
+                f"progress:{self.job_id}",
+                json.dumps(progress_data)
+            )
+            
+            logger.info(f"[PROGRESS] Initial progress sent: 0% with ETA {remaining_seconds}s")
+            
+        except Exception as e:
+            logger.error(f"[PROGRESS] Failed to send initial progress: {e}")
+    
     def set_stage(self, stage_name: str, total_items: int = 0):
-        """Set current stage with absolute boundaries - SMOOTH TRANSITION"""
+        """Set current stage with ZERO JUMPS - TensorFlow/Chrome style continuous progress"""
         if stage_name in self.stage_config:
             stage_info = self.stage_config[stage_name]
             
-            # Use absolute stage boundaries for consistency
-            stage_start = stage_info['start']
-            stage_end = stage_info['end']
-            
-            # SMOOTH TRANSITION: If we're already past the stage start, continue from current
-            # Otherwise, smoothly move to stage start
-            if self.last_progress >= stage_start:
-                # Already at or past stage start - use current progress
-                self.stage_start_progress = self.last_progress
-            else:
-                # Need to reach stage start - use absolute start
-                self.stage_start_progress = stage_start
-                # Don't jump backward, ensure we're at stage start
-                if self.last_progress < stage_start:
-                    self.last_progress = stage_start
-            
-            self.stage_end_progress = stage_end
+            # CRITICAL: Use current progress as start - NEVER jump to stage boundaries
+            # This is how TensorFlow/Chrome do it - always continue from where you are
+            self.stage_start_progress = self.last_progress
+            self.stage_end_progress = stage_info['end']
             self.current_stage = stage_name
             self.stage_start_time = time.time()
             
@@ -99,9 +134,13 @@ class EnterpriseProgressTracker:
             self.stage_items_total = total_items
             self.stage_items_done = 0
             
+            # Clear any catch-up targets from previous stage
+            if hasattr(self, '_catch_up_target'):
+                delattr(self, '_catch_up_target')
+            
             # Get user-friendly name for logging
             display_name = self.stage_display_names.get(stage_name, stage_name)
-            logger.info(f"[PROGRESS] Stage: {display_name} ({self.stage_start_progress:.1f}% → {stage_end}%, items: {total_items})")
+            logger.info(f"[PROGRESS] Stage: {display_name} ({self.stage_start_progress:.1f}% -> {stage_info['end']}%, items: {total_items})")
     
     def update_work_progress(self, items_done: int):
         """Update work-based progress (for CP-SAT clusters, GA generations, RL episodes)"""
@@ -118,105 +157,140 @@ class EnterpriseProgressTracker:
     
     def calculate_smooth_progress(self) -> float:
         """
-        ENTERPRISE SMOOTH: Chrome/TensorFlow style - NEVER jumps, NEVER sticks
-        Uses absolute stage boundaries (start→end) for consistent progress ranges
+        GOOGLE/TENSORFLOW STYLE: Smooth continuous progress with adaptive speed
+        - NEVER jumps backward or forward
+        - Accelerates when behind schedule (catching up)
+        - Decelerates when ahead (preventing overshoot)
+        - Uses work anchors when available for accuracy
         """
         now = time.time()
         time_since_last = now - getattr(self, '_last_update_time', now)
         self._last_update_time = now
         
-        # Get stage boundaries
+        # Get stage boundaries and timing
         stage_info = self.stage_config.get(self.current_stage, {'start': 0, 'end': 100, 'expected_time': 5})
-        stage_start = self.stage_start_progress  # Actual start (may be past config start)
+        stage_start = self.stage_start_progress  # Where we actually started this stage
         stage_end = stage_info['end']
         stage_range = stage_end - stage_start
+        expected_time = stage_info.get('expected_time', 5)
+        elapsed_in_stage = now - self.stage_start_time
         
         # Calculate target progress based on work/time
-        if self.stage_items_total > 0:
-            # Work-based: Calculate target from actual completion
+        if self.stage_items_total > 0 and self.stage_items_done > 0:
+            # Work-based anchor: Use actual completed work for accuracy
             work_ratio = min(1.0, self.stage_items_done / self.stage_items_total)
             target_progress = stage_start + (work_ratio * stage_range)
         else:
-            # Time-based: Asymptotic approach to stage end
-            elapsed = now - self.stage_start_time
-            expected = stage_info.get('expected_time', 5)
-            
-            if elapsed < expected:
-                ratio = elapsed / expected
+            # Time-based: Smooth asymptotic approach (never quite reaches end)
+            if elapsed_in_stage < expected_time:
+                # Linear progress during expected time
+                ratio = elapsed_in_stage / expected_time
             else:
-                # Slow down exponentially after expected time
-                overtime = elapsed - expected
-                ratio = 1.0 - (0.01 * (0.5 ** (overtime / expected)))
+                # Asymptotic slowdown after expected time (Google/Chrome style)
+                overtime = elapsed_in_stage - expected_time
+                # Approaches 95% of stage range asymptotically
+                ratio = 0.95 * (1.0 - (0.5 ** (elapsed_in_stage / expected_time)))
             
             target_progress = stage_start + (ratio * stage_range)
         
         # Cap target at stage end (never exceed stage boundary)
-        target_progress = min(stage_end, target_progress)
+        target_progress = min(stage_end - 0.5, target_progress)  # Leave 0.5% margin
         
-        # SMOOTH INTERPOLATION: Move towards target at constant speed
-        # Speed: 0.3% per 500ms = 0.6% per second (smoother, prevents jumps)
-        max_step = 0.3 * (time_since_last / 0.5)
+        # ADAPTIVE SPEED: Accelerate/decelerate based on distance to target
+        distance_to_target = target_progress - self.last_progress
         
-        if target_progress > self.last_progress:
-            # Move towards target smoothly
-            step = min(max_step, target_progress - self.last_progress)
+        # Calculate adaptive step size (Google/TensorFlow approach)
+        if distance_to_target > 0:
+            # Accelerate when behind (proportional to distance)
+            # Base: 0.2%/update (0.4%/sec), Max: 2%/update (4%/sec)
+            acceleration_factor = min(3.0, 1.0 + (distance_to_target / 5.0))
+            step = min(distance_to_target, 0.2 * acceleration_factor * (time_since_last / 0.5))
+            new_progress = self.last_progress + step
+        elif distance_to_target < -0.5:
+            # Rarely happens, but if ahead, slow down dramatically
+            deceleration_factor = 0.3
+            step = 0.05 * deceleration_factor * (time_since_last / 0.5)
             new_progress = self.last_progress + step
         else:
-            # Always move forward (minimum 0.03% per 500ms = never stuck)
-            new_progress = self.last_progress + (0.03 * (time_since_last / 0.5))
+            # At target or slightly ahead - maintain minimum forward progress
+            # Always creep forward (NEVER stuck)
+            min_step = 0.05 * (time_since_last / 0.5)
+            new_progress = self.last_progress + min_step
         
-        # Cap at stage end (never exceed current stage)
+        # Ensure never exceeds stage end
         new_progress = min(stage_end, new_progress)
         
-        # Cap at 98% until final completion
+        # Global cap at 98% (save 98-100% for finalization)
         new_progress = min(98.0, new_progress)
+        
+        # CRITICAL: Never go backward
+        new_progress = max(self.last_progress, new_progress)
+        
         self.last_progress = new_progress
         
         return self.last_progress
     
     def calculate_eta(self) -> tuple[int, str]:
         """
-        FIXED ETA: Calculate based on global time and stage expectations
-        Prevents resets between stages by using total expected time, not progress-based calculation
+        ADAPTIVE ETA: TensorFlow/Google style - learns from actual speed
+        Recalculates based on current progress rate, not fixed estimates
         """
         elapsed = time.time() - self.start_time
         
-        # Calculate remaining time based on stage expectations (more stable than progress-based)
-        remaining_time = 0
+        # Method 1: Progress-based ETA (learns from actual speed)
+        if self.last_progress > 1.0 and elapsed > 2:
+            # Calculate actual progress rate
+            progress_rate = self.last_progress / elapsed  # percent per second
+            remaining_progress = 100.0 - self.last_progress
+            progress_based_eta = int(remaining_progress / progress_rate) if progress_rate > 0 else 600
+        else:
+            # Not enough data yet, use total expected time
+            progress_based_eta = sum(stage['expected_time'] for stage in self.stage_config.values())
+        
+        # Method 2: Stage-based ETA (sum of remaining stage times)
+        stage_based_eta = 0
         current_stage_found = False
         
         for stage_name, config in self.stage_config.items():
             if not current_stage_found:
                 if stage_name == self.current_stage:
                     current_stage_found = True
-                    # Calculate remaining time for current stage
+                    # Current stage: use remaining time
                     stage_elapsed = time.time() - self.stage_start_time
                     stage_expected = config['expected_time']
                     stage_remaining = max(1, stage_expected - stage_elapsed)
-                    remaining_time += stage_remaining
-                # else: stage already completed, skip
+                    stage_based_eta += stage_remaining
             else:
-                # Add time for all future stages
-                remaining_time += config['expected_time']
+                # Future stages: add full expected time
+                stage_based_eta += config['expected_time']
         
-        # If progress > 90%, use progress-based calculation for final accuracy
-        if self.last_progress > 90:
-            # Near completion, switch to progress-based for accuracy
-            if self.last_progress > 95:
-                progress_based_eta = int(elapsed * (100 - self.last_progress) / self.last_progress)
-                remaining_time = min(remaining_time, progress_based_eta)
+        # Blend both methods (Google/TensorFlow approach)
+        if self.last_progress < 10:
+            # Early stage: trust stage estimates more (70% stage, 30% progress)
+            blended_eta = int(0.7 * stage_based_eta + 0.3 * progress_based_eta)
+        elif self.last_progress < 50:
+            # Mid stage: balanced blend (50% each)
+            blended_eta = int(0.5 * stage_based_eta + 0.5 * progress_based_eta)
+        else:
+            # Late stage: trust progress rate more (30% stage, 70% progress)
+            blended_eta = int(0.3 * stage_based_eta + 0.7 * progress_based_eta)
         
-        # Smooth ETA with exponential moving average (alpha=0.2 for more stability)
+        # Exponential moving average for smoothness
         if not hasattr(self, '_smoothed_eta'):
-            self._smoothed_eta = remaining_time
+            self._smoothed_eta = blended_eta
             self._last_eta_update = time.time()
         else:
-            # Update immediately on first call, then every 2 seconds
             time_since_update = time.time() - self._last_eta_update
-            if time_since_update >= 1.5 or self._smoothed_eta == remaining_time:
-                # Apply exponential smoothing (more responsive on startup)
-                alpha = 0.3 if time_since_update < 10 else 0.2  # More responsive in first 10 seconds
-                self._smoothed_eta = int((1 - alpha) * self._smoothed_eta + alpha * remaining_time)
+            if time_since_update >= 1.0:  # Update every second
+                # Adaptive alpha: more responsive early, more stable later
+                if self.last_progress < 5:
+                    alpha = 0.4  # Very responsive at start
+                elif self.last_progress < 30:
+                    alpha = 0.3  # Moderately responsive
+                else:
+                    alpha = 0.2  # Stable in late stages
+                
+                self._smoothed_eta = int((1 - alpha) * self._smoothed_eta + alpha * blended_eta)
                 self._last_eta_update = time.time()
         
         # Clamp to reasonable range (1 second to 15 minutes)

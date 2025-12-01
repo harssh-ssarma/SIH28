@@ -632,6 +632,7 @@ class RLConflictResolver:
                 conflicts,
                 clusters,
                 timetable_data,
+                self.rl_agent.q_table,
                 self.progress_tracker,
                 job_id=job_id,
                 redis_client=redis_client_global
@@ -835,37 +836,21 @@ class RLConflictResolver:
 
 
 def _update_rl_progress(progress_tracker, current_episode: int, total_episodes: int, resolved: int, total_conflicts: int, job_id: str = None, redis_client=None):
-    """Update RL progress with direct Redis updates (smooth like CP-SAT/GA)"""
+    """Update RL progress - TENSORFLOW-STYLE: ONLY work progress, NO direct assignments"""
     try:
         if not progress_tracker:
             return
         
-        # Use work-based progress (sync method, no async calls)
+        # TENSORFLOW-STYLE: ONLY update work progress
+        # The progress_tracker.calculate_smooth_progress() handles:
+        # - Smooth acceleration when behind
+        # - No jumps between stages
+        # - Proper stage boundaries (85% -> 95%)
         progress_tracker.update_work_progress(current_episode)
         
-        # ENTERPRISE: Direct Redis update like CP-SAT/GA (smooth progress, no jumps)
-        if redis_client and job_id:
-            import json
-            from datetime import datetime, timezone, timedelta
-            
-            # RL is 85-95% (10% weight)
-            progress_pct = int(85 + (current_episode / total_episodes * 10))
-            progress_tracker.last_progress = float(progress_pct)
-            
-            # Calculate ETA based on episode completion rate
-            start_time_str = redis_client.get(f"start_time:job:{job_id}")
-            time_remaining_seconds = None
-            eta = None
-            if start_time_str and current_episode > 0:
-                start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
-                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-                avg_time_per_episode = elapsed / (progress_pct / 100)
-                remaining_percent = 100 - progress_pct
-                time_remaining_seconds = int(avg_time_per_episode * remaining_percent)
-                eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
-            
-            # Progress tracker handles all Redis updates - no direct writes
-            # (This fallback path shouldn't be reached in normal operation)
+        # DO NOT set last_progress directly - this breaks smooth acceleration!
+        # DO NOT calculate manual progress percentages - tracker handles it!
+        # Background task updates Redis automatically from progress_tracker state
         
         # Log EVERY batch for smooth progress (not just every 10)
         logger.info(f'[RL] Episode {current_episode}/{total_episodes}: {resolved}/{total_conflicts} conflicts resolved ({current_episode/total_episodes*100:.1f}%)')
@@ -1020,9 +1005,100 @@ def _resolve_cluster_conflicts_with_rl(courses: List, conflicts: List[Dict],
     """
     Use Q-learning to resolve conflicts within a cluster via intelligent swaps
     Returns: Number of conflicts resolved
+    
+    IMPROVED ALGORITHM:
+    1. Find conflicting course
+    2. Generate ALL feasible alternative slots
+    3. Use Q-table to rank alternatives (if available)
+    4. Try alternatives in order until conflict is resolved
+    5. Validate that swap actually removes conflict
     """
     resolved = 0
     max_iterations = 100
+    
+    # Helper: Check if slot/room assignment causes conflicts
+    def _causes_conflict(course_id, slot, room, schedule, courses_data, time_slots):
+        """NEP 2020: Check conflicts considering department-specific slots and wall-clock time"""
+        course = next((c for c in courses_data if c.course_id == course_id), None)
+        if not course:
+            return True
+        
+        # Build slot_id to (day, period) mapping for cross-department conflict detection
+        slot_to_time = {}
+        for t in time_slots:
+            slot_to_time[t.slot_id] = (t.day, t.period)
+        
+        # Get wall-clock time for this slot
+        current_time = slot_to_time.get(slot)
+        if not current_time:
+            return True  # Unknown slot
+        
+        # Check faculty conflicts - NEP 2020: compare wall-clock time (day, period)
+        faculty_id = course.faculty_id
+        for (other_course_id, session), (other_slot, other_room) in schedule.items():
+            if other_course_id == course_id:
+                continue
+            other_course = next((c for c in courses_data if c.course_id == other_course_id), None)
+            if other_course and other_course.faculty_id == faculty_id:
+                other_time = slot_to_time.get(other_slot)
+                if other_time and other_time == current_time:  # Same wall-clock time
+                    return True  # Faculty conflict
+        
+        # Check room conflicts - room conflicts are still slot-specific (rooms belong to departments)
+        for (other_course_id, session), (other_slot, other_room) in schedule.items():
+            if other_course_id == course_id:
+                continue
+            if other_slot == slot and other_room == room:
+                return True  # Room conflict
+        
+        # Check student conflicts - NEP 2020: compare wall-clock time (cross-department)
+        student_ids = getattr(course, 'student_ids', [])
+        for student_id in student_ids:
+            for (other_course_id, session), (other_slot, other_room) in schedule.items():
+                if other_course_id == course_id:
+                    continue
+                other_course = next((c for c in courses_data if c.course_id == other_course_id), None)
+                if other_course and student_id in getattr(other_course, 'student_ids', []):
+                    other_time = slot_to_time.get(other_slot)
+                    if other_time and other_time == current_time:  # Same wall-clock time
+                        return True  # Student conflict
+        
+        return False
+    
+    # Helper: Find feasible alternative slots (NEP 2020: department-specific)
+    def _find_feasible_slots(course_id, current_slot, current_room, schedule, courses_data, rooms_data, time_slots):
+        course = next((c for c in courses_data if c.course_id == course_id), None)
+        if not course:
+            return []
+        
+        # NEP 2020: Get department-specific time slots for this course
+        course_dept_id = getattr(course, 'dept_id', None)
+        dept_slots = [t for t in time_slots if t.department_id == course_dept_id] if course_dept_id else time_slots
+        
+        feasible = []
+        # NEP 2020: Try all department-specific time slots
+        for t_slot in dept_slots:
+            if t_slot.slot_id == current_slot:
+                continue
+            
+            # Try all rooms
+            for room in rooms_data:
+                # Check room capacity
+                if len(getattr(course, 'student_ids', [])) > room.capacity:
+                    continue
+                
+                # Check if this slot/room causes conflicts (NEP 2020: wall-clock time aware)
+                if not _causes_conflict(course_id, t_slot.slot_id, room.room_id, schedule, courses_data, time_slots):
+                    feasible.append((t_slot.slot_id, room.room_id))
+        
+        return feasible
+    
+    # Log Q-table status
+    q_table_size = len(q_table) if q_table else 0
+    if q_table_size > 0:
+        logger.info(f"[RL] Using Q-table with {q_table_size} states for conflict resolution")
+    else:
+        logger.warning(f"[RL] Q-table is empty - using first feasible slot (no learning)")
     
     for iteration in range(max_iterations):
         if not conflicts:
@@ -1041,41 +1117,57 @@ def _resolve_cluster_conflicts_with_rl(courses: List, conflicts: List[Dict],
         
         current_slot, current_room = current_assignment
         
-        # Find alternative slots using Q-table
-        state_key = f"{course_id}_{current_slot}_{current_room}"
-        actions = q_table.get(state_key, {})
+        # Find ALL feasible alternative slots (NEP 2020: pass time_slots)
+        feasible_alternatives = _find_feasible_slots(
+            course_id, 
+            current_slot, 
+            current_room,
+            timetable_data['current_solution'],
+            timetable_data['courses'],
+            timetable_data['rooms'],
+            timetable_data['time_slots']
+        )
         
-        # Try swapping to best alternative
-        best_action = None
-        best_q_value = float('-inf')
-        
-        for action, q_value in actions.items():
-            if q_value > best_q_value:
-                best_q_value = q_value
-                best_action = action
-        
-        if best_action:
-            # Parse action (format: "slot_X_room_Y")
-            try:
-                parts = best_action.split('_')
-                new_slot = int(parts[1])
-                new_room = int(parts[3])
-                
-                # Apply swap
-                timetable_data['current_solution'][(course_id, 0)] = (new_slot, new_room)
-                resolved += 1
-                conflicts.pop(0)
-            except:
-                conflicts.pop(0)
-        else:
-            # No alternative found
+        if not feasible_alternatives:
+            # No feasible alternatives - skip this conflict
             conflicts.pop(0)
+            logger.debug(f"[RL] No feasible alternatives for course {course_id}")
+            continue
+        
+        # Rank alternatives using Q-table (if available and has data)
+        if q_table and q_table_size > 0:
+            state_key = f"{course_id}_{current_slot}_{current_room}"
+            q_values = {}
+            for alt_slot, alt_room in feasible_alternatives:
+                action_key = f"slot_{alt_slot}_room_{alt_room}"
+                q_values[(alt_slot, alt_room)] = q_table.get(state_key, {}).get(action_key, 0)
+            
+            # Sort by Q-value (highest first)
+            feasible_alternatives = sorted(feasible_alternatives, key=lambda x: q_values.get(x, 0), reverse=True)
+        else:
+            # No Q-table - use heuristic: prefer earlier slots (better for students)
+            feasible_alternatives = sorted(feasible_alternatives, key=lambda x: x[0])  # Sort by slot ID
+        
+        # Try best alternative
+        best_slot, best_room = feasible_alternatives[0]
+        
+        # Apply swap
+        timetable_data['current_solution'][(course_id, 0)] = (best_slot, best_room)
+        
+        # Remove conflict from list
+        conflicts.pop(0)
+        resolved += 1
+        
+        if iteration % 10 == 0:  # Log every 10 resolutions
+            logger.debug(f"[RL] Resolved {resolved} conflicts so far...")
+        
+        logger.debug(f"[RL] Resolved conflict for course {course_id}: slot {current_slot}->{best_slot}, room {current_room}->{best_room}")
     
     return resolved
 
 
 def resolve_conflicts_globally(conflicts: List[Dict], clusters: Dict, timetable_data: Dict,
-                              progress_tracker=None, job_id: str = None, redis_client=None) -> Dict:
+                              q_table: Dict, progress_tracker=None, job_id: str = None, redis_client=None) -> Dict:
     """HYBRID: Global repair (Q-learning) + Bundle-Action RL for remaining conflicts
     
     ARCHITECTURE NOTE: This function NO LONGER calls CP-SAT. CP-SAT is Stage 2a only.
@@ -1169,9 +1261,10 @@ def resolve_conflicts_globally(conflicts: List[Dict], clusters: Dict, timetable_
         course_id_to_course = {c.course_id: c for c in timetable_data['courses']}
         expanded_course_set = [course_id_to_course[cid] for cid in expanded_course_ids if cid in course_id_to_course]
         
-        # CRITICAL FIX: Limit super-cluster size to prevent CP-SAT timeout
-        # Reduced from 100 to 30 due to student constraint computation O(n²) complexity
-        MAX_SUPER_CLUSTER_SIZE = 30  # CP-SAT can handle up to 30 courses with student constraints
+        # CRITICAL FIX: Limit super-cluster size to prevent timeout
+        # RL conflict resolution can handle more courses than CP-SAT (no constraint solving)
+        # Increased from 30 to 50 since we're using Q-learning swaps, not CP-SAT
+        MAX_SUPER_CLUSTER_SIZE = 50  # RL swap-based resolution can handle larger clusters
         
         if len(expanded_course_set) > MAX_SUPER_CLUSTER_SIZE:
             logger.warning(f"[GLOBAL] Super-cluster too large ({len(expanded_course_set)} courses), limiting to {MAX_SUPER_CLUSTER_SIZE}")
@@ -1188,6 +1281,8 @@ def resolve_conflicts_globally(conflicts: List[Dict], clusters: Dict, timetable_
                 reverse=True
             )
             expanded_course_set = sorted_courses[:MAX_SUPER_CLUSTER_SIZE]
+            
+            logger.info(f"[GLOBAL] Top courses by conflicts: {[(c.course_id, course_conflict_counts.get(c.course_id, 0)) for c in expanded_course_set[:5]]}")
         
         logger.info(f"[GLOBAL] Super-cluster: {len(cluster_courses)} -> {len(expanded_course_set)} courses")
         
@@ -1195,12 +1290,18 @@ def resolve_conflicts_globally(conflicts: List[Dict], clusters: Dict, timetable_
         # ARCHITECTURE FIX: Stage 3 should only do Q-learning conflict resolution,
         # not call CP-SAT again. CP-SAT is Stage 2a responsibility.
         try:
+            # Count conflicts before resolution
+            cluster_conflicts = [c for c in conflicts if course_to_cluster.get(c.get('course_id')) == cluster_id]
+            conflicts_before = len(cluster_conflicts)
+            
+            logger.info(f"[GLOBAL] Cluster {cluster_id}: Attempting to resolve {conflicts_before} conflicts across {len(expanded_course_set)} courses")
+            
             # Use Q-learning to resolve conflicts via intelligent swaps
             resolved_conflicts = _resolve_cluster_conflicts_with_rl(
                 expanded_course_set,
-                conflicts,
+                cluster_conflicts,  # Pass only this cluster's conflicts
                 timetable_data,
-                self.q_table,
+                q_table,
                 job_id,
                 redis_client
             )
@@ -1213,12 +1314,15 @@ def resolve_conflicts_globally(conflicts: List[Dict], clusters: Dict, timetable_
             
             if resolved_conflicts > 0:
                 resolved_count += resolved_conflicts
-                logger.info(f"[GLOBAL] Super-cluster {cluster_id} resolved {resolved_conflicts} conflicts via Q-learning")
+                success_rate = (resolved_conflicts / conflicts_before * 100) if conflicts_before > 0 else 0
+                logger.info(f"[GLOBAL] Super-cluster {cluster_id} resolved {resolved_conflicts}/{conflicts_before} conflicts ({success_rate:.1f}%) via Q-learning in {cluster_elapsed:.1f}s")
             else:
-                logger.warning(f"[GLOBAL] Super-cluster {cluster_id} Q-learning couldn't resolve conflicts - accepting current state")
+                logger.warning(f"[GLOBAL] Super-cluster {cluster_id} couldn't resolve any of {conflicts_before} conflicts in {cluster_elapsed:.1f}s - may need manual review")
         
         except Exception as e:
             logger.error(f"[GLOBAL] Super-cluster {cluster_id} failed: {e}")
+            import traceback
+            logger.error(f"[GLOBAL] Traceback: {traceback.format_exc()}")
         
         # CRITICAL FIX: Update work progress after each cluster (shows progress, not stuck)
         if progress_tracker:
@@ -1263,24 +1367,10 @@ def _update_global_progress(progress_tracker, current: int, total: int, resolved
         from datetime import datetime, timezone, timedelta
         
         # CORRECTED: Global repair is 89-98% (9% weight, not 10%)
-        # Stage 1 = 0-10%, Stage 2A = 10-60%, Stage 2B = 60-89%, Stage 3 = 89-98%
-        progress_pct = int(89 + (current / total * 9))  # 89% + up to 9% = 98%
-        progress_tracker.last_progress = float(progress_pct)
-        
-        # Calculate ETA
-        start_time_str = redis_client.get(f"start_time:job:{job_id}")
-        time_remaining_seconds = None
-        eta = None
-        if start_time_str and current > 0:
-            start_time = datetime.fromisoformat(start_time_str.decode() if isinstance(start_time_str, bytes) else start_time_str)
-            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-            avg_time_per_cluster = elapsed / (progress_pct / 100)
-            remaining_percent = 100 - progress_pct
-            time_remaining_seconds = int(avg_time_per_cluster * remaining_percent)
-            eta = (datetime.now(timezone.utc) + timedelta(seconds=time_remaining_seconds)).isoformat()
-        
-        # Progress tracker handles all Redis updates via update_work_progress()
-        # No need for direct Redis writes here
+        # TENSORFLOW-STYLE: ONLY update work progress
+        # DO NOT set last_progress directly - this breaks smooth acceleration!
+        # DO NOT calculate manual progress percentages - tracker handles it!
+        # Background task updates Redis automatically from progress_tracker state
         
         logger.info(f"[GLOBAL] Cluster {current}/{total}: {resolved}/{total_conflicts} conflicts resolved")
     except Exception as e:
@@ -1377,14 +1467,28 @@ def resolve_with_bundle_actions(conflicts: List[Dict], timetable_data: Dict,
             conflicts.pop(0)
             continue
         
-        # Generate bundle actions (2-3 courses)
+        # Generate bundle actions (2-3 courses) - NEP 2020: use department-specific slots
         best_action = None
         for size in [2, 3]:
             if size > len(student_courses):
                 continue
             
             for bundle in itertools.combinations(student_courses, size):
-                for time_slot in timetable_data['time_slots'][:10]:  # Try first 10 slots
+                # NEP 2020: Get department-specific slots for each course in bundle
+                # For bundles, we need to check each course's dept slots
+                bundle_dept_ids = set(getattr(c, 'dept_id', None) for c in bundle if hasattr(c, 'dept_id'))
+                
+                # Get union of all relevant department slots (try up to 10 per department)
+                candidate_slots = []
+                for dept_id in bundle_dept_ids:
+                    dept_slots = [t for t in timetable_data['time_slots'] if t.department_id == dept_id][:10]
+                    candidate_slots.extend(dept_slots)
+                
+                # If no department info, fall back to first 10 slots
+                if not candidate_slots:
+                    candidate_slots = timetable_data['time_slots'][:10]
+                
+                for time_slot in candidate_slots:
                     action = BundleAction(list(bundle), time_slot.slot_id, timetable_data)
                     if action.is_valid():
                         best_action = action

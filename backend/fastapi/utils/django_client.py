@@ -5,16 +5,20 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from typing import List, Dict, Optional
 from models.timetable_models import Course, Faculty, Room, TimeSlot, Student, Batch
+from utils.cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 
 
 class DjangoAPIClient:
-    """Client for fetching data directly from Django database with connection pooling"""
+    """Client for fetching data directly from Django database with intelligent caching"""
 
-    def __init__(self):
+    def __init__(self, redis_client=None):
         self.db_conn = None
+        self.cache_manager = CacheManager(redis_client=redis_client, db_conn=None)
         self._connect_db()
+        # Set db_conn in cache manager after connection
+        self.cache_manager.db_conn = self.db_conn
     
     def _connect_db(self):
         """Connect to Django's PostgreSQL database with optimized settings"""
@@ -39,28 +43,135 @@ class DjangoAPIClient:
         """Close database connection"""
         if self.db_conn:
             self.db_conn.close()
+    
+    def resolve_org_id(self, org_identifier: str) -> str:
+        """
+        Resolve organization name to UUID if needed.
+        If org_identifier is already a UUID, return it.
+        If it's an org_name, look up the UUID.
+        
+        Args:
+            org_identifier: Either org_id (UUID) or org_name
+        
+        Returns:
+            org_id (UUID)
+        """
+        # Check if it's already a UUID (contains hyphens and is 36 chars)
+        if len(org_identifier) == 36 and '-' in org_identifier:
+            return org_identifier
+        
+        # It's an org_name, look up the UUID
+        try:
+            cursor = self.db_conn.cursor()
+            cursor.execute(
+                "SELECT org_id FROM organizations WHERE org_name = %s",
+                (org_identifier,)
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            
+            if row:
+                logger.info(f"[ORG] Resolved '{org_identifier}' -> {row['org_id']}")
+                return row['org_id']
+            else:
+                logger.error(f"[ORG] Organization '{org_identifier}' not found")
+                # List available orgs
+                cursor = self.db_conn.cursor()
+                cursor.execute("SELECT org_id, org_name FROM organizations LIMIT 5")
+                orgs = cursor.fetchall()
+                cursor.close()
+                logger.error(f"[ORG] Available: {[(o['org_name'], o['org_id']) for o in orgs]}")
+                raise ValueError(f"Organization '{org_identifier}' not found")
+        except Exception as e:
+            logger.error(f"[ORG] Failed to resolve org_id: {e}")
+            raise
+    
+    async def fetch_time_config(self, org_id: str) -> Optional[Dict]:
+        """
+        Fetch timetable configuration from database with caching.
+        
+        Args:
+            org_id: Organization ID
+        
+        Returns:
+            Configuration dict with working_days, slots_per_day, start_time, etc.
+        """
+        # Try cache first
+        cached_config = await self.cache_manager.get('config', org_id)
+        if cached_config:
+            logger.info(f"[CONFIG] Using cached config: {cached_config['working_days']} days, {cached_config['slots_per_day']} slots/day")
+            return cached_config
+        
+        # Fetch from database
+        try:
+            cursor = self.db_conn.cursor()
+            cursor.execute("""
+                SELECT working_days, slots_per_day, start_time, end_time,
+                       slot_duration_minutes, lunch_break_enabled, 
+                       lunch_break_start, lunch_break_end
+                FROM timetable_config
+                WHERE org_id = %s AND is_active = true
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (org_id,))
+            
+            config_row = cursor.fetchone()
+            cursor.close()
+            
+            if config_row:
+                config = {
+                    'working_days': config_row['working_days'],
+                    'slots_per_day': config_row['slots_per_day'],
+                    'start_time': str(config_row['start_time']),
+                    'end_time': str(config_row['end_time']),
+                    'slot_duration_minutes': config_row['slot_duration_minutes'],
+                    'lunch_break_enabled': config_row['lunch_break_enabled'],
+                    'lunch_break_start': str(config_row['lunch_break_start']) if config_row['lunch_break_start'] else None,
+                    'lunch_break_end': str(config_row['lunch_break_end']) if config_row['lunch_break_end'] else None,
+                }
+                
+                # Cache for 24 hours
+                await self.cache_manager.set('config', org_id, config, ttl=86400)
+                logger.info(f"[CONFIG] Fetched from DB and cached: {config['working_days']} days, {config['slots_per_day']} slots/day")
+                return config
+            else:
+                logger.warning(f"[CONFIG] No config found for org {org_id}, using defaults")
+                return None
+                
+        except Exception as e:
+            logger.error(f"[CONFIG] Fetch error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
 
     async def fetch_courses(
         self,
-        org_name: str,
+        org_id: str,
         semester: int,
         department_id: Optional[str] = None
     ) -> List[Course]:
-        """Fetch courses from database"""
+        """Fetch courses from database with caching"""
+        # Try cache first
+        cached_courses = await self.cache_manager.get('courses', org_id, semester=semester, department_id=department_id)
+        if cached_courses:
+            logger.info(f"[CACHE] Using cached courses: {len(cached_courses)} courses")
+            # Deserialize from dict back to Course objects
+            return [Course(**c) for c in cached_courses]
+        
+        # Fetch from database
         try:
             cursor = self.db_conn.cursor()
             
-            # First get org_id from org_name
-            cursor.execute("SELECT org_id, org_name FROM organizations WHERE org_name = %s", (org_name,))
+            # Validate org_id exists
+            cursor.execute("SELECT org_id, org_name FROM organizations WHERE org_id = %s", (org_id,))
             org_row = cursor.fetchone()
             if not org_row:
-                logger.error(f"Organization '{org_name}' not found")
+                logger.error(f"Organization ID '{org_id}' not found")
                 # Try to list available organizations
                 cursor.execute("SELECT org_id, org_name FROM organizations LIMIT 5")
                 orgs = cursor.fetchall()
                 logger.error(f"Available organizations: {[o['org_name'] for o in orgs]}")
                 return []
-            org_id = org_row['org_id']
             logger.info(f"Found organization: {org_row['org_name']} (ID: {org_id})")
             
             # CRITICAL: Use subquery to avoid ARRAY_AGG duplicates from join multiplication
@@ -130,6 +241,8 @@ class DjangoAPIClient:
                         num_sections = (len(student_ids) + 59) // 60  # Ceiling division
                         students_per_section = len(student_ids) // num_sections
                         remainder = len(student_ids) % num_sections
+                        
+                        logger.debug(f"Splitting {row['course_code']} ({len(student_ids)} students) into {num_sections} sections")
                         
                         start_idx = 0
                         for section_idx in range(num_sections):
@@ -231,8 +344,16 @@ class DjangoAPIClient:
                 logger.info(f"Top 10 offerings by enrollment: {[(r['course_code'], r['student_count']) for r in sample_offerings]}")
             
             cursor.close()
-            logger.info(f"Fetched {len(courses)} course offerings (out of {len(rows)} total offerings)")
+            sections_created = len(courses) - len(rows)
+            logger.info(f"Fetched {len(rows)} course offerings from database")
+            logger.info(f"Created {len(courses)} course sections ({sections_created} extra sections from splitting large courses)")
             logger.info(f"Total unique students: {len(unique_students)} (System total: {total_students})")
+            
+            # Cache courses for 30 minutes (convert to dict for JSON serialization)
+            courses_dict = [c.dict() for c in courses]
+            await self.cache_manager.set('courses', org_id, courses_dict, ttl=1800, semester=semester, department_id=department_id)
+            logger.info(f"[CACHE] Cached {len(courses)} courses")
+            
             return courses
 
         except Exception as e:
@@ -241,17 +362,25 @@ class DjangoAPIClient:
                 self.db_conn.rollback()
             return []
 
-    async def fetch_faculty(self, org_name: str) -> Dict[str, Faculty]:
-        """Fetch faculty from database"""
+    async def fetch_faculty(self, org_id: str) -> Dict[str, Faculty]:
+        """Fetch faculty from database with caching"""
+        # Try cache first
+        cached_faculty = await self.cache_manager.get('faculty', org_id)
+        if cached_faculty:
+            logger.info(f"[CACHE] Using cached faculty: {len(cached_faculty)} faculty members")
+            # Deserialize from dict back to Faculty objects
+            return {fid: Faculty(**fdata) for fid, fdata in cached_faculty.items()}
+        
+        # Fetch from database
         try:
             cursor = self.db_conn.cursor()
             
-            # Get org_id
-            cursor.execute("SELECT org_id FROM organizations WHERE org_name = %s", (org_name,))
+            # Validate org_id exists
+            cursor.execute("SELECT org_id FROM organizations WHERE org_id = %s", (org_id,))
             org_row = cursor.fetchone()
             if not org_row:
+                logger.warning(f"Organization ID '{org_id}' not found")
                 return {}
-            org_id = org_row['org_id']
             
             cursor.execute("""
                 SELECT faculty_id, faculty_code, first_name, last_name, 
@@ -280,6 +409,12 @@ class DjangoAPIClient:
             
             cursor.close()
             logger.info(f"Fetched {len(faculty_dict)} faculty from database")
+            
+            # Cache faculty for 1 hour (convert to dict for JSON serialization)
+            faculty_cache = {fid: fac.dict() for fid, fac in faculty_dict.items()}
+            await self.cache_manager.set('faculty', org_id, faculty_cache, ttl=3600)
+            logger.info(f"[CACHE] Cached {len(faculty_dict)} faculty members")
+            
             return faculty_dict
 
         except Exception as e:
@@ -288,17 +423,25 @@ class DjangoAPIClient:
                 self.db_conn.rollback()
             return {}
 
-    async def fetch_rooms(self, org_name: str) -> List[Room]:
-        """Fetch rooms from database"""
+    async def fetch_rooms(self, org_id: str) -> List[Room]:
+        """Fetch rooms from database with caching"""
+        # Try cache first
+        cached_rooms = await self.cache_manager.get('rooms', org_id)
+        if cached_rooms:
+            logger.info(f"[CACHE] Using cached rooms: {len(cached_rooms)} rooms")
+            # Deserialize from dict back to Room objects
+            return [Room(**r) for r in cached_rooms]
+        
+        # Fetch from database
         try:
             cursor = self.db_conn.cursor()
             
-            # Get org_id
-            cursor.execute("SELECT org_id FROM organizations WHERE org_name = %s", (org_name,))
+            # Validate org_id exists
+            cursor.execute("SELECT org_id FROM organizations WHERE org_id = %s", (org_id,))
             org_row = cursor.fetchone()
             if not org_row:
+                logger.warning(f"Organization ID '{org_id}' not found")
                 return []
-            org_id = org_row['org_id']
             
             cursor.execute("""
                 SELECT room_id, room_code, room_number, room_type, 
@@ -329,6 +472,12 @@ class DjangoAPIClient:
             
             cursor.close()
             logger.info(f"Fetched {len(rooms)} rooms from database")
+            
+            # Cache rooms for 1 hour (convert to dict for JSON serialization)
+            rooms_cache = [r.dict() for r in rooms]
+            await self.cache_manager.set('rooms', org_id, rooms_cache, ttl=3600)
+            logger.info(f"[CACHE] Cached {len(rooms)} rooms")
+            
             return rooms
 
         except Exception as e:
@@ -337,19 +486,43 @@ class DjangoAPIClient:
                 self.db_conn.rollback()
             return []
 
-    async def fetch_time_slots(self, org_name: str, time_config: dict = None) -> List[TimeSlot]:
+    async def fetch_time_slots(self, org_id: str, time_config: dict = None, departments: List[str] = None) -> List[TimeSlot]:
         """
-        Generate dynamic time slots based on time_config from TimetableConfiguration
+        Generate department-specific time slots for NEP 2020 centralized scheduling.
+        
+        NEP 2020 Architecture:
+        - Each department has its own set of time slots (e.g., 127 departments × 48 slots = 6,096 total)
+        - Students can take courses across departments without time conflicts
+        - A course scheduled in "CS Monday 9:00-10:00" is DIFFERENT from "Physics Monday 9:00-10:00"
         
         Args:
-            org_name: Organization name
+            org_id: Organization ID (UUID)
             time_config: Time configuration dict with working_days, slots_per_day, start_time, etc.
+            departments: List of department IDs (if None, fetches from database)
         
         Returns:
-            List of TimeSlot objects
+            List of TimeSlot objects (one per department per time slot)
         """
         try:
             from datetime import datetime, timedelta
+            
+            # If no departments provided, fetch from database
+            if not departments:
+                cursor = self.db_conn.cursor()
+                cursor.execute("""
+                    SELECT DISTINCT dept_id 
+                    FROM courses 
+                    WHERE org_id = %s
+                    AND is_active = true
+                    ORDER BY dept_id
+                """, (org_id,))
+                dept_rows = cursor.fetchall()
+                departments = [row['dept_id'] for row in dept_rows]
+                logger.info(f"[TIME_SLOTS] Fetched {len(departments)} departments from database for org {org_id}")
+            
+            if not departments:
+                logger.error("[TIME_SLOTS] No departments found! Cannot generate time slots.")
+                return []
             
             # Use time_config if provided, otherwise use defaults
             if time_config:
@@ -381,47 +554,52 @@ class DjangoAPIClient:
             lunch_start = datetime.strptime(lunch_break_start, '%H:%M') if lunch_break_enabled else None
             lunch_end = datetime.strptime(lunch_break_end, '%H:%M') if lunch_break_enabled else None
             
-            # Generate time slots
+            # NEP 2020: Generate time slots FOR EACH DEPARTMENT
             days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'][:working_days]
             time_slots = []
-            slot_id = 0
             
-            for day_idx, day in enumerate(days):
-                current_time = start_time
-                period_idx = 0
-                
-                for _ in range(slots_per_day):
-                    # Calculate slot end time
-                    slot_end = current_time + timedelta(minutes=slot_duration)
+            for dept_id in departments:
+                for day_idx, day in enumerate(days):
+                    current_time = start_time
+                    period_idx = 0
                     
-                    # Check if this slot overlaps with lunch break
-                    if lunch_break_enabled and lunch_start and lunch_end:
-                        # Skip if slot starts during lunch break
-                        if lunch_start <= current_time < lunch_end:
-                            current_time = lunch_end  # Jump to end of lunch break
-                            continue
-                    
-                    # Create time slot
-                    start_str = current_time.strftime('%H:%M')
-                    end_str = slot_end.strftime('%H:%M')
-                    
-                    slot = TimeSlot(
-                        slot_id=str(slot_id),
-                        day_of_week=day,
-                        day=day_idx,
-                        period=period_idx,
-                        start_time=start_str,
-                        end_time=end_str,
-                        slot_name=f"{day.capitalize()} {start_str}-{end_str}"
-                    )
-                    time_slots.append(slot)
-                    
-                    # Move to next slot
-                    current_time = slot_end
-                    period_idx += 1
-                    slot_id += 1
+                    for _ in range(slots_per_day):
+                        # Calculate slot end time
+                        slot_end = current_time + timedelta(minutes=slot_duration)
+                        
+                        # Check if this slot overlaps with lunch break
+                        if lunch_break_enabled and lunch_start and lunch_end:
+                            # Skip if slot starts during lunch break
+                            if lunch_start <= current_time < lunch_end:
+                                current_time = lunch_end  # Jump to end of lunch break
+                                continue
+                        
+                        # Create time slot
+                        start_str = current_time.strftime('%H:%M')
+                        end_str = slot_end.strftime('%H:%M')
+                        
+                        # NEP 2020: Department-specific slot ID
+                        slot_id = f"{dept_id}_{day_idx}_{period_idx}"
+                        
+                        slot = TimeSlot(
+                            slot_id=slot_id,
+                            department_id=dept_id,
+                            day_of_week=day,
+                            day=day_idx,
+                            period=period_idx,
+                            start_time=start_str,
+                            end_time=end_str,
+                            slot_name=f"{dept_id[:8]} {day.capitalize()} {start_str}-{end_str}"
+                        )
+                        time_slots.append(slot)
+                        
+                        # Move to next slot
+                        current_time = slot_end
+                        period_idx += 1
             
-            logger.info(f"[TIME_SLOTS] Generated {len(time_slots)} time slots ({working_days} days × {slots_per_day} slots)")
+            slots_per_dept = len(time_slots) // len(departments) if departments else 0
+            logger.info(f"[TIME_SLOTS] Generated {len(time_slots)} department-specific time slots")
+            logger.info(f"[TIME_SLOTS] {len(departments)} departments × {slots_per_dept} slots/dept = {len(time_slots)} total")
             if lunch_break_enabled:
                 logger.info(f"[TIME_SLOTS] Lunch break: {lunch_break_start}-{lunch_break_end}")
             
@@ -433,17 +611,25 @@ class DjangoAPIClient:
             logger.error(traceback.format_exc())
             return []
 
-    async def fetch_students(self, org_name: str) -> Dict[str, Student]:
-        """Fetch students from database"""
+    async def fetch_students(self, org_id: str) -> Dict[str, Student]:
+        """Fetch students from database with caching"""
+        # Try cache first
+        cached_students = await self.cache_manager.get('students', org_id)
+        if cached_students:
+            logger.info(f"[CACHE] Using cached students: {len(cached_students)} students")
+            # Deserialize from dict back to Student objects
+            return {sid: Student(**sdata) for sid, sdata in cached_students.items()}
+        
+        # Fetch from database
         try:
             cursor = self.db_conn.cursor()
             
-            # Get org_id
-            cursor.execute("SELECT org_id FROM organizations WHERE org_name = %s", (org_name,))
+            # Validate org_id exists
+            cursor.execute("SELECT org_id FROM organizations WHERE org_id = %s", (org_id,))
             org_row = cursor.fetchone()
             if not org_row:
+                logger.warning(f"Organization ID '{org_id}' not found")
                 return {}
-            org_id = org_row['org_id']
             
             cursor.execute("""
                 SELECT student_id, enrollment_number, first_name, last_name,
@@ -472,6 +658,12 @@ class DjangoAPIClient:
             
             cursor.close()
             logger.info(f"Fetched {len(students_dict)} students from database")
+            
+            # Cache students for 30 minutes (convert to dict for JSON serialization)
+            students_cache = {sid: stud.dict() for sid, stud in students_dict.items()}
+            await self.cache_manager.set('students', org_id, students_cache, ttl=1800)
+            logger.info(f"[CACHE] Cached {len(students_dict)} students")
+            
             return students_dict
 
         except Exception as e:

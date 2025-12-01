@@ -108,46 +108,44 @@ class AdaptiveCPSATSolver:
         """
         Ultra-fast cluster solving with aggressive shortcuts + cancellation support
         """
-        logger.info(f"\n{'='*80}")
-        logger.info(f"[CP-SAT DEBUG] Starting cluster with {len(cluster)} courses")
-        logger.info(f"[CP-SAT DEBUG] Available: {len(self.rooms)} rooms, {len(self.time_slots)} time slots")
+        logger.debug(f"Starting cluster with {len(cluster)} courses, {len(self.rooms)} rooms, {len(self.time_slots)} slots")
         self._update_progress(f"Starting ({len(cluster)} courses)")
         
         # Check cancellation before starting
         if self._check_cancellation():
-            logger.info(f"[CP-SAT DEBUG] [ERROR] Job cancelled before cluster solve")
+            logger.warning(f"CP-SAT: Job cancelled before cluster solve")
             return None
         
         # SHORTCUT 1: Skip large clusters immediately
         if len(cluster) > self.max_cluster_size:
-            logger.warning(f"[CP-SAT DEBUG] [ERROR] Cluster too large: {len(cluster)} > {self.max_cluster_size}")
+            logger.warning(f"CP-SAT: Cluster too large ({len(cluster)} > {self.max_cluster_size}) - using greedy")
             return None
         
         # SHORTCUT 2: Ultra-fast feasibility (< 50ms)
-        logger.info(f"[CP-SAT DEBUG] Running feasibility check...")
+        logger.debug(f"Running feasibility check...")
         self._update_progress("Checking feasibility")
         if not self._ultra_fast_feasibility(cluster):
-            logger.warning(f"[CP-SAT DEBUG] [ERROR] Failed feasibility check")
+            logger.warning(f"CP-SAT: Feasibility check failed for cluster")
             return None
-        logger.info(f"[CP-SAT DEBUG] [OK] Passed feasibility check")
+        logger.debug(f"Passed feasibility check")
         
         # Try all 4 strategies with progressive relaxation
         for idx, strategy in enumerate(self.STRATEGIES):
             # Check cancellation between strategies
             if self._check_cancellation():
-                logger.info(f"[CP-SAT DEBUG] [ERROR] Job cancelled during strategy {idx+1}")
+                logger.warning(f"CP-SAT: Job cancelled during strategy {idx+1}")
                 return None
             
-            logger.info(f"[CP-SAT DEBUG] Trying strategy {idx+1}/{len(self.STRATEGIES)}: {strategy['name']}")
+            logger.debug(f"Trying strategy {idx+1}/{len(self.STRATEGIES)}: {strategy['name']}")
             self._update_progress(f"Trying {strategy['name']}")
             solution = self._try_cpsat_with_strategy(cluster, strategy)
             if solution:
-                logger.info(f"[CP-SAT DEBUG] [OK] Strategy {strategy['name']} succeeded with {len(solution)} assignments")
+                logger.debug(f"Strategy {strategy['name']} succeeded with {len(solution)} assignments")
                 self._update_progress(f"Completed ({len(solution)} assignments)")
                 return solution
-            logger.warning(f"[CP-SAT DEBUG] [ERROR] Strategy {strategy['name']} failed")
+            logger.debug(f"Strategy {strategy['name']} failed")
         
-        logger.error(f"[CP-SAT DEBUG] [ERROR] All strategies failed for cluster")
+        logger.warning(f"CP-SAT: All strategies failed for cluster - will use greedy fallback")
         return None
     
     def _check_cancellation(self) -> bool:
@@ -161,42 +159,56 @@ class AdaptiveCPSATSolver:
         return False
     
     def _ultra_fast_feasibility(self, cluster: List[Course]) -> bool:
-        """Ultra-fast feasibility check (< 50ms) - only critical checks"""
-        logger.info(f"[CP-SAT FEASIBILITY] Checking {len(cluster)} courses")
+        """Ultra-fast feasibility check (< 50ms) - only critical checks
+        NEP 2020: Uses department-specific time slots"""
+        logger.debug(f"Checking feasibility for {len(cluster)} courses")
         
-        # Check only first 5 courses and ALL slots/rooms for better accuracy
+        # Check only first 5 courses and ALL dept slots/rooms for better accuracy
         for idx, course in enumerate(cluster[:5]):
             available = 0
             students = len(course.student_ids)
             duration = course.duration
-            logger.info(f"[CP-SAT FEASIBILITY] Course {idx+1}: {students} students, duration={duration}")
             
-            # Check ALL time slots and rooms (not just first 10)
-            for t_slot in self.time_slots:
+            # NEP 2020: Get department-specific time slots
+            course_dept_id = getattr(course, 'dept_id', None)
+            dept_slots = [t for t in self.time_slots if t.department_id == course_dept_id] if course_dept_id else self.time_slots
+            
+            logger.debug(f"Course {idx+1}: {students} students, duration={duration}, dept={course_dept_id}, slots={len(dept_slots)}")
+            
+            # Check ALL department time slots and rooms
+            for t_slot in dept_slots:
                 for room in self.rooms:
                     # Only check room capacity (HC5)
                     if students <= room.capacity:
                         available += 1
             
-            logger.info(f"[CP-SAT FEASIBILITY] Course {idx+1}: found {available} valid slots (needs {duration})")
+            logger.debug(f"Course {idx+1}: found {available} valid slots (needs {duration})")
             # Relax the check - if we have at least 50% of needed slots, continue
             if available < duration * 0.5:
                 logger.warning(f"[CP-SAT FEASIBILITY] [ERROR] Course {idx+1} insufficient slots: {available} < {duration * 0.5}")
                 return False
         
-        # Quick faculty overload check
+        # Quick faculty overload check (per department)
         from collections import defaultdict
-        faculty_load = defaultdict(int)
+        # NEP 2020: Faculty can teach across departments, check per-department load
+        faculty_dept_load = defaultdict(lambda: defaultdict(int))
         for course in cluster:
-            faculty_load[course.faculty_id] += course.duration
+            course_dept = getattr(course, 'dept_id', 'UNKNOWN')
+            faculty_dept_load[course.faculty_id][course_dept] += course.duration
         
-        max_load = max(faculty_load.values(), default=0)
-        logger.info(f"[CP-SAT FEASIBILITY] Max faculty load: {max_load} (limit: {len(self.time_slots)})")
-        if max_load > len(self.time_slots):
-            logger.warning(f"[CP-SAT FEASIBILITY] [ERROR] Faculty overloaded: {max_load} > {len(self.time_slots)}")
-            return False
+        # Get slots per department
+        dept_slot_counts = defaultdict(int)
+        for t_slot in self.time_slots:
+            dept_slot_counts[t_slot.department_id] += 1
         
-        logger.info(f"[CP-SAT FEASIBILITY] [OK] All checks passed")
+        for faculty_id, dept_loads in faculty_dept_load.items():
+            for dept_id, load in dept_loads.items():
+                dept_limit = dept_slot_counts.get(dept_id, 48)  # Default 48 slots per dept
+                if load > dept_limit:
+                    logger.warning(f"[CP-SAT FEASIBILITY] [ERROR] Faculty {faculty_id} overloaded in dept {dept_id}: {load} > {dept_limit}")
+                    return False
+        
+        logger.debug(f"All feasibility checks passed")
         return True
     
     def _quick_feasibility_check(self, cluster: List[Course]) -> bool:
@@ -235,7 +247,11 @@ class AdaptiveCPSATSolver:
         """Count valid (time, room) pairs for a course (NEP 2020 constraints only)"""
         count = 0
         
-        for t_slot in self.time_slots:
+        # NEP 2020: Filter time slots by course department
+        course_dept_id = getattr(course, 'dept_id', None)
+        dept_slots = [t for t in self.time_slots if t.department_id == course_dept_id] if course_dept_id else self.time_slots
+        
+        for t_slot in dept_slots:
             for room in self.rooms:
                 # HC5: Room capacity check
                 if len(course.student_ids) > room.capacity:
@@ -386,8 +402,8 @@ class AdaptiveCPSATSolver:
             variables.clear()
             del valid_domains
             
-            logger.info(f"[CP-SAT SOLVE] [OK] SUCCESS: {len(solution)} assignments in {solver.WallTime():.2f}s")
-            logger.info(f"[CP-SAT SOLVE] Coverage: {len(solution)}/{len(cluster)} courses ({len(solution)/len(cluster)*100:.1f}%)")
+            logger.debug(f"CP-SAT SUCCESS: {len(solution)} assignments in {solver.WallTime():.2f}s")
+            logger.debug(f"Coverage: {len(solution)}/{len(cluster)} courses ({len(solution)/len(cluster)*100:.1f}%)")
             return solution
         
         # Clear on failure
@@ -404,8 +420,9 @@ class AdaptiveCPSATSolver:
         """
         Pre-filter valid (time, room) pairs
         Reduces search space by 70-80%
+        NEP 2020: Uses department-specific time slots
         """
-        logger.info(f"[CP-SAT DOMAINS] Computing valid domains for {len(cluster)} courses")
+        logger.debug(f"Computing valid domains for {len(cluster)} courses")
         valid_domains = {}
         total_valid_pairs = 0
         
@@ -417,7 +434,11 @@ class AdaptiveCPSATSolver:
             student_count = len(course.student_ids)
             faculty_avail = None
             
-            logger.debug(f"[CP-SAT DOMAINS] Course {course_idx+1}/{len(cluster)}: {student_count} students")
+            # NEP 2020: Get department-specific time slots
+            course_dept_id = getattr(course, 'dept_id', None)
+            dept_slots = [t for t in self.time_slots if t.department_id == course_dept_id] if course_dept_id else self.time_slots
+            
+            logger.debug(f"[CP-SAT DOMAINS] Course {course_idx+1}/{len(cluster)}: {student_count} students, dept={course_dept_id}, slots={len(dept_slots)}")
             
             if course.faculty_id in self.faculty:
                 faculty_avail = set(getattr(self.faculty[course.faculty_id], 'available_slots', []))
@@ -429,7 +450,7 @@ class AdaptiveCPSATSolver:
                 rejected_features = 0
                 rejected_faculty = 0
                 
-                for t_slot in self.time_slots:
+                for t_slot in dept_slots:  # NEP 2020: Use department-specific slots
                     # Faculty availability check
                     if faculty_avail and t_slot.slot_id not in faculty_avail:
                         rejected_faculty += len(self.rooms)
@@ -466,26 +487,34 @@ class AdaptiveCPSATSolver:
         # Clear temporary data
         del room_features
         
-        logger.info(f"[CP-SAT DOMAINS] [OK] {total_valid_pairs} pairs for {len(cluster)} courses (avg: {total_valid_pairs/len(cluster):.0f})")
+        logger.debug(f"{total_valid_pairs} pairs for {len(cluster)} courses (avg: {total_valid_pairs/len(cluster):.0f})")
         return valid_domains
     
     def _add_faculty_constraints(self, model, variables, cluster):
-        """Faculty conflict prevention - CORRECT: One faculty = one time slot = one room"""
+        """Faculty conflict prevention - NEP 2020: Group by wall-clock time across departments"""
         for faculty_id in set(c.faculty_id for c in cluster):
             faculty_courses = [c for c in cluster if c.faculty_id == faculty_id]
             
+            # NEP 2020: Group slots by (day, period) to handle cross-department teaching
+            # Faculty can't teach CS Mon 9-10 AND Physics Mon 9-10 simultaneously
+            from collections import defaultdict
+            slots_by_time = defaultdict(list)
             for t_slot in self.time_slots:
-                # CORRECT: Collect ALL assignments (any course, any session) for this faculty at this time
+                slots_by_time[(t_slot.day, t_slot.period)].append(t_slot.slot_id)
+            
+            for time_key, slot_ids in slots_by_time.items():
+                # Collect ALL assignments for this faculty at this wall-clock time (across all departments)
                 faculty_time_vars = []
                 
                 for course in faculty_courses:
                     for session in range(course.duration):
-                        for room in self.rooms:
-                            var_key = (course.course_id, session, t_slot.slot_id, room.room_id)
-                            if var_key in variables:
-                                faculty_time_vars.append(variables[var_key])
+                        for slot_id in slot_ids:  # Check all department slots at this time
+                            for room in self.rooms:
+                                var_key = (course.course_id, session, slot_id, room.room_id)
+                                if var_key in variables:
+                                    faculty_time_vars.append(variables[var_key])
                 
-                # Faculty can be in at most ONE room at this time (teaching at most one session of one course)
+                # Faculty can be in at most ONE room at this wall-clock time
                 if faculty_time_vars:
                     model.Add(sum(faculty_time_vars) <= 1)
     
@@ -532,10 +561,17 @@ class AdaptiveCPSATSolver:
                     model.Add(sum(faculty_vars) <= max_load)
     
     def _add_hierarchical_student_constraints(self, model, variables, cluster, priority: str):
-        """CORRECTED: ALL students MUST get constraints (with safety limits for large clusters)"""
+        """CORRECTED: ALL students MUST get constraints (with safety limits for large clusters)
+        NEP 2020: Group slots by wall-clock time to prevent cross-department conflicts"""
         import time
         start_time = time.time()
         MAX_CONSTRAINT_TIME = 30  # Maximum 30 seconds for constraint computation
+        
+        # NEP 2020: Group slots by (day, period) for cross-department conflict prevention
+        from collections import defaultdict
+        slots_by_time = defaultdict(list)
+        for t_slot in self.time_slots:
+            slots_by_time[(t_slot.day, t_slot.period)].append(t_slot.slot_id)
         
         student_groups = self._group_students_by_conflicts(cluster)
         
@@ -566,14 +602,15 @@ class AdaptiveCPSATSolver:
                 
                 courses_list = [c for c in cluster if student_id in c.student_ids]
                 
-                # For each time slot, student can take at most 1 course
-                for t_slot in self.time_slots:
+                # NEP 2020: For each wall-clock time, student can take at most 1 course (across all departments)
+                for time_key, slot_ids in slots_by_time.items():
                     student_vars = [
-                        variables[(c.course_id, s, t_slot.slot_id, r.room_id)]
+                        variables[(c.course_id, s, slot_id, r.room_id)]
                         for c in courses_list
                         for s in range(c.duration)
+                        for slot_id in slot_ids  # Check all department slots at this time
                         for r in self.rooms
-                        if (c.course_id, s, t_slot.slot_id, r.room_id) in variables
+                        if (c.course_id, s, slot_id, r.room_id) in variables
                     ]
                     if student_vars:
                         model.Add(sum(student_vars) <= 1)
@@ -586,13 +623,15 @@ class AdaptiveCPSATSolver:
             # Only critical students (5+ courses) - for speed
             for student_id in student_groups["CRITICAL"]:
                 courses_list = [c for c in cluster if student_id in c.student_ids]
-                for t_slot in self.time_slots:
+                # NEP 2020: Group by wall-clock time
+                for time_key, slot_ids in slots_by_time.items():
                     student_vars = [
-                        variables[(c.course_id, s, t_slot.slot_id, r.room_id)]
+                        variables[(c.course_id, s, slot_id, r.room_id)]
                         for c in courses_list
                         for s in range(c.duration)
+                        for slot_id in slot_ids
                         for r in self.rooms
-                        if (c.course_id, s, t_slot.slot_id, r.room_id) in variables
+                        if (c.course_id, s, slot_id, r.room_id) in variables
                     ]
                     if student_vars:
                         model.Add(sum(student_vars) <= 1)
@@ -622,7 +661,7 @@ class AdaptiveCPSATSolver:
     
     def greedy_fallback(self, cluster: List[Course]) -> Dict:
         """Greedy scheduling fallback when CP-SAT fails"""
-        logger.info(f"[GREEDY] Starting greedy fallback for {len(cluster)} courses")
+        logger.info(f"CP-SAT failed - using greedy fallback for {len(cluster)} courses")
         schedule = {}
         
         # Sort courses by priority: large classes first, then by student count
@@ -678,5 +717,5 @@ class AdaptiveCPSATSolver:
             if not assigned:
                 logger.warning(f"[GREEDY] Could not assign course {course.course_id}")
         
-        logger.info(f"[GREEDY] Assigned {len(schedule)}/{len(cluster)} courses ({len(schedule)/len(cluster)*100:.1f}%)")
+        logger.info(f"Greedy assigned {len(schedule)}/{len(cluster)} courses ({len(schedule)/len(cluster)*100:.1f}%)")
         return schedule
