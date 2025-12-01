@@ -84,7 +84,7 @@ export default function AdminTimetablesPage() {
       // Transform to list items (minimal processing)
       const listItems = jobs.map((job: any) => ({
         id: job.job_id || job.id,
-        department: job.department?.department_name || 'N/A',
+        department: job.organization_name || 'All Departments', // Show organization name instead of N/A
         batch: job.batch?.batch_name || null,
         semester: job.semester || 1,
         academic_year: job.academic_year || '2024-25',
