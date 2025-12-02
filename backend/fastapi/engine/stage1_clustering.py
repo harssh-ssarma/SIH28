@@ -159,13 +159,17 @@ class LouvainClusterer:
     
     def _compute_constraint_weight(self, course_i: Course, course_j: Course) -> float:
         """
-        NEP 2020 FIX: Lighter clustering for interdisciplinary education
-        Instead of forcing shared-student courses into same cluster,
-        use softer weights that allow CP-SAT to handle cross-cluster conflicts
+        NEP 2020 FIX: Student-overlap driven clustering for cross-enrollment support
+        
+        Priority:
+        1. Student overlap (PRIMARY) - Courses with shared students MUST be in same cluster
+        2. Faculty sharing (SECONDARY) - Same faculty courses should cluster together
+        3. Room features (TERTIARY) - Special room requirements
+        4. Department boundaries REMOVED - No longer relevant for NEP 2020
         """
         weight = 0.0
         
-        # Student overlap - REDUCED for interdisciplinary education
+        # PRIMARY: Student overlap (NEP 2020 cross-enrollment is critical)
         students_i = set(getattr(course_i, 'student_ids', []))
         students_j = set(getattr(course_j, 'student_ids', []))
         
@@ -173,34 +177,34 @@ class LouvainClusterer:
             shared = len(students_i & students_j)
             
             if shared > 0:
-                # Use smaller class size as denominator
+                # Use smaller class size as denominator for overlap ratio
                 min_size = min(len(students_i), len(students_j))
                 student_overlap_ratio = shared / min_size  # 0.0 to 1.0
                 
-                # REDUCED: 10x base weight (was 100x) - softer clustering
-                weight += 10.0 * student_overlap_ratio
+                # HIGH weight: 100x base (10x higher than before)
+                # This ensures cross-enrolled students' courses are in SAME cluster
+                # so CP-SAT can prevent conflicts
+                weight += 100.0 * student_overlap_ratio
                 
-                # Only cluster together if VERY high overlap (>80% of class)
-                # This handles lab sections, not interdisciplinary electives
-                if student_overlap_ratio > 0.8:
-                    weight += 20.0
+                # Extra weight for high overlap (lab sections, etc.)
+                if student_overlap_ratio > 0.5:
+                    weight += 50.0
         
-        # Faculty sharing (now PRIMARY for NEP 2020)
+        # SECONDARY: Faculty sharing
         # Courses by same faculty should be in same cluster (easier to schedule)
         if getattr(course_i, 'faculty_id', None) == getattr(course_j, 'faculty_id', None):
             weight += 50.0
         
-        # Department affinity (secondary)
-        # Same department courses likely have similar constraints
-        if getattr(course_i, 'department_id', None) == getattr(course_j, 'department_id', None):
-            weight += 15.0
-        
-        # Room features (tertiary)
+        # TERTIARY: Room features (only for specialized equipment)
         # Courses needing same special rooms should cluster together
         features_i = set(getattr(course_i, 'required_features', []))
         features_j = set(getattr(course_j, 'required_features', []))
         if features_i and features_j and features_i & features_j:
-            weight += 8.0
+            weight += 10.0
+        
+        # REMOVED: Department affinity
+        # NEP 2020: Department boundaries don't matter for scheduling
+        # Students take courses across departments - no more silos!
         
         return weight
     

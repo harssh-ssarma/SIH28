@@ -209,7 +209,7 @@ class GeneticAlgorithmOptimizer:
     
     def _get_valid_domain(self, course_id: str, session: int) -> List[Tuple]:
         """On-demand with caching: Compute valid (time, room) pairs per course
-        NEP 2020: Uses department-specific time slots"""
+        NEP 2020: Uses universal time slots (54-slot grid shared by all departments)"""
         # Check cache first (course-level, not session-level)
         if course_id in self._domain_cache:
             return self._domain_cache[course_id]
@@ -219,17 +219,12 @@ class GeneticAlgorithmOptimizer:
         if not course:
             return []
         
-        # NEP 2020: Get department-specific time slots (with fallback)
-        course_dept_id = getattr(course, 'dept_id', None)
-        if course_dept_id:
-            filtered = [t for t in self.time_slots if t.department_id == course_dept_id]
-            dept_slots = filtered if filtered else self.time_slots
-        else:
-            dept_slots = self.time_slots
+        # NEP 2020 FIX: Use universal time slots (all departments share same 54-slot grid)
+        dept_slots = self.time_slots
         
         # Compute valid pairs (only once per course)
         valid_pairs = []
-        for t_slot in dept_slots:  # NEP 2020: Use department-specific slots
+        for t_slot in dept_slots:  # NEP 2020: Use universal slots
             for room in self.rooms:
                 if len(course.student_ids) > room.capacity:
                     continue
@@ -318,13 +313,19 @@ class GeneticAlgorithmOptimizer:
                 return cached_value
         
         # Calculate fitness (outside lock to allow parallel computation)
-        # OPTIMIZATION: Skip feasibility check for large schedules (too expensive)
-        if len(solution) > 2000:
-            # ULTRA-FAST: Only 3 metrics, no feasibility check
-            sc1 = self._faculty_preference_satisfaction(solution) * 0.40
-            sc3 = self._room_utilization(solution) * 0.30
-            sc_dept = self._department_matching(solution) * 0.30
-            fitness_val = sc1 + sc3 + sc_dept
+        # NEP 2020 FIX: ALWAYS check feasibility first (no size exemption!)
+        # Large schedules (>2000) still need feasibility validation
+        if not self._is_feasible(solution):
+            # Infeasible: Heavy penalty proportional to violations
+            fitness_val = -1000 * self._count_violations(solution)
+        elif len(solution) > 2000:
+            # Feasible + Large: Fast metrics (5 metrics, no compactness/continuity)
+            sc1 = self._faculty_preference_satisfaction(solution) * 0.25
+            sc3 = self._room_utilization(solution) * 0.20
+            sc4 = self._workload_balance(solution) * 0.20
+            sc5 = self._peak_spreading(solution) * 0.15
+            sc_dept = self._department_matching(solution) * 0.20
+            fitness_val = sc1 + sc3 + sc4 + sc5 + sc_dept
         elif len(solution) > 1500:
             # FAST: 5 metrics, no feasibility check
             sc1 = self._faculty_preference_satisfaction(solution) * 0.25
@@ -386,10 +387,11 @@ class GeneticAlgorithmOptimizer:
                 return False
             faculty_schedule[(course.faculty_id, wall_time[0], wall_time[1])] = True
             
-            # Room conflict - still slot-specific (rooms belong to departments)
-            if (room_id, time_slot) in room_schedule:
+            # NEP 2020 FIX: Room conflict - use wall-clock time (rooms are shared across departments)
+            # Same room can't be used by CS at Mon 9-10 CS slot AND Physics at Mon 9-10 Physics slot
+            if (room_id, wall_time[0], wall_time[1]) in room_schedule:
                 return False
-            room_schedule[(room_id, time_slot)] = True
+            room_schedule[(room_id, wall_time[0], wall_time[1])] = True
             
             # NEP 2020: Student conflicts - check wall-clock time (cross-department conflicts)
             students_to_check = course.student_ids
@@ -726,7 +728,7 @@ class GeneticAlgorithmOptimizer:
             self.progress_tracker.stage_items_total = self.generations
             self.progress_tracker.stage_items_done = 0
         
-        # SMART STRATEGY: GPU available → disable streaming (use fast GPU), no GPU → enable streaming (memory-safe CPU)
+        # SMART STRATEGY: GPU available -> disable streaming (use fast GPU), no GPU -> enable streaming (memory-safe CPU)
         # Streaming mode is incompatible with GPU (GPU stores population in VRAM, streaming processes one-by-one)
         if self.streaming_mode and self.use_gpu:
             logger.warning(f"[GA] GPU available - disabling streaming mode (using fast GPU mode instead)")
@@ -1339,7 +1341,7 @@ class GeneticAlgorithmOptimizer:
                     gc.collect(generation=0)
             
             mem_end = psutil.virtual_memory()
-            logger.info(f"[GPU-VRAM] Fitness complete. RAM: {mem_start.percent:.1f}% → {mem_end.percent:.1f}% (Δ{mem_end.percent - mem_start.percent:+.1f}%)")
+            logger.info(f"[GPU-VRAM] Fitness complete. RAM: {mem_start.percent:.1f}% -> {mem_end.percent:.1f}% (Delta {mem_end.percent - mem_start.percent:+.1f}%)")
             
             # CRITICAL: Return lazy wrapper that reconstructs dicts on-demand
             # This avoids keeping all 50 dicts in RAM

@@ -132,51 +132,68 @@ class GenerationJobViewSet(viewsets.ModelViewSet):
             else:
                 priority_value = {'high': 9, 'normal': 5, 'low': 1}.get(priority, 5)
             
-            # CRITICAL FIX: Get time configuration from TimetableConfiguration
+            # Get time configuration: PRIORITY ORDER
+            # 1. Use form data from request.data['config'] if provided (user just filled form)
+            # 2. Fall back to database TimetableConfiguration (cached from previous generation)
+            # 3. Use hardcoded defaults as last resort
             from .timetable_config_models import TimetableConfiguration
+            
+            form_config = request.data.get("config")  # From generation form
+            
             try:
-                # Try to get the most recently used config for this org/semester
-                time_config = TimetableConfiguration.objects.filter(
-                    organization=org,
-                    academic_year=academic_year,
-                    semester=1 if semester == 'odd' else 2
-                ).order_by('-last_used_at').first()
-                
-                if not time_config:
-                    # Fallback to latest config for this org
-                    time_config = TimetableConfiguration.objects.filter(
-                        organization=org
-                    ).order_by('-last_used_at').first()
-                
-                if time_config:
+                if form_config:
+                    # User provided form data - use it directly
                     time_config_dict = {
-                        'working_days': time_config.working_days,
-                        'slots_per_day': time_config.slots_per_day,
-                        'start_time': time_config.start_time.strftime('%H:%M'),
-                        'end_time': time_config.end_time.strftime('%H:%M'),
-                        'slot_duration_minutes': time_config.slot_duration_minutes,
-                        'lunch_break_enabled': time_config.lunch_break_enabled,
-                        'lunch_break_start': time_config.lunch_break_start.strftime('%H:%M') if time_config.lunch_break_enabled else None,
-                        'lunch_break_end': time_config.lunch_break_end.strftime('%H:%M') if time_config.lunch_break_enabled else None,
-                    }
-                    logger.info(f"Using time config: {time_config_dict}")
-                    
-                    # Update last_used_at timestamp (auto-updated by model, but we can save explicitly)
-                    # This happens automatically since last_used_at has auto_now=True
-                    time_config.save(update_fields=['last_used_at'])
-                else:
-                    # Use default config if none found
-                    time_config_dict = {
-                        'working_days': 6,
-                        'slots_per_day': 9,
-                        'start_time': '08:00',
-                        'end_time': '17:00',
+                        'working_days': form_config.get('working_days', 6),
+                        'slots_per_day': form_config.get('slots_per_day', 9),
+                        'start_time': form_config.get('start_time', '08:00'),
+                        'end_time': form_config.get('end_time', '17:00'),
                         'slot_duration_minutes': 60,
-                        'lunch_break_enabled': True,
-                        'lunch_break_start': '12:00',
-                        'lunch_break_end': '13:00',
+                        'lunch_break_enabled': form_config.get('lunch_break_enabled', True),
+                        'lunch_break_start': form_config.get('lunch_break_start', '12:00'),
+                        'lunch_break_end': form_config.get('lunch_break_end', '13:00'),
                     }
-                    logger.warning(f"No TimetableConfiguration found, using defaults: {time_config_dict}")
+                    logger.info(f"Using form config from request: {time_config_dict}")
+                else:
+                    # No form data - try database cache
+                    time_config = TimetableConfiguration.objects.filter(
+                        organization=org,
+                        academic_year=academic_year,
+                        semester=1 if semester == 'odd' else 2
+                    ).order_by('-last_used_at').first()
+                    
+                    if not time_config:
+                        # Fallback to latest config for this org
+                        time_config = TimetableConfiguration.objects.filter(
+                            organization=org
+                        ).order_by('-last_used_at').first()
+                    
+                    if time_config:
+                        time_config_dict = {
+                            'working_days': time_config.working_days,
+                            'slots_per_day': time_config.slots_per_day,
+                            'start_time': time_config.start_time.strftime('%H:%M'),
+                            'end_time': time_config.end_time.strftime('%H:%M'),
+                            'slot_duration_minutes': time_config.slot_duration_minutes,
+                            'lunch_break_enabled': time_config.lunch_break_enabled,
+                            'lunch_break_start': time_config.lunch_break_start.strftime('%H:%M') if time_config.lunch_break_enabled else None,
+                            'lunch_break_end': time_config.lunch_break_end.strftime('%H:%M') if time_config.lunch_break_enabled else None,
+                        }
+                        logger.info(f"Using cached config from database: {time_config_dict}")
+                        time_config.save(update_fields=['last_used_at'])
+                    else:
+                        # Use default config if none found
+                        time_config_dict = {
+                            'working_days': 6,
+                            'slots_per_day': 9,
+                            'start_time': '08:00',
+                            'end_time': '17:00',
+                            'slot_duration_minutes': 60,
+                            'lunch_break_enabled': True,
+                            'lunch_break_start': '12:00',
+                            'lunch_break_end': '13:00',
+                        }
+                        logger.warning(f"No TimetableConfiguration found, using defaults: {time_config_dict}")
             except Exception as config_error:
                 logger.error(f"Error fetching time config: {config_error}, using defaults")
                 time_config_dict = {

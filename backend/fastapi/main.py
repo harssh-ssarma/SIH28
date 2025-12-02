@@ -527,16 +527,16 @@ class TimetableGenerationSaga:
         max_parallel = stage2a_config['parallel_clusters']
         student_limit = stage2a_config['student_limit']
         
-        # Adaptive limits based on memory
+        # Adaptive limits based on memory (courses per cluster only)
+        # Room limits removed - CP-SAT domain filtering handles memory efficiently
         if available_gb > 8.0:
             max_courses_per_cluster = 15
-            max_rooms = 200
         elif available_gb > 6.0:
             max_courses_per_cluster = 12
-            max_rooms = 150
+        elif available_gb > 4.0:
+            max_courses_per_cluster = 10
         else:
             max_courses_per_cluster = 10
-            max_rooms = 100
         
         logger.info(f"[STAGE2] Config: timeout={base_timeout}s, parallel={max_parallel}, students={student_limit}, RAM={available_gb:.1f}GB")
         
@@ -564,7 +564,7 @@ class TimetableGenerationSaga:
                     
                     solution = self._solve_cluster_safe(
                         cluster_id, cluster_courses,
-                        data['load_data']['rooms'][:max_rooms],
+                        data['load_data']['rooms'],  # Use ALL rooms
                         data['load_data']['time_slots'],
                         data['load_data']['faculty'],
                         total_clusters=total_clusters,
@@ -598,7 +598,7 @@ class TimetableGenerationSaga:
                     future = executor.submit(
                         self._solve_cluster_safe,
                         cluster_id, cluster_courses,
-                        data['load_data']['rooms'][:max_rooms],
+                        data['load_data']['rooms'],  # Use ALL rooms
                         data['load_data']['time_slots'],
                         data['load_data']['faculty'],
                         total_clusters,
@@ -704,7 +704,7 @@ class TimetableGenerationSaga:
         }
     
     def _solve_cluster_safe(self, cluster_id, courses, rooms, time_slots, faculty, total_clusters=None, completed=0):
-        """Solve single cluster with CP-SAT → Basic Greedy fallback"""
+        """Solve single cluster with CP-SAT -> Basic Greedy fallback"""
         from engine.stage2_cpsat import AdaptiveCPSATSolver
         
         global redis_client_global
@@ -1431,7 +1431,7 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
         # Create variant with ACTUAL calculated metrics
         variant = {
             'id': 1,
-            'name': '3-Stage AI Solution (Louvain→CP-SAT→GA→RL)',
+            'name': '3-Stage AI Solution (Louvain->CP-SAT->GA->RL)',
             'score': quality_score,
             'conflicts': actual_conflicts,
             'faculty_satisfaction': faculty_satisfaction,
@@ -1501,7 +1501,7 @@ async def run_enterprise_generation(job_id: str, request: GenerationRequest):
                     new_quality = max(0, new_quality - int(refined_penalty))
                     
                     if new_quality > quality_score:
-                        logger.info(f"[OK] Refinement improved quality: {quality_score}% → {new_quality}%")
+                        logger.info(f"[OK] Refinement improved quality: {quality_score}% -> {new_quality}%")
                         solution = refined
                         variant['score'] = new_quality
                         variant['conflicts'] = len(refined_conflicts)
@@ -1837,8 +1837,8 @@ async def generate_variants_enterprise(request: GenerationRequest):
             
             progress_data = {
                 'job_id': job_id,
-                'progress': 0.1,  # Start at 0.1% to show activity without jumping
-                'progress_percent': 0.1,
+                'progress': 0.5,  # Start at 0.5% for smooth transition
+                'progress_percent': 0.5,
                 'status': 'running',
                 'stage': 'Preparing',
                 'message': 'Preparing your timetable...',

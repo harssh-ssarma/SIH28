@@ -22,6 +22,8 @@ class ApiClient {
   private getHeaders(): HeadersInit {
     return {
       'Content-Type': 'application/json',
+      // 🔐 NO Authorization header - JWT tokens in secure HttpOnly cookies
+      // Backend reads from cookies automatically (Google-like security)
     };
   }
 

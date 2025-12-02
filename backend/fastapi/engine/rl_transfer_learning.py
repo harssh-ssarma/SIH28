@@ -1,7 +1,7 @@
 ﻿"""
 Q-Learning Transfer Learning System
 Bootstrap new universities using knowledge from similar institutions
-Improves Semester 1 quality from 75% → 85%
+Improves Semester 1 quality from 75% -> 85%
 """
 import numpy as np
 import pickle
@@ -188,7 +188,7 @@ class TransferLearningQTable:
         
         avg_q = total_q / count if count > 0 else 0.0
         
-        # Estimate quality improvement (75% baseline → 85% with transfer learning)
+        # Estimate quality improvement (75% baseline -> 85% with transfer learning)
         baseline_quality = 0.75
         transfer_boost = min(0.10, avg_q * 0.05)  # Up to 10% improvement
         

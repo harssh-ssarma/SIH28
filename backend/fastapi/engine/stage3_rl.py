@@ -476,26 +476,32 @@ class ContextAwareRLAgent:
 
 
 def get_available_slots(conflict, timetable_data):
-    """Get available alternative slots for conflict resolution"""
+    """NEP 2020 FIX: Get available slots using wall-clock time (day, period) filtering"""
     available_slots = []
     current_solution = timetable_data['current_solution']
     time_slots = timetable_data['time_slots']
     
-    # Find slots not occupied by the same student
+    # Find wall-clock times occupied by the student (NEP 2020: cross-department conflicts)
     student_id = conflict['student_id']
-    occupied_slots = set()
+    occupied_times = set()  # Store (day, period) tuples, not slot_ids
+    
+    # Build slot_id to wall-clock mapping
+    slot_to_time = {t.slot_id: (t.day, t.period) for t in time_slots}
     
     for (course_id, session), (time_slot, room_id) in current_solution.items():
         course = next((c for c in timetable_data['courses'] if c.course_id == course_id), None)
         if course and student_id in getattr(course, 'student_ids', []):
-            occupied_slots.add(time_slot)
+            wall_time = slot_to_time.get(time_slot)
+            if wall_time:
+                occupied_times.add(wall_time)  # Add (day, period) tuple
     
-    # Return unoccupied slots
+    # Return slots with unoccupied wall-clock times
     for time_slot in time_slots:
-        if time_slot.slot_id not in occupied_slots:
+        wall_time = (time_slot.day, time_slot.period)
+        if wall_time not in occupied_times:
             available_slots.append(time_slot.slot_id)
     
-    return available_slots[:10]  # Limit to 10 alternatives
+    return available_slots[:20]  # Increased from 10 to 20 for more alternatives
 
 def apply_slot_swap(conflict, new_slot, timetable_data):
     """Apply slot swap for conflict resolution"""
@@ -1071,16 +1077,11 @@ def _resolve_cluster_conflicts_with_rl(courses: List, conflicts: List[Dict],
         if not course:
             return []
         
-        # NEP 2020: Get department-specific time slots for this course (with fallback)
-        course_dept_id = getattr(course, 'dept_id', None)
-        if course_dept_id:
-            filtered = [t for t in time_slots if t.department_id == course_dept_id]
-            dept_slots = filtered if filtered else time_slots
-        else:
-            dept_slots = time_slots
+        # NEP 2020 FIX: Use universal time slots (all departments share same 54-slot grid)
+        dept_slots = time_slots
         
         feasible = []
-        # NEP 2020: Try all department-specific time slots
+        # NEP 2020: Try all universal time slots (54-slot grid shared by all departments)
         for t_slot in dept_slots:
             if t_slot.slot_id == current_slot:
                 continue
@@ -1265,13 +1266,13 @@ def resolve_conflicts_globally(conflicts: List[Dict], clusters: Dict, timetable_
         course_id_to_course = {c.course_id: c for c in timetable_data['courses']}
         expanded_course_set = [course_id_to_course[cid] for cid in expanded_course_ids if cid in course_id_to_course]
         
-        # CRITICAL FIX: Limit super-cluster size to prevent timeout
-        # RL conflict resolution can handle more courses than CP-SAT (no constraint solving)
-        # Increased from 30 to 50 since we're using Q-learning swaps, not CP-SAT
-        MAX_SUPER_CLUSTER_SIZE = 50  # RL swap-based resolution can handle larger clusters
+        # NEP 2020 FIX: Increase super-cluster size to handle cross-enrollment
+        # With 20-30% cross-enrollment, typical super-cluster has 150-200 courses
+        # RL swap-based resolution (Q-learning) can handle larger clusters than CP-SAT
+        MAX_SUPER_CLUSTER_SIZE = 150  # Increased from 50 to 150 (3x improvement)
         
         if len(expanded_course_set) > MAX_SUPER_CLUSTER_SIZE:
-            logger.warning(f"[GLOBAL] Super-cluster too large ({len(expanded_course_set)} courses), limiting to {MAX_SUPER_CLUSTER_SIZE}")
+            logger.warning(f"[GLOBAL] Super-cluster very large ({len(expanded_course_set)} courses), limiting to {MAX_SUPER_CLUSTER_SIZE}")
             # Keep only courses with most conflicts
             course_conflict_counts = defaultdict(int)
             for conflict in conflicts:
@@ -1478,19 +1479,8 @@ def resolve_with_bundle_actions(conflicts: List[Dict], timetable_data: Dict,
                 continue
             
             for bundle in itertools.combinations(student_courses, size):
-                # NEP 2020: Get department-specific slots for each course in bundle
-                # For bundles, we need to check each course's dept slots
-                bundle_dept_ids = set(getattr(c, 'dept_id', None) for c in bundle if hasattr(c, 'dept_id'))
-                
-                # Get union of all relevant department slots (try up to 10 per department)
-                candidate_slots = []
-                for dept_id in bundle_dept_ids:
-                    dept_slots = [t for t in timetable_data['time_slots'] if t.department_id == dept_id][:10]
-                    candidate_slots.extend(dept_slots)
-                
-                # If no department info, fall back to first 10 slots
-                if not candidate_slots:
-                    candidate_slots = timetable_data['time_slots'][:10]
+                # NEP 2020 FIX: Use universal time slots (try first 10 slots from universal grid)
+                candidate_slots = timetable_data['time_slots'][:10]
                 
                 for time_slot in candidate_slots:
                     action = BundleAction(list(bundle), time_slot.slot_id, timetable_data)

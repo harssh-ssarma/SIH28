@@ -66,9 +66,9 @@ export default function StudentTimetable() {
     try {
       setLoading(true)
       setError(null)
-      const token = localStorage.getItem('token')
+      // 🔐 Use HttpOnly cookies (no manual token handling)
       const res = await fetch('http://localhost:8000/api/timetable/student/me/', {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include', // Send HttpOnly cookies automatically
       })
       
       if (!res.ok) {

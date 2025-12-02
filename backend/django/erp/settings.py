@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",  # 🔐 Token rotation & blacklisting
     "drf_spectacular",
     "corsheaders",
     "django_filters",
@@ -427,13 +428,13 @@ LOGGING = {
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    # Token Lifetimes - Extended for better UX (Enterprise: balance security & convenience)
-    "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),     # 1 hour (auto-refresh in background)
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),    # 30 days (like Google/Microsoft)
+    # Token Lifetimes - Google-like security (shorter refresh, auto-rotate)
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),     # 1 hour (auto-refresh)
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),     # 7 days (Google standard with rotation)
     
-    # Token Rotation & Blacklisting (CRITICAL for security)
-    "ROTATE_REFRESH_TOKENS": False,              # Disabled due to UUID user_id
-    "BLACKLIST_AFTER_ROTATION": False,           # Disabled due to UUID user_id
+    # Token Rotation & Blacklisting (CRITICAL: Prevents token theft)
+    "ROTATE_REFRESH_TOKENS": True,               # Rotate on each refresh (Google standard)
+    "BLACKLIST_AFTER_ROTATION": True,            # Blacklist old tokens immediately
     "UPDATE_LAST_LOGIN": True,
     
     # Encryption & Signing

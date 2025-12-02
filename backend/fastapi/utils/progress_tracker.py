@@ -45,12 +45,12 @@ class EnterpriseProgressTracker:
         # Observed: load=5s, cluster=10s, cpsat=180s, ga=300s, rl=180s, final=5s
         # Each stage has start_progress, end_progress, and expected_time
         self.stage_config = {
-            'load_data': {'start': 0, 'end': 5, 'expected_time': 5},       # 0% → 5%
-            'clustering': {'start': 5, 'end': 10, 'expected_time': 10},    # 5% → 10%
-            'cpsat': {'start': 10, 'end': 60, 'expected_time': 180},       # 10% → 60%
-            'ga': {'start': 60, 'end': 85, 'expected_time': 300},          # 60% → 85%
-            'rl': {'start': 85, 'end': 95, 'expected_time': 180},          # 85% → 95%
-            'finalize': {'start': 95, 'end': 100, 'expected_time': 5}      # 95% → 100%
+            'load_data': {'start': 0, 'end': 5, 'expected_time': 5},       # 0% -> 5%
+            'clustering': {'start': 5, 'end': 10, 'expected_time': 10},    # 5% -> 10%
+            'cpsat': {'start': 10, 'end': 60, 'expected_time': 180},       # 10% -> 60%
+            'ga': {'start': 60, 'end': 85, 'expected_time': 300},          # 60% -> 85%
+            'rl': {'start': 85, 'end': 95, 'expected_time': 180},          # 85% -> 95%
+            'finalize': {'start': 95, 'end': 100, 'expected_time': 5}      # 95% -> 100%
         }
         
         # Current stage tracking
@@ -182,6 +182,7 @@ class EnterpriseProgressTracker:
             target_progress = stage_start + (work_ratio * stage_range)
         else:
             # Time-based: Smooth asymptotic approach (never quite reaches end)
+            # This handles both: (1) no work tracking, (2) work tracking but no items done yet
             if elapsed_in_stage < expected_time:
                 # Linear progress during expected time
                 ratio = elapsed_in_stage / expected_time
@@ -192,6 +193,13 @@ class EnterpriseProgressTracker:
                 ratio = 0.95 * (1.0 - (0.5 ** (elapsed_in_stage / expected_time)))
             
             target_progress = stage_start + (ratio * stage_range)
+            
+            # CRITICAL FIX: If work tracking enabled but no work done yet,
+            # ensure minimum progress to show activity (Google/TensorFlow style)
+            if self.stage_items_total > 0 and self.stage_items_done == 0 and elapsed_in_stage > 2:
+                # After 2 seconds, guarantee at least 1% progress in the stage
+                min_progress = stage_start + min(1.0, elapsed_in_stage * 0.2)  # 0.2% per second
+                target_progress = max(target_progress, min_progress)
         
         # Cap target at stage end (never exceed stage boundary)
         target_progress = min(stage_end - 0.5, target_progress)  # Leave 0.5% margin

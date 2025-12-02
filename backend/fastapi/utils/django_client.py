@@ -151,6 +151,16 @@ class DjangoAPIClient:
         department_id: Optional[str] = None
     ) -> List[Course]:
         """Fetch courses from database with caching"""
+        
+        def _is_valid_uuid(value) -> bool:
+            """Check if UUID is valid (not NULL, empty, or zero UUID)"""
+            if not value:
+                return False
+            str_val = str(value).strip().upper()
+            if str_val in ('NULL', 'NONE', '', '00000000-0000-0000-0000-000000000000'):
+                return False
+            return True
+        
         # Try cache first
         cached_courses = await self.cache_manager.get('courses', org_id, semester=semester, department_id=department_id)
         if cached_courses:
@@ -176,8 +186,10 @@ class DjangoAPIClient:
             
             # CRITICAL: Use subquery to avoid ARRAY_AGG duplicates from join multiplication
             # Also fetch co_faculty_ids to split large courses into sections
+            # FALLBACK: Get dept_id from faculty if course.dept_id is NULL
             query = """
-                SELECT c.course_id, c.course_code, c.course_name, c.dept_id,
+                SELECT c.course_id, c.course_code, c.course_name, 
+                       COALESCE(c.dept_id, f.dept_id) as dept_id,
                        c.lecture_hours_per_week, c.room_type_required, 
                        c.min_room_capacity, c.course_type,
                        co.offering_id, co.primary_faculty_id, co.co_faculty_ids,
@@ -191,6 +203,7 @@ class DjangoAPIClient:
                     AND co.is_active = true
                     AND co.primary_faculty_id IS NOT NULL
                     AND co.semester_type = %s
+                LEFT JOIN faculty f ON co.primary_faculty_id = f.faculty_id
                 WHERE c.org_id = %s 
                 AND c.is_active = true
                 AND EXISTS (
@@ -235,14 +248,37 @@ class DjangoAPIClient:
                     enrollment_counts.append(len(student_ids))
                     unique_students.update(student_ids)
                     
-                    # CRITICAL: Split large courses (>60 students) into sections to fit 60-capacity rooms
+                    # CRITICAL: Split large courses (>60 students) into parallel sections
+                    # Sections can be scheduled SIMULTANEOUSLY using different faculty and rooms
                     if len(student_ids) > 60:
-                        # Calculate number of sections needed (round up)
-                        num_sections = (len(student_ids) + 59) // 60  # Ceiling division
+                        # Parse co_faculty_ids (PostgreSQL array format: "{id1,id2}")
+                        co_faculty_raw = row.get('co_faculty_ids')
+                        co_faculty_list = []
+                        if co_faculty_raw and isinstance(co_faculty_raw, str):
+                            # Filter out NULL/None/empty UUIDs from PostgreSQL array
+                            co_faculty_list = [
+                                f.strip() for f in co_faculty_raw.strip('{}').split(',') 
+                                if _is_valid_uuid(f)
+                            ]
+                        
+                        # Determine available faculty: primary + co_faculty
+                        primary_fid = str(row['primary_faculty_id'])
+                        # Safety check: primary faculty must be valid UUID
+                        if not _is_valid_uuid(primary_fid):
+                            logger.warning(f"[PARALLEL] Course {row['course_code']} has invalid primary_faculty_id: {primary_fid}, skipping")
+                            continue
+                        
+                        available_faculty = [primary_fid]
+                        available_faculty.extend(co_faculty_list)
+                        
+                        # Number of sections = min(num_faculty, ceiling(students/60))
+                        max_sections_by_students = (len(student_ids) + 59) // 60
+                        num_sections = min(len(available_faculty), max_sections_by_students)
+                        
                         students_per_section = len(student_ids) // num_sections
                         remainder = len(student_ids) % num_sections
                         
-                        logger.debug(f"Splitting {row['course_code']} ({len(student_ids)} students) into {num_sections} sections")
+                        logger.info(f"[PARALLEL SECTIONS] {row['course_code']}: {len(student_ids)} students -> {num_sections} sections (faculty: {len(available_faculty)})")
                         
                         start_idx = 0
                         for section_idx in range(num_sections):
@@ -251,12 +287,15 @@ class DjangoAPIClient:
                             section_students = student_ids[start_idx:start_idx + section_size]
                             start_idx += section_size
                             
+                            # Assign different faculty to each section (enables parallel scheduling)
+                            section_faculty_id = available_faculty[section_idx] if section_idx < len(available_faculty) else available_faculty[0]
+                            
                             course = Course(
                                 course_id=f"{row['course_id']}_off_{row['offering_id']}_sec{section_idx}",
                                 course_code=f"{row['course_code']}",
                                 course_name=f"{row['course_name']} (Sec {section_idx+1}/{num_sections})",
                                 department_id=str(row['dept_id']),
-                                faculty_id=str(row['primary_faculty_id']),  # Same faculty for all sections
+                                faculty_id=section_faculty_id,  # DIFFERENT faculty per section
                                 credits=row.get('lecture_hours_per_week', 3) or 3,
                                 duration=row.get('lecture_hours_per_week', 3) or 3,
                                 type=row.get('course_type', 'core'),
@@ -268,12 +307,18 @@ class DjangoAPIClient:
                             courses.append(course)
                     else:
                         # Single section course (≤60 students)
+                        primary_fid = str(row['primary_faculty_id'])
+                        # Safety check: primary faculty must be valid UUID
+                        if not _is_valid_uuid(primary_fid):
+                            logger.warning(f"[COURSE LOAD] Course {row['course_code']} has invalid primary_faculty_id: {primary_fid}, skipping")
+                            continue
+                        
                         course = Course(
                             course_id=f"{row['course_id']}_off_{row['offering_id']}",
                             course_code=f"{row['course_code']}",
                             course_name=row['course_name'],
                             department_id=str(row['dept_id']),
-                            faculty_id=str(row['primary_faculty_id']),
+                            faculty_id=primary_fid,
                             credits=row.get('lecture_hours_per_week', 3) or 3,
                             duration=row.get('lecture_hours_per_week', 3) or 3,
                             type=row.get('course_type', 'core'),
@@ -300,7 +345,7 @@ class DjangoAPIClient:
                 debug_rows = cursor.fetchall()
                 logger.warning(f"Semester types in database: {[(r['semester_type'], r['semester_number'], r['count']) for r in debug_rows]}")
             
-            # Get total distinct students enrolled (not just from filtered courses)
+            # Summary statistics
             cursor.execute("""
                 SELECT COUNT(DISTINCT student_id) as total_students
                 FROM course_enrollments
@@ -308,7 +353,13 @@ class DjangoAPIClient:
             """)
             total_students_row = cursor.fetchone()
             total_students = total_students_row['total_students'] if total_students_row else 0
-            logger.info(f"DEBUG: Total students in course_enrollments: {total_students}, Unique students in fetched courses: {len(unique_students)}")
+            
+            # Count parallel sections created
+            parallel_sections = sum(1 for c in courses if '_sec' in c.course_id)
+            original_offerings = len(set(c.course_id.split('_off_')[1].split('_sec')[0] for c in courses if '_off_' in c.course_id))
+            
+            logger.info(f"[COURSE LOAD] Total: {len(courses)} sections from {original_offerings} offerings | Parallel sections: {parallel_sections}")
+            logger.info(f"[STUDENTS] Database: {total_students} | In courses: {len(unique_students)} | Enrollments: min={min(enrollment_counts) if enrollment_counts else 0}, max={max(enrollment_counts) if enrollment_counts else 0}, avg={sum(enrollment_counts)/len(enrollment_counts) if enrollment_counts else 0:.1f}")
             
             # Debug: Check enrollments for ODD semester offerings
             cursor.execute("""
@@ -488,41 +539,25 @@ class DjangoAPIClient:
 
     async def fetch_time_slots(self, org_id: str, time_config: dict = None, departments: List[str] = None) -> List[TimeSlot]:
         """
-        Generate department-specific time slots for NEP 2020 centralized scheduling.
+        Generate UNIVERSAL time slots for NEP 2020 centralized scheduling.
         
-        NEP 2020 Architecture:
-        - Each department has its own set of time slots (e.g., 127 departments × 48 slots = 6,096 total)
-        - Students can take courses across departments without time conflicts
-        - A course scheduled in "CS Monday 9:00-10:00" is DIFFERENT from "Physics Monday 9:00-10:00"
+        NEP 2020 Architecture FIX:
+        - ALL departments share the SAME 54 time slots (9 periods × 6 days)
+        - Wall-clock synchronization is automatic - slot_id=0 is Monday Period 1 for EVERYONE
+        - Students can take courses across departments without conflicts
+        - Example: CS course at "Monday 9-10" and Physics course at "Monday 9-10" share slot_id=0
         
         Args:
-            org_id: Organization ID (UUID)
+            org_id: Organization ID (UUID) - kept for compatibility, not used for slot generation
             time_config: Time configuration dict with working_days, slots_per_day, start_time, etc.
-            departments: List of department IDs (if None, fetches from database)
+            departments: DEPRECATED - no longer needed (universal slots)
         
         Returns:
-            List of TimeSlot objects (one per department per time slot)
+            List of 54 universal TimeSlot objects (shared by all departments)
         """
         try:
+            logger.info(f"[NEP 2020] Generating UNIVERSAL time slots (no department filtering)")
             from datetime import datetime, timedelta
-            
-            # If no departments provided, fetch from database
-            if not departments:
-                cursor = self.db_conn.cursor()
-                cursor.execute("""
-                    SELECT DISTINCT dept_id 
-                    FROM courses 
-                    WHERE org_id = %s
-                    AND is_active = true
-                    ORDER BY dept_id
-                """, (org_id,))
-                dept_rows = cursor.fetchall()
-                departments = [row['dept_id'] for row in dept_rows]
-                logger.info(f"[TIME_SLOTS] Fetched {len(departments)} departments from database for org {org_id}")
-            
-            if not departments:
-                logger.error("[TIME_SLOTS] No departments found! Cannot generate time slots.")
-                return []
             
             # Use time_config if provided, otherwise use defaults
             if time_config:
@@ -547,61 +582,67 @@ class DjangoAPIClient:
                 lunch_break_end = '13:00'
                 logger.warning("[TIME_SLOTS] No time_config provided, using defaults")
             
-            # Parse start time
-            start_time = datetime.strptime(start_time_str, '%H:%M')
+            # Parse start time - handle both HH:MM and HH:MM:SS formats
+            def parse_time(time_str: str) -> datetime:
+                """Parse time string in HH:MM or HH:MM:SS format"""
+                # Remove seconds if present
+                time_str = time_str.strip()
+                if time_str.count(':') == 2:
+                    time_str = ':'.join(time_str.split(':')[:2])
+                return datetime.strptime(time_str, '%H:%M')
+            
+            start_time = parse_time(start_time_str)
             
             # Parse lunch break times
-            lunch_start = datetime.strptime(lunch_break_start, '%H:%M') if lunch_break_enabled else None
-            lunch_end = datetime.strptime(lunch_break_end, '%H:%M') if lunch_break_enabled else None
+            lunch_start = parse_time(lunch_break_start) if lunch_break_enabled else None
+            lunch_end = parse_time(lunch_break_end) if lunch_break_enabled else None
             
-            # NEP 2020: Generate time slots FOR EACH DEPARTMENT
+            # NEP 2020 FIX: Generate UNIVERSAL time slots (ONE grid for ALL departments)
             days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'][:working_days]
             time_slots = []
             
-            for dept_id in departments:
-                for day_idx, day in enumerate(days):
-                    current_time = start_time
-                    period_idx = 0
-                    
-                    for _ in range(slots_per_day):
-                        # Calculate slot end time
-                        slot_end = current_time + timedelta(minutes=slot_duration)
-                        
-                        # Check if this slot overlaps with lunch break
-                        if lunch_break_enabled and lunch_start and lunch_end:
-                            # Skip if slot starts during lunch break
-                            if lunch_start <= current_time < lunch_end:
-                                current_time = lunch_end  # Jump to end of lunch break
-                                continue
-                        
-                        # Create time slot
-                        start_str = current_time.strftime('%H:%M')
-                        end_str = slot_end.strftime('%H:%M')
-                        
-                        # NEP 2020: Department-specific slot ID
-                        slot_id = f"{dept_id}_{day_idx}_{period_idx}"
-                        
-                        slot = TimeSlot(
-                            slot_id=slot_id,
-                            department_id=dept_id,
-                            day_of_week=day,
-                            day=day_idx,
-                            period=period_idx,
-                            start_time=start_str,
-                            end_time=end_str,
-                            slot_name=f"{dept_id[:8]} {day.capitalize()} {start_str}-{end_str}"
-                        )
-                        time_slots.append(slot)
-                        
-                        # Move to next slot
-                        current_time = slot_end
-                        period_idx += 1
+            # Global slot ID counter (0 to 53 for 9 periods × 6 days)
+            global_slot_id = 0
             
-            slots_per_dept = len(time_slots) // len(departments) if departments else 0
-            logger.info(f"[TIME_SLOTS] Generated {len(time_slots)} department-specific time slots")
-            logger.info(f"[TIME_SLOTS] {len(departments)} departments × {slots_per_dept} slots/dept = {len(time_slots)} total")
+            for day_idx, day in enumerate(days):
+                current_time = start_time
+                period_idx = 0
+                
+                for _ in range(slots_per_day):
+                    # Calculate slot end time
+                    slot_end = current_time + timedelta(minutes=slot_duration)
+                    
+                    # Check if this slot overlaps with lunch break
+                    if lunch_break_enabled and lunch_start and lunch_end:
+                        # Skip if slot starts during lunch break
+                        if lunch_start <= current_time < lunch_end:
+                            current_time = lunch_end  # Jump to end of lunch break
+                            continue
+                    
+                    # Create UNIVERSAL time slot (shared by all departments)
+                    start_str = current_time.strftime('%H:%M')
+                    end_str = slot_end.strftime('%H:%M')
+                    
+                    slot = TimeSlot(
+                        slot_id=str(global_slot_id),  # Sequential: 0, 1, 2, ..., 53
+                        day_of_week=day,
+                        day=day_idx,
+                        period=period_idx,
+                        start_time=start_str,
+                        end_time=end_str,
+                        slot_name=f"{day.capitalize()} P{period_idx+1} ({start_str}-{end_str})"
+                    )
+                    time_slots.append(slot)
+                    
+                    # Move to next slot
+                    current_time = slot_end
+                    period_idx += 1
+                    global_slot_id += 1
+            
+            logger.info(f"[NEP 2020] Generated {len(time_slots)} UNIVERSAL time slots (shared by ALL departments)")
+            logger.info(f"[NEP 2020] {working_days} days x {len(time_slots)//working_days} slots/day = {len(time_slots)} total")
             if lunch_break_enabled:
-                logger.info(f"[TIME_SLOTS] Lunch break: {lunch_break_start}-{lunch_break_end}")
+                logger.info(f"   Lunch break: {lunch_break_start}-{lunch_break_end}")
             
             return time_slots
 

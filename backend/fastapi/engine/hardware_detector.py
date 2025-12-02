@@ -650,7 +650,7 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
     # CRITICAL: GPU only if VRAM >= 2GB (enough for population offloading)
     use_gpu_ga = has_gpu and gpu_vram >= 2
     
-    # SMART STRATEGY: GPU available → disable streaming (fast GPU), no GPU → enable streaming (memory-safe CPU)
+    # SMART STRATEGY: GPU available -> disable streaming (fast GPU), no GPU -> enable streaming (memory-safe CPU)
     if tier == "potato":
         # ULTRA-SAFE: Streaming GA with population of 5 (only 20MB × 5 = 100MB total)
         stage2b = {
@@ -672,7 +672,7 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
             'skip_ga': False  # Don't skip, use streaming
         }
     elif tier == "laptop":
-        # SMART: GPU available → full GPU mode (pop=50, no streaming), no GPU → streaming mode (pop=10)
+        # SMART: GPU available -> full GPU mode (pop=50, no streaming), no GPU -> streaming mode (pop=10)
         if use_gpu_ga:
             stage2b = {
                 'algorithm': 'gpu_ga',
@@ -710,7 +710,7 @@ def get_optimal_config(profile: HardwareProfile) -> Dict:
                 'streaming_mode': True  # CPU streaming mode
             }
     elif tier == "workstation":
-        # SMART: GPU available → full GPU mode (pop=50, no streaming), no GPU → streaming mode (pop=20)
+        # SMART: GPU available -> full GPU mode (pop=50, no streaming), no GPU -> streaming mode (pop=20)
         if use_gpu_ga:
             stage2b = {
                 'algorithm': 'gpu_ga',

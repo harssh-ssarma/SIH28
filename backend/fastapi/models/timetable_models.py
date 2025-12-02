@@ -27,6 +27,11 @@ class Course(BaseModel):
     required_features: List[str] = Field(default_factory=list)
     department_id: str
     subject_type: str = Field(default="core", description="core, elective, or open_elective")
+    
+    @property
+    def dept_id(self) -> str:
+        """Alias for department_id"""
+        return self.department_id
 
 
 class Faculty(BaseModel):
@@ -54,17 +59,16 @@ class Room(BaseModel):
 
 
 class TimeSlot(BaseModel):
-    """Time Slot - NEP 2020: Department-specific slots for centralized university-wide scheduling
+    """Time Slot - NEP 2020: Universal time grid for centralized university-wide scheduling
     
-    Each department has its own set of time slots (e.g., 127 departments × 48 slots = 6,096 total).
-    This enables students to take courses across departments without time conflicts, as each
-    department operates in its own scheduling space.
+    All departments share the SAME 54 time slots (9 periods × 6 days).
+    This ensures students can take courses across departments without time conflicts.
     
-    Example: CS dept slot "Monday 9:00-10:00" is DIFFERENT from Physics dept slot "Monday 9:00-10:00"
-    even though they occur at the same wall-clock time.
+    Example: ALL courses scheduled at "Monday Period 1" use slot_id=0, regardless of department.
+    Wall-clock synchronization is automatic - students physically can't attend two classes
+    at Monday 9:00-10:00 AM, even if they're in different departments.
     """
     slot_id: str
-    department_id: str = Field(..., description="Department ID - each department has separate time slots")
     day_of_week: str
     day: int = Field(..., ge=0, le=5, description="0=Mon, 5=Sat")
     period: int = Field(..., ge=0, le=9, description="Period number")

@@ -14,9 +14,9 @@ export default function FacultySchedule() {
 
   const fetchSchedule = async () => {
     try {
-      const token = localStorage.getItem('token')
+      // 🔐 Use HttpOnly cookies (no manual token handling)
       const res = await fetch('http://localhost:8000/api/timetable/faculty/me/', {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include', // Send HttpOnly cookies automatically
       })
       const data = await res.json()
       if (data.success) {
