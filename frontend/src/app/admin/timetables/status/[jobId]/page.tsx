@@ -19,7 +19,7 @@ export default function TimetableStatusPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    <div className="h-screen flex items-center justify-center p-4 overflow-hidden">
       <TimetableProgressTracker 
         jobId={jobId} 
         onComplete={handleComplete}

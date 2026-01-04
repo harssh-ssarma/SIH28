@@ -5,8 +5,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import {
-  fetchTimetableWorkflows,
-  transformWorkflowsToListItems,
   fetchFacultyAvailability,
   updateFacultyAvailability,
 } from '@/lib/api/timetable'
@@ -27,6 +25,8 @@ export default function AdminTimetablesPage() {
   const [runningJobs, setRunningJobs] = useState<RunningJob[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
 
   const { user } = useAuth()
   const router = useRouter()
@@ -34,27 +34,69 @@ export default function AdminTimetablesPage() {
 
   useEffect(() => {
     loadTimetableData()
-    loadFacultyData()
+  }, [currentPage])
+  
+  useEffect(() => {
     loadRunningJobs()
-    
-    const interval = setInterval(loadRunningJobs, 3000)
+    const interval = setInterval(loadRunningJobs, 5000)
     return () => clearInterval(interval)
   }, [])
+  
+  // Lazy load faculty when faculty section becomes visible
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && facultyAvailability.length === 0) {
+          loadFacultyData()
+        }
+      },
+      { threshold: 0.1 }
+    )
+    
+    const facultySection = document.getElementById('faculty-section')
+    if (facultySection) {
+      observer.observe(facultySection)
+    }
+    
+    return () => observer.disconnect()
+  }, [facultyAvailability.length])
 
   const loadTimetableData = async () => {
     try {
       setLoading(true)
       setError(null)
 
-      // Fetch generation jobs (no filters to avoid backend errors)
-      const workflows = await fetchTimetableWorkflows({})
+      // Fast load: Paginated with minimal data
+      const response = await fetch(
+        `${API_BASE}/generation-jobs/?page=${currentPage}&page_size=20`,
+        { credentials: 'include' }
+      )
+      
+      if (!response.ok) {
+        setTimetables([])
+        return
+      }
 
-      const listItems = transformWorkflowsToListItems(workflows)
+      const data = await response.json()
+      const jobs = data.results || []
+      setTotalCount(data.count || 0)
+      
+      // Transform to list items (minimal processing)
+      const listItems = jobs.map((job: any) => ({
+        id: job.job_id || job.id,
+        department: job.organization_name || 'All Departments', // Show organization name instead of N/A
+        batch: job.batch?.batch_name || null,
+        semester: job.semester || 1,
+        academic_year: job.academic_year || '2024-25',
+        status: job.status || 'draft',
+        lastUpdated: new Date(job.updated_at || job.created_at).toLocaleDateString(),
+        conflicts: job.conflicts_count || 0,
+        score: job.quality_score || null
+      }))
+      
       setTimetables(listItems)
     } catch (err) {
       console.error('Failed to load timetables:', err)
-      // Don't show error - just show empty state
-      // This is more user-friendly for new installations
       setTimetables([])
     } finally {
       setLoading(false)
@@ -63,73 +105,63 @@ export default function AdminTimetablesPage() {
 
   const loadFacultyData = async () => {
     try {
-      const faculty = await fetchFacultyAvailability({
-        department_id: user?.department,
-        organization_id: user?.organization,
-      })
+      // Only fetch 10 faculty initially
+      const response = await fetch(
+        `${API_BASE}/faculty/?page=1&page_size=10`,
+        { credentials: 'include' }
+      )
+      if (!response.ok) {
+        setFacultyAvailability([])
+        return
+      }
+      const data = await response.json()
+      const faculty = (data.results || []).map((f: any) => ({
+        id: f.faculty_code || f.faculty_id || f.id,
+        name: f.faculty_name || `${f.first_name || ''} ${f.last_name || ''}`.trim() || 'Unknown',
+        available: f.status === 'active' || f.is_active
+      })).filter(f => f.name !== 'Unknown')
       setFacultyAvailability(faculty)
     } catch (err) {
-      console.error('Failed to load faculty:', err)
       setFacultyAvailability([])
     }
   }
 
   const loadRunningJobs = async () => {
     try {
-      const response = await fetch(`${API_BASE}/generation-jobs/?status=running,queued`, {
-        credentials: 'include',
-      })
-      if (!response.ok) return
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 3000)
       
-      const data = await response.json()
-      const jobs = Array.isArray(data) ? data : (data.results || [])
-      
-      // Filter out cancelled/completed jobs immediately
-      const activeJobs = jobs.filter((job: any) => 
-        job.status === 'running' || job.status === 'queued'
+      const response = await fetch(
+        `${API_BASE}/generation-jobs/?status=running,pending&page=1&page_size=5`,
+        { credentials: 'include', signal: controller.signal }
       )
+      clearTimeout(timeoutId)
       
-      if (activeJobs.length === 0) {
+      if (!response.ok) {
         setRunningJobs([])
         return
       }
       
-      const jobsWithProgress = await Promise.all(
-        activeJobs.map(async (job: any) => {
-          try {
-            const controller = new AbortController()
-            const timeoutId = setTimeout(() => controller.abort(), 2000)
-            
-            const progressRes = await fetch(`${API_BASE}/progress/${job.id}/`, {
-              credentials: 'include',
-              signal: controller.signal,
-            })
-            clearTimeout(timeoutId)
-            
-            if (progressRes.ok) {
-              const progressData = await progressRes.json()
-              return {
-                job_id: job.id,
-                progress: progressData.progress || 0,
-                status: progressData.status || job.status,
-                message: progressData.message || 'Processing...',
-                time_remaining_seconds: progressData.time_remaining_seconds,
-              }
-            }
-          } catch (e) {
-            // Silently handle network errors
-          }
-          return null
-        })
-      )
+      const data = await response.json()
+      const jobs = (data.results || []).filter((job: any) => ['running', 'pending'].includes(job.status))
       
-      // Filter out null results and non-active jobs
-      const validJobs = jobsWithProgress.filter(j => 
-        j && (j.status === 'running' || j.status === 'queued')
-      )
-      setRunningJobs(validJobs)
+      if (jobs.length === 0) {
+        setRunningJobs([])
+        return
+      }
+      
+      // Simplified: Use job data directly without extra progress calls
+      const runningJobs = jobs.map((job: any) => ({
+        job_id: job.job_id || job.id,
+        progress: job.progress || 1,  // Show at least 1% to indicate activity
+        status: job.status === 'pending' ? 'running' : job.status,  // Treat pending as running
+        message: job.current_stage || (job.status === 'pending' ? 'Starting...' : 'Processing...'),
+        time_remaining_seconds: null
+      }))
+      
+      setRunningJobs(runningJobs)
     } catch (err) {
-      // Silently handle errors
+      setRunningJobs([])
     }
   }
 
@@ -249,8 +281,8 @@ export default function AdminTimetablesPage() {
 
   return (
       <div className="space-y-6">
-        {/* Running Jobs Banner - Only show if jobs have progress > 0 */}
-        {runningJobs.length > 0 && runningJobs.some(j => j.progress > 0 || j.status === 'running') && (
+        {/* Running Jobs Banner - Show for any running/queued jobs */}
+        {runningJobs.length > 0 && (
           <div className="card bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
             <div className="card-header">
               <h3 className="font-semibold text-blue-900 dark:text-blue-100">🔄 Generation in Progress</h3>
@@ -401,10 +433,17 @@ export default function AdminTimetablesPage() {
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 sm:gap-4">
                       {semesterTimetables
                         .sort((a, b) => (a.department || '').localeCompare(b.department || ''))
-                        .map(timetable => (
+                        .map(timetable => {
+                          // Check if this job is currently running
+                          const isRunning = runningJobs.some(job => job.job_id === timetable.id)
+                          const targetUrl = isRunning 
+                            ? `/admin/timetables/status/${timetable.id}`
+                            : `/admin/timetables/${timetable.id}/review`
+                          
+                          return (
                           <Link
                             key={timetable.id}
-                            href={`/admin/timetables/${timetable.id}/review`}
+                            href={targetUrl}
                             className="block p-3 sm:p-4 bg-white dark:bg-[#1E1E1E] border border-[#E0E0E0] dark:border-[#2A2A2A] rounded-lg hover:border-[#2196F3] dark:hover:border-[#2196F3] transition-colors"
                           >
                             <div className="flex items-start justify-between mb-3">
@@ -417,11 +456,11 @@ export default function AdminTimetablesPage() {
                                 </p>
                               </div>
                               <span
-                                className={`px-2 py-1 text-xs font-medium flex-shrink-0 ml-2 rounded ${getStatusColor(
+                                className={`px-2 py-1 text-xs font-medium flex-shrink-0 ml-2 rounded ${isRunning ? 'text-blue-600 bg-blue-50 dark:bg-blue-900/20' : getStatusColor(
                                   timetable.status
                                 )}`}
                               >
-                                {getStatusIcon(timetable.status)} {timetable.status.charAt(0).toUpperCase() + timetable.status.slice(1)}
+                                {isRunning ? '🔄 Running' : `${getStatusIcon(timetable.status)} ${timetable.status.charAt(0).toUpperCase() + timetable.status.slice(1)}`}
                               </span>
                             </div>
 
@@ -458,11 +497,12 @@ export default function AdminTimetablesPage() {
 
                             <div className="mt-3 pt-3 border-t border-[#e5e5e5] dark:border-[#3d3d3d]">
                               <span className="text-xs text-[#065fd4] font-medium group-hover:text-[#0856c1] transition-colors duration-200">
-                                👁️ View Details →
+                                {isRunning ? '⏱️ View Progress →' : '👁️ View Details →'}
                               </span>
                             </div>
                           </Link>
-                        ))}
+                        )})
+                      }
                     </div>
                   </div>
                 )
@@ -472,7 +512,7 @@ export default function AdminTimetablesPage() {
           </div>
 
           {/* Right Column: Faculty Availability (1/3 width) */}
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1" id="faculty-section">
             <div className="card sticky top-6">
               <div className="card-header">
                 <div className="flex items-center gap-3">
@@ -501,7 +541,13 @@ export default function AdminTimetablesPage() {
               </div>
 
               <div className="max-h-[calc(100vh-200px)] overflow-y-auto space-y-2">
-                {facultyAvailability.filter(f => f.name).map(faculty => (
+                {facultyAvailability.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="loading-spinner w-6 h-6 mx-auto mb-2"></div>
+                    <p className="text-xs text-gray-500">Loading faculty...</p>
+                  </div>
+                ) : (
+                  facultyAvailability.filter(f => f.name).map(faculty => (
                   <div key={faculty.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <div className="w-8 h-8 bg-[#2196F3]/10 dark:bg-[#2196F3]/20 rounded-full flex items-center justify-center flex-shrink-0">
@@ -532,11 +578,35 @@ export default function AdminTimetablesPage() {
                       />
                     </button>
                   </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           </div>
         </div>
+
+        {/* Pagination */}
+        {totalCount > 20 && (
+          <div className="flex justify-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1 || loading}
+              className="btn-secondary px-4 py-2 disabled:opacity-50"
+            >
+              ← Previous
+            </button>
+            <span className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">
+              Page {currentPage} of {Math.ceil(totalCount / 20)}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => p + 1)}
+              disabled={currentPage >= Math.ceil(totalCount / 20) || loading}
+              className="btn-secondary px-4 py-2 disabled:opacity-50"
+            >
+              Next →
+            </button>
+          </div>
+        )}
 
         {/* Quick Stats */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">

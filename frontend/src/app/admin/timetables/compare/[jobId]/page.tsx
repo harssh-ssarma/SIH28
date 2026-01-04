@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { authenticatedFetch } from '@/lib/auth'
 
 interface Variant {
   id: string
@@ -56,7 +57,7 @@ export default function CompareVariantsPage() {
 
     setSubmitting(true)
     try {
-      const res = await fetch(`${API_BASE}/generation-jobs/${jobId}/select-variant/`, {
+      const res = await authenticatedFetch(`${API_BASE}/generation-jobs/${jobId}/select-variant/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

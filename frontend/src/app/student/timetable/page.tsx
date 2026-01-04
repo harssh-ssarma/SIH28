@@ -3,9 +3,59 @@
 import { useState, useEffect } from 'react'
 import DashboardLayout from '@/components/dashboard-layout'
 
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const TIME_SLOTS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00']
+
+function TimetableGrid({ schedule }: { schedule: any[] }) {
+  if (!schedule || schedule.length === 0) {
+    return (
+      <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+        <p>No timetable data available</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse">
+        <thead>
+          <tr>
+            <th className="border border-gray-300 dark:border-gray-700 p-2 bg-gray-100 dark:bg-gray-800 text-xs font-medium">Time</th>
+            {DAYS.map(day => (
+              <th key={day} className="border border-gray-300 dark:border-gray-700 p-2 bg-gray-100 dark:bg-gray-800 text-xs font-medium">{day}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {TIME_SLOTS.map(time => (
+            <tr key={time}>
+              <td className="border border-gray-300 dark:border-gray-700 p-2 text-xs font-medium text-gray-600 dark:text-gray-400">{time}</td>
+              {DAYS.map(day => {
+                const slot = schedule.find(s => s.day === day && s.time_slot?.startsWith(time))
+                return (
+                  <td key={`${day}-${time}`} className="border border-gray-300 dark:border-gray-700 p-2">
+                    {slot ? (
+                      <div className="text-xs space-y-1">
+                        <div className="font-medium text-gray-800 dark:text-gray-200">{slot.subject_code}</div>
+                        <div className="text-gray-600 dark:text-gray-400">{slot.faculty_name}</div>
+                        <div className="text-gray-500 dark:text-gray-500">{slot.room_number}</div>
+                      </div>
+                    ) : null}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function StudentTimetable() {
   const [schedule, setSchedule] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [student, setStudent] = useState<any>(null)
 
   useEffect(() => {
@@ -14,17 +64,27 @@ export default function StudentTimetable() {
 
   const fetchSchedule = async () => {
     try {
-      const token = localStorage.getItem('token')
+      setLoading(true)
+      setError(null)
+      // 🔐 Use HttpOnly cookies (no manual token handling)
       const res = await fetch('http://localhost:8000/api/timetable/student/me/', {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include', // Send HttpOnly cookies automatically
       })
+      
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+      }
+      
       const data = await res.json()
       if (data.success) {
-        setSchedule(data.slots)
+        setSchedule(data.slots || [])
         setStudent(data.student)
+      } else {
+        setError(data.message || 'Failed to load timetable')
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to fetch schedule:', error)
+      setError(error.message || 'Network error')
     } finally {
       setLoading(false)
     }
@@ -35,8 +95,23 @@ export default function StudentTimetable() {
       <DashboardLayout role="student">
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
-            <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
             <p className="text-gray-600 dark:text-gray-400">Loading schedule...</p>
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  if (error) {
+    return (
+      <DashboardLayout role="student">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="text-red-600 dark:text-red-400 mb-4">⚠️</div>
+            <p className="text-gray-800 dark:text-gray-200 font-medium mb-2">Failed to load timetable</p>
+            <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">{error}</p>
+            <button onClick={fetchSchedule} className="btn-primary">Retry</button>
           </div>
         </div>
       </DashboardLayout>
@@ -73,7 +148,7 @@ export default function StudentTimetable() {
           <div className="card-compact">
             <div className="text-center">
               <div className="text-lg sm:text-xl font-semibold text-blue-600 dark:text-blue-400">
-                18
+                {schedule.length}
               </div>
               <div className="text-xs text-gray-600 dark:text-gray-400">Total Classes</div>
             </div>
@@ -81,7 +156,7 @@ export default function StudentTimetable() {
           <div className="card-compact">
             <div className="text-center">
               <div className="text-lg sm:text-xl font-semibold text-green-600 dark:text-green-400">
-                5
+                {new Set(schedule.map(s => s.subject_code)).size}
               </div>
               <div className="text-xs text-gray-600 dark:text-gray-400">Subjects</div>
             </div>
@@ -89,7 +164,7 @@ export default function StudentTimetable() {
           <div className="card-compact">
             <div className="text-center">
               <div className="text-lg sm:text-xl font-semibold text-purple-600 dark:text-purple-400">
-                8
+                {new Set(schedule.map(s => s.faculty_name)).size}
               </div>
               <div className="text-xs text-gray-600 dark:text-gray-400">Faculty</div>
             </div>
@@ -117,65 +192,48 @@ export default function StudentTimetable() {
         <div className="card">
           <div className="card-header">
             <h3 className="card-title">Today's Classes</h3>
-            <p className="card-description">Monday, December 16, 2024</p>
+            <p className="card-description">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
           </div>
           <div className="space-y-3">
-            <div className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/40 rounded-lg flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-bold text-blue-800 dark:text-blue-300">9:00</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
-                  Data Structures
-                </h4>
-                <p className="text-xs text-gray-600 dark:text-gray-400">Dr. Rajesh Kumar • Lab 1</p>
-              </div>
-              <div className="text-xs text-blue-600 dark:text-blue-400 font-medium">1h 30m</div>
-            </div>
-            <div className="flex items-center gap-3 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-              <div className="w-12 h-12 bg-green-100 dark:bg-green-900/40 rounded-lg flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-bold text-green-800 dark:text-green-300">14:00</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
-                  Technical Writing
-                </h4>
-                <p className="text-xs text-gray-600 dark:text-gray-400">
-                  Dr. Kavita Joshi • Room 101
-                </p>
-              </div>
-              <div className="text-xs text-green-600 dark:text-green-400 font-medium">1h 30m</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Upcoming Assignments */}
-        <div className="card">
-          <div className="card-header">
-            <h3 className="card-title">Upcoming Assignments</h3>
-            <p className="card-description">Due dates and submissions</p>
-          </div>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-              <div className="flex-1 min-w-0">
-                <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
-                  Database Design Project
-                </h4>
-                <p className="text-xs text-gray-600 dark:text-gray-400">Prof. Meera Sharma</p>
-              </div>
-              <div className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">
-                Due in 3 days
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <div className="flex-1 min-w-0">
-                <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
-                  ML Algorithm Implementation
-                </h4>
-                <p className="text-xs text-gray-600 dark:text-gray-400">Dr. Anita Verma</p>
-              </div>
-              <div className="text-xs text-red-600 dark:text-red-400 font-medium">Due tomorrow</div>
-            </div>
+            {(() => {
+              const today = new Date().toLocaleDateString('en-US', { weekday: 'long' })
+              const todayClasses = schedule.filter(s => s.day === today).sort((a, b) => {
+                const timeA = a.time_slot?.split('-')[0] || '00:00'
+                const timeB = b.time_slot?.split('-')[0] || '00:00'
+                return timeA.localeCompare(timeB)
+              })
+              
+              if (todayClasses.length === 0) {
+                return (
+                  <p className="text-sm text-gray-500 text-center py-4">No classes scheduled for today</p>
+                )
+              }
+              
+              const colors = ['blue', 'green', 'purple', 'orange', 'pink', 'indigo']
+              
+              return todayClasses.map((slot, index) => {
+                const color = colors[index % colors.length]
+                const startTime = slot.time_slot?.split('-')[0] || '00:00'
+                return (
+                  <div key={index} className={`flex items-center gap-3 p-3 bg-${color}-50 dark:bg-${color}-900/20 border border-${color}-200 dark:border-${color}-800 rounded-lg`}>
+                    <div className={`w-12 h-12 bg-${color}-100 dark:bg-${color}-900/40 rounded-lg flex items-center justify-center flex-shrink-0`}>
+                      <span className={`text-xs font-bold text-${color}-800 dark:text-${color}-300`}>{startTime}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                        {slot.subject_code}
+                      </h4>
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        {slot.faculty_name} • {slot.room_number}
+                      </p>
+                    </div>
+                    <div className={`text-xs text-${color}-600 dark:text-${color}-400 font-medium`}>
+                      {slot.time_slot}
+                    </div>
+                  </div>
+                )
+              })
+            })()}
           </div>
         </div>
       </div>

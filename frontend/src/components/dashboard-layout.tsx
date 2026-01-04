@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Sidebar from '@/components/layout/Sidebar'
 
@@ -26,6 +26,7 @@ export default function DashboardLayout({
   const settingsRef = useRef<HTMLDivElement>(null)
   const notificationsRef = useRef<HTMLDivElement>(null)
   const pathname = usePathname()
+  const router = useRouter()
 
   const getPageTitle = () => {
     const segments = pathname.split('/').filter(Boolean)
@@ -72,7 +73,7 @@ export default function DashboardLayout({
           }`}
         >
           {/* Header */}
-          <header className="sticky top-0 z-30 bg-white dark:bg-[#1E1E1E] border-b border-gray-200 dark:border-gray-800">
+          <header className="sticky top-0 z-30 bg-white dark:bg-[#1E1E1E]">
             <div className="flex items-center justify-between px-4 lg:px-6 h-16">
               <div className="flex items-center gap-3">
                 <button
@@ -168,7 +169,7 @@ export default function DashboardLayout({
               <button onClick={() => setShowSignOutDialog(false)} className="btn-secondary">
                 Cancel
               </button>
-              <button onClick={() => (window.location.href = '/login')} className="btn-danger">
+              <button onClick={() => router.push('/login')} className="btn-danger">
                 Sign Out
               </button>
             </div>

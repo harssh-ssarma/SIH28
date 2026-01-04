@@ -11,6 +11,17 @@ from .timetable_views import (
 )
 from .workflow_views import TimetableWorkflowViewSet, TimetableVariantViewSet
 from .timetable_config_views import TimetableConfigurationViewSet
+from .conflict_views import ConflictViewSet
+from .cross_enrollment_views import CrossEnrollmentViewSet
+from .analytics_views import AnalyticsViewSet
+from .views_optimized import (
+    fast_generation_jobs,
+    fast_faculty,
+    fast_departments,
+    fast_courses,
+    fast_students,
+    fast_rooms,
+)
 from .views import (
     BatchViewSet,
     BuildingViewSet,
@@ -27,6 +38,8 @@ from .views import (
     UserViewSet,
     current_user_view,
     dashboard_stats,
+    faculty_profile_and_courses,
+    student_profile_and_courses,
     login_view,
     logout_view,
     refresh_token_view,
@@ -52,9 +65,14 @@ router.register(r"generation-jobs", GenerationJobViewSet, basename="generation-j
 router.register(r"timetable/workflows", TimetableWorkflowViewSet, basename="workflow")
 router.register(r"timetable/variants", TimetableVariantViewSet, basename="variant")
 router.register(r"timetable-configs", TimetableConfigurationViewSet, basename="timetable-config")
+router.register(r"conflicts", ConflictViewSet, basename="conflict")
+router.register(r"cross-enrollment", CrossEnrollmentViewSet, basename="cross-enrollment")
+router.register(r"analytics", AnalyticsViewSet, basename="analytics")
 
 urlpatterns = [
-    path("", include(router.urls)),
+    # Faculty and Student profile - MUST be before router to avoid conflict
+    path("faculty/profile/", faculty_profile_and_courses, name="faculty-profile"),
+    path("student/profile/", student_profile_and_courses, name="student-profile"),
     # New Attendance management routes (takes priority)
     path("attendance/", include("academics.attendance_urls")),
     # Timetable viewing endpoints (RBAC-based)
@@ -78,4 +96,13 @@ urlpatterns = [
     path("auth/me", current_user_view, name="current-user-no-slash"),
     # Dashboard stats
     path("dashboard/stats/", dashboard_stats, name="dashboard-stats"),
+    # PERFORMANCE: Ultra-fast endpoints
+    path("fast/jobs/", fast_generation_jobs, name="fast-jobs"),
+    path("fast/faculty/", fast_faculty, name="fast-faculty"),
+    path("fast/departments/", fast_departments, name="fast-departments"),
+    path("fast/courses/", fast_courses, name="fast-courses"),
+    path("fast/students/", fast_students, name="fast-students"),
+    path("fast/rooms/", fast_rooms, name="fast-rooms"),
+    # Router URLs (keep at end to avoid conflicts with specific paths above)
+    path("", include(router.urls)),
 ]

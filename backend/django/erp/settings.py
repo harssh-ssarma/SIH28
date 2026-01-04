@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",  # 🔐 Token rotation & blacklisting
     "drf_spectacular",
     "corsheaders",
     "django_filters",
@@ -91,15 +92,16 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "django.middleware.gzip.GZipMiddleware",  # PERFORMANCE: Compress responses
+    "django.middleware.http.ConditionalGetMiddleware",  # PERFORMANCE: ETag support
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "core.csrf_middleware.APICSRFExemptMiddleware",  # Custom: Exempts /api/ endpoints
+    "core.csrf_middleware.APICSRFExemptMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    # Custom logging middleware
     "core.middleware.RequestResponseLoggingMiddleware",
     "core.middleware.APIMetricsMiddleware",
 ]
@@ -150,10 +152,10 @@ else:
             "HOST": os.getenv("DB_HOST"),
             "PORT": os.getenv("DB_PORT", "5432"),
             "ATOMIC_REQUESTS": True,
-            "CONN_MAX_AGE": 600,
+            "CONN_MAX_AGE": 600,  # PERFORMANCE: Connection pooling
             "OPTIONS": {
-                "sslmode": "require",  # Required for Neon database
-                "connect_timeout": 10,
+                "sslmode": "require",
+                "connect_timeout": 5,  # PERFORMANCE: Faster timeout
             },
         }
     }
@@ -211,8 +213,8 @@ AUTH_USER_MODEL = "academics.User"
 # REST Framework Settings
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "core.authentication.JWTCookieAuthentication",  # 🔐 Custom JWT from HttpOnly cookies
-        "rest_framework_simplejwt.authentication.JWTAuthentication",  # Fallback for Authorization header
+        "core.authentication.JWTCookieAuthentication",
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -224,16 +226,15 @@ REST_FRAMEWORK = {
         "rest_framework.filters.OrderingFilter",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "PAGE_SIZE": 100,
+    "PAGE_SIZE": 50,  # PERFORMANCE: Reduced from 100 to 50
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-    # Rate Limiting (Industry-level security)
-    "DEFAULT_THROTTLE_CLASSES": [
+    "DEFAULT_THROTTLE_CLASSES": [] if DEBUG else [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100/hour",  # Anonymous users: 100 requests per hour
-        "user": "1000/hour",  # Authenticated users: 1000 requests per hour
+        "anon": "1000/hour",
+        "user": "10000/hour",
     },
 }
 
@@ -427,13 +428,13 @@ LOGGING = {
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    # Token Lifetimes - SHORT expiry for security (Industry best practice)
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),  # 15 min (was 60)
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),     # 7 days with rotation
+    # Token Lifetimes - Google-like security (shorter refresh, auto-rotate)
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),     # 1 hour (auto-refresh)
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),     # 7 days (Google standard with rotation)
     
-    # Token Rotation & Blacklisting (CRITICAL for security)
-    "ROTATE_REFRESH_TOKENS": False,              # Disabled due to UUID user_id
-    "BLACKLIST_AFTER_ROTATION": False,           # Disabled due to UUID user_id
+    # Token Rotation & Blacklisting (CRITICAL: Prevents token theft)
+    "ROTATE_REFRESH_TOKENS": True,               # Rotate on each refresh (Google standard)
+    "BLACKLIST_AFTER_ROTATION": True,            # Blacklist old tokens immediately
     "UPDATE_LAST_LOGIN": True,
     
     # Encryption & Signing
@@ -464,11 +465,13 @@ SIMPLE_JWT = {
 # INDUSTRY-LEVEL SECURITY SETTINGS
 # =============================
 
-# Session Security
+# Session Security (Enterprise: Long-lived sessions like Google/Microsoft)
 SESSION_COOKIE_SECURE = not DEBUG  # Use secure cookies in production (HTTPS only)
 SESSION_COOKIE_HTTPONLY = True  # Prevent JavaScript access to session cookies
 SESSION_COOKIE_SAMESITE = "Lax"  # CSRF protection
-SESSION_COOKIE_AGE = 86400  # 24 hours
+SESSION_COOKIE_AGE = 1209600  # 14 days (enterprise standard)
+SESSION_SAVE_EVERY_REQUEST = True  # Extend session on every request (keep-alive)
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False  # Persist across browser restarts
 
 # CSRF Protection
 # Note: Auth endpoints (login, logout, refresh) are CSRF-exempt because

@@ -61,7 +61,10 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   handleGoHome = () => {
-    window.location.href = '/'
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', '/')
+      window.location.reload()
+    }
   }
 
   render() {

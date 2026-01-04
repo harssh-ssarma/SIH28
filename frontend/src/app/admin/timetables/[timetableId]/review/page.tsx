@@ -9,57 +9,59 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
+import { authenticatedFetch } from '@/lib/auth'
 
 // Backend types matching Django models
 interface TimetableEntry {
   day: number // 0-4 (Monday-Friday)
   time_slot: string
-  subject_id: string
-  subject_name: string
-  subject_code: string
-  faculty_id: string
-  faculty_name: string
-  batch_id: string
-  batch_name: string
-  classroom_id: string
-  room_number: string
-  duration_minutes: number
+  subject_id?: string
+  subject_name?: string
+  subject_code?: string
+  faculty_id?: string
+  faculty_name?: string
+  batch_id?: string
+  batch_name?: string
+  classroom_id?: string
+  room_number?: string
+  duration_minutes?: number
+  department_id?: string
 }
 
 interface QualityMetrics {
-  total_conflicts: number
-  hard_constraint_violations: number
-  soft_constraint_violations: number
-  room_utilization_score: number
-  faculty_workload_balance_score: number
-  student_compactness_score: number
-  overall_score: number
+  total_conflicts?: number
+  hard_constraint_violations?: number
+  soft_constraint_violations?: number
+  room_utilization_score?: number
+  faculty_workload_balance_score?: number
+  student_compactness_score?: number
+  overall_score?: number
 }
 
 interface Statistics {
-  total_classes: number
-  total_hours: number
-  unique_subjects: number
-  unique_faculty: number
-  unique_rooms: number
-  average_classes_per_day: number
+  total_classes?: number
+  total_hours?: number
+  unique_subjects?: number
+  unique_faculty?: number
+  unique_rooms?: number
+  average_classes_per_day?: number
 }
 
 interface TimetableVariant {
   id: string
   job_id: string
   variant_number: number
-  optimization_priority: string
+  optimization_priority?: string
   organization_id: string
-  department_id: string
-  semester: number
-  academic_year: string
+  department_id?: string
+  semester?: number
+  academic_year?: string
   timetable_entries: TimetableEntry[]
   statistics: Statistics
   quality_metrics: QualityMetrics
-  is_selected: boolean
-  selected_at: string | null
-  selected_by: number | null
+  is_selected?: boolean
+  selected_at?: string | null
+  selected_by?: number | null
   generated_at: string
 }
 
@@ -120,25 +122,57 @@ export default function TimetableReviewPage() {
   const [activeVariant, setActiveVariant] = useState<TimetableVariant | null>(null)
   const [viewMode, setViewMode] = useState<'comparison' | 'detail'>('comparison')
   const [selectedDay, setSelectedDay] = useState(0)
+  const [departmentFilter, setDepartmentFilter] = useState<string>('all')
 
   useEffect(() => {
     if (workflowId) {
-      loadWorkflowData()
+      checkJobStatusAndLoad()
     }
   }, [workflowId])
+
+  const checkJobStatusAndLoad = async () => {
+    try {
+      // First check if this job is still running
+      const jobRes = await authenticatedFetch(
+        `${API_BASE}/generation-jobs/${workflowId}/`,
+        { credentials: 'include' }
+      )
+      
+      if (jobRes.ok) {
+        const jobData = await jobRes.json()
+        // If job is running or queued, redirect to status page
+        if (jobData.status === 'running' || jobData.status === 'queued') {
+          router.push(`/admin/timetables/status/${workflowId}`)
+          return
+        }
+      }
+      
+      // Job is completed/failed/cancelled, load workflow data
+      loadWorkflowData()
+    } catch (err) {
+      // If job check fails, try loading workflow anyway
+      loadWorkflowData()
+    }
+  }
 
   const loadWorkflowData = async () => {
     try {
       setLoading(true)
       setError(null)
 
-      // Fetch workflow details
-      const workflowRes = await fetch(`${API_BASE}/timetable/workflows/${workflowId}/`, {
-        credentials: 'include',
-      })
+      // Fetch workflow details with auto-refresh
+      const workflowRes = await authenticatedFetch(
+        `${API_BASE}/timetable/workflows/${workflowId}/`,
+        { credentials: 'include' }
+      )
 
       if (!workflowRes.ok) {
-        throw new Error('Failed to load workflow')
+        if (workflowRes.status === 401 || workflowRes.status === 403) {
+          // Session expired - redirect to login
+          router.push('/login?redirect=' + encodeURIComponent(window.location.pathname))
+          return
+        }
+        throw new Error(`Failed to load workflow (${workflowRes.status})`)
       }
 
       const workflowData = await workflowRes.json()
@@ -146,25 +180,41 @@ export default function TimetableReviewPage() {
 
       // Fetch variants for this job
       if (workflowData.job_id) {
-        const variantsRes = await fetch(
+        const variantsRes = await authenticatedFetch(
           `${API_BASE}/timetable/variants/?job_id=${workflowData.job_id}`,
-          {
-            credentials: 'include',
-          }
+          { credentials: 'include' }
         )
 
         if (variantsRes.ok) {
           const variantsData = await variantsRes.json()
           setVariants(variantsData)
 
-          // Pre-select variant
+          // Pre-select variant and load its entries
           const selected = variantsData.find((v: TimetableVariant) => v.is_selected)
-          if (selected) {
-            setSelectedVariantId(selected.id)
-            setActiveVariant(selected)
-          } else if (variantsData.length > 0) {
-            // Default to first variant
-            setActiveVariant(variantsData[0])
+          const variantToLoad = selected || variantsData[0]
+          
+          if (variantToLoad) {
+            setSelectedVariantId(variantToLoad.id)
+            
+            // Load entries for the selected variant
+            try {
+              const entriesRes = await authenticatedFetch(
+                `${API_BASE}/timetable/variants/${variantToLoad.id}/entries/?job_id=${variantToLoad.job_id}`,
+                { credentials: 'include' }
+              )
+              if (entriesRes.ok) {
+                const entriesData = await entriesRes.json()
+                setActiveVariant({
+                  ...variantToLoad,
+                  timetable_entries: entriesData.timetable_entries
+                })
+              } else {
+                setActiveVariant(variantToLoad)
+              }
+            } catch (err) {
+              console.error('Failed to load entries:', err)
+              setActiveVariant(variantToLoad)
+            }
           }
         }
       }
@@ -179,13 +229,13 @@ export default function TimetableReviewPage() {
   const handleVariantSelect = async (variantId: string) => {
     try {
       setActionLoading(true)
-      const response = await fetch(`${API_BASE}/timetable/variants/${variantId}/select/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-      })
+      const response = await authenticatedFetch(
+        `${API_BASE}/timetable/variants/${variantId}/select/`,
+        {
+          method: 'POST',
+          credentials: 'include',
+        }
+      )
 
       if (!response.ok) {
         throw new Error('Failed to select variant')
@@ -219,16 +269,15 @@ export default function TimetableReviewPage() {
 
     try {
       setActionLoading(true)
-      const response = await fetch(`${API_BASE}/timetable/workflows/${workflowId}/approve/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          comments: approvalComments,
-        }),
-      })
+      const response = await authenticatedFetch(
+        `${API_BASE}/timetable/workflows/${workflowId}/approve/`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ comments: approvalComments }),
+        }
+      )
 
       if (!response.ok) {
         throw new Error('Failed to approve timetable')
@@ -253,16 +302,15 @@ export default function TimetableReviewPage() {
 
     try {
       setActionLoading(true)
-      const response = await fetch(`${API_BASE}/timetable/workflows/${workflowId}/reject/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          comments: rejectionReason,
-        }),
-      })
+      const response = await authenticatedFetch(
+        `${API_BASE}/timetable/workflows/${workflowId}/reject/`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ comments: rejectionReason }),
+        }
+      )
 
       if (!response.ok) {
         throw new Error('Failed to reject timetable')
@@ -280,6 +328,11 @@ export default function TimetableReviewPage() {
   }
 
   const renderTimetableGrid = (variant: TimetableVariant) => {
+    // Safety check
+    if (!variant.timetable_entries || variant.timetable_entries.length === 0) {
+      return <div className="text-center py-8 text-gray-500">No timetable entries available</div>
+    }
+
     // Group entries by day and time
     const grid: { [key: string]: TimetableEntry[] } = {}
     variant.timetable_entries.forEach(entry => {
@@ -289,7 +342,7 @@ export default function TimetableReviewPage() {
     })
 
     // Get unique time slots
-    const timeSlots = Array.from(new Set(variant.timetable_entries.map(e => e.time_slot))).sort()
+    const timeSlots = Array.from(new Set(variant.timetable_entries.map(e => e.time_slot).filter(Boolean))).sort()
 
     return (
       <div className="overflow-x-auto">
@@ -411,7 +464,7 @@ export default function TimetableReviewPage() {
                         : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
                 }`}
               >
-                {workflow?.status.replace('_', ' ').toUpperCase()}
+                {workflow?.status?.replace('_', ' ').toUpperCase() || 'DRAFT'}
               </span>
             </div>
           </div>
@@ -460,9 +513,26 @@ export default function TimetableReviewPage() {
                     ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20'
                     : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
                 }`}
-                onClick={() => {
-                  setActiveVariant(variant)
-                  setViewMode('detail')
+                onClick={async () => {
+                  // Load entries for this variant
+                  try {
+                    const response = await authenticatedFetch(
+                      `${API_BASE}/timetable/variants/${variant.id}/entries/?job_id=${variant.job_id}`,
+                      { credentials: 'include' }
+                    )
+                    if (response.ok) {
+                      const data = await response.json()
+                      setActiveVariant({
+                        ...variant,
+                        timetable_entries: data.timetable_entries
+                      })
+                      setViewMode('detail')
+                    }
+                  } catch (err) {
+                    console.error('Failed to load entries:', err)
+                    setActiveVariant(variant)
+                    setViewMode('detail')
+                  }
                 }}
               >
                 <div className="flex items-start justify-between mb-3">
@@ -471,7 +541,7 @@ export default function TimetableReviewPage() {
                       Variant {variant.variant_number}
                     </h3>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      {variant.optimization_priority.replace('_', ' ')}
+                      {variant.optimization_priority?.replace('_', ' ') || 'Standard'}
                     </p>
                   </div>
                   {variant.is_selected && (
@@ -486,31 +556,31 @@ export default function TimetableReviewPage() {
                   <div className="flex justify-between">
                     <span className="text-gray-600 dark:text-gray-400">Overall Score:</span>
                     <span className="font-semibold text-gray-900 dark:text-white">
-                      {variant.quality_metrics.overall_score.toFixed(1)}%
+                      {variant.quality_metrics?.overall_score?.toFixed(1) || '0.0'}%
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600 dark:text-gray-400">Conflicts:</span>
                     <span
                       className={`font-semibold ${
-                        variant.quality_metrics.total_conflicts === 0
+                        (variant.quality_metrics?.total_conflicts || 0) === 0
                           ? 'text-green-600 dark:text-green-400'
                           : 'text-red-600 dark:text-red-400'
                       }`}
                     >
-                      {variant.quality_metrics.total_conflicts}
+                      {variant.quality_metrics?.total_conflicts || 0}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600 dark:text-gray-400">Room Utilization:</span>
                     <span className="font-semibold text-gray-900 dark:text-white">
-                      {variant.quality_metrics.room_utilization_score.toFixed(1)}%
+                      {variant.quality_metrics?.room_utilization_score?.toFixed(1) || '0.0'}%
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600 dark:text-gray-400">Total Classes:</span>
                     <span className="font-semibold text-gray-900 dark:text-white">
-                      {variant.statistics.total_classes}
+                      {variant.statistics?.total_classes || 0}
                     </span>
                   </div>
                 </div>
@@ -537,9 +607,53 @@ export default function TimetableReviewPage() {
         {activeVariant && viewMode === 'detail' && (
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Variant {activeVariant.variant_number} - Detailed View
-              </h2>
+              <div className="flex items-center gap-4">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Variant {activeVariant.variant_number} - Detailed View
+                </h2>
+                <select
+                  value={departmentFilter}
+                  onChange={async (e) => {
+                    const deptId = e.target.value
+                    setDepartmentFilter(deptId)
+                    
+                    // Fetch filtered data from Django API
+                    if (deptId !== 'all' && activeVariant) {
+                      try {
+                        const response = await authenticatedFetch(
+                          `${API_BASE}/timetable/variants/${activeVariant.id}/department_view/?department_id=${deptId}&job_id=${activeVariant.job_id}`,
+                          { credentials: 'include' }
+                        )
+                        
+                        if (response.ok) {
+                          const data = await response.json()
+                          setActiveVariant({
+                            ...activeVariant,
+                            timetable_entries: data.timetable_entries
+                          })
+                        }
+                      } catch (err) {
+                        console.error('Failed to fetch department view:', err)
+                      }
+                    } else {
+                      // Reset to full variant
+                      const fullVariant = variants.find(v => v.id === activeVariant.id)
+                      if (fullVariant) setActiveVariant(fullVariant)
+                    }
+                  }}
+                  aria-label="Filter by department"
+                  className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                >
+                  <option value="all">All Departments</option>
+                  {Array.from(new Set(
+                    (activeVariant.timetable_entries || [])
+                      .map(e => e.department_id)
+                      .filter(Boolean)
+                  )).map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+              </div>
               <button
                 onClick={() => setViewMode('comparison')}
                 className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"

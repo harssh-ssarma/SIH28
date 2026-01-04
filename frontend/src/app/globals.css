@@ -102,23 +102,23 @@
 
   /* Modern Card Components with YouTube-style hover */
   .card {
-    @apply bg-white dark:bg-[#1E1E1E] border border-[#E0E0E0] dark:border-[#2A2A2A] p-4 sm:p-6 rounded-xl transition-colors duration-200;
+    @apply bg-white dark:bg-[#1E1E1E] border border-[#E0E0E0] dark:border-[#2A2A2A] p-6 rounded-lg shadow-sm transition-all duration-200;
   }
 
   .card-flat {
-    @apply bg-white dark:bg-[#1E1E1E] border border-[#E0E0E0] dark:border-[#2A2A2A] p-4 sm:p-6 rounded-lg;
+    @apply bg-white dark:bg-[#1E1E1E] border border-[#E0E0E0] dark:border-[#2A2A2A] p-6 rounded-lg;
   }
 
   .card-header {
-    @apply pb-4 border-b border-[#E0E0E0] dark:border-[#2A2A2A] mb-4;
+    @apply pb-5 border-b border-[#E0E0E0] dark:border-[#2A2A2A] mb-6;
   }
 
   .card-title {
-    @apply text-lg sm:text-xl font-semibold tracking-tight text-[#2C2C2C] dark:text-[#FFFFFF];
+    @apply text-xl font-semibold text-[#2C2C2C] dark:text-[#FFFFFF];
   }
 
   .card-description {
-    @apply text-xs sm:text-sm text-[#606060] dark:text-[#aaaaaa] mt-1;
+    @apply text-sm text-[#606060] dark:text-[#aaaaaa] mt-1.5;
   }
 
   /* Circular Header Components */
@@ -203,11 +203,11 @@
 
   /* Form Components */
   .form-group {
-    @apply space-y-2;
+    @apply space-y-2.5;
   }
 
   .form-label {
-    @apply block text-sm font-medium text-gray-700 dark:text-gray-300;
+    @apply block text-sm font-medium text-[#2C2C2C] dark:text-[#E0E0E0] mb-1.5;
   }
 
   .form-error {

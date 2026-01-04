@@ -10,7 +10,7 @@ import { useToast } from '@/components/Toast'
 interface Faculty {
   id: number
   faculty_id: string
-  employee_id?: string
+  faculty_code: string
   faculty_name: string
   designation: string
   specialization: string
@@ -42,14 +42,18 @@ export default function FacultyManagePage() {
   const [selectedFaculty, setSelectedFaculty] = useState<Faculty | null>(null)
   const [isDeleting, setIsDeleting] = useState<number | null>(null)
 
+  // Debounced search
   useEffect(() => {
-    fetchFaculty()
-  }, [currentPage])
+    const timer = setTimeout(() => {
+      setCurrentPage(1)
+      fetchFaculty()
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
 
   useEffect(() => {
-    setCurrentPage(1)
     fetchFaculty()
-  }, [itemsPerPage])
+  }, [currentPage, itemsPerPage])
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page)
@@ -68,7 +72,7 @@ export default function FacultyManagePage() {
 
     setError(null)
     try {
-      const response = await apiClient.getFaculty(currentPage)
+      const response = await apiClient.getFaculty(currentPage, itemsPerPage, searchTerm)
       if (response.error) {
         setError(response.error)
       } else if (response.data) {
@@ -169,13 +173,11 @@ export default function FacultyManagePage() {
     }
   }
 
+  // Client-side filtering for department (search is server-side)
   const filteredFaculty = faculty.filter(member => {
-    const matchesSearch =
-      member.faculty_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      member.faculty_id?.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesDepartment =
       !selectedDepartment || member.department?.department_name === selectedDepartment
-    return matchesSearch && matchesDepartment
+    return matchesDepartment
   })
 
   const departments = [...new Set(faculty.map(f => f.department?.department_name).filter(Boolean))].filter(Boolean)
@@ -243,15 +245,6 @@ export default function FacultyManagePage() {
             </select>
           </div>
         </div>
-
-        {/* Loading indicator */}
-        {isLoading && (
-          <div className="flex items-center justify-center py-8">
-            <div className="loading-spinner w-6 h-6 mr-2"></div>
-            <span className="text-gray-600 dark:text-gray-400">Loading faculty...</span>
-          </div>
-        )}
-
         {!isLoading && filteredFaculty.length === 0 ? (
           <div className="text-center py-12">
             <div className="text-4xl sm:text-6xl mb-4">👨</div>
@@ -279,7 +272,7 @@ export default function FacultyManagePage() {
                         {member.faculty_name}
                       </h4>
                       <p className="text-sm text-gray-600 dark:text-gray-400">
-                        {member.employee_id || member.faculty_id}
+                        {member.faculty_code}
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-500">
                         {member.designation}
@@ -337,52 +330,81 @@ export default function FacultyManagePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredFaculty.map(member => (
-                    <tr key={member.id} className="table-row">
-                      <td className="table-cell">
-                        <span className="font-mono text-sm">
-                          {member.employee_id || member.faculty_id}
-                        </span>
-                      </td>
-                      <td className="table-cell">
-                        <div className="font-medium text-gray-800 dark:text-gray-200">
-                          {member.faculty_name}
-                        </div>
-                      </td>
-                      <td className="table-cell">
-                        <span className="badge badge-neutral text-xs">{member.designation}</span>
-                      </td>
-                      <td className="table-cell">{member.department.department_name}</td>
-                      <td className="table-cell">{member.specialization}</td>
-                      <td className="table-cell">
-                        <span className="badge badge-info text-xs">
-                          {member.max_workload}h/week
-                        </span>
-                      </td>
-                      <td className="table-cell">
-                        <span className="badge badge-success text-xs">{member.status}</span>
-                      </td>
-                      <td className="table-cell">
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => handleEditFaculty(member)}
-                            className="btn-ghost text-xs px-2 py-1"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDeleteFaculty(member.id, member.faculty_name)}
-                            disabled={isDeleting === member.id}
-                            className="btn-danger text-xs px-2 py-1"
-                          >
-                            {isDeleting === member.id ? 'Deleting...' : 'Del'}
-                          </button>
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan="8">
+                        <div className="flex items-center justify-center py-8">
+                          <div className="loading-spinner w-6 h-6 mr-2"></div>
+                          <span className="text-gray-600 dark:text-gray-400">
+                            Loading Faculty...
+                          </span>
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredFaculty.map(member => (
+                      <tr key={member.id} className="table-row">
+                        <td className="table-cell">
+                          <span className="font-mono text-sm">
+                            {member.faculty_code}
+                          </span>
+                        </td>
+
+                        <td className="table-cell">
+                          <div className="font-medium text-gray-800 dark:text-gray-200">
+                            {member.faculty_name}
+                          </div>
+                        </td>
+
+                        <td className="table-cell">
+                          <span className="badge badge-neutral text-xs">
+                            {member.designation}
+                          </span>
+                        </td>
+
+                        <td className="table-cell">
+                          {member.department.department_name}
+                        </td>
+
+                        <td className="table-cell">{member.specialization}</td>
+
+                        <td className="table-cell">
+                          <span className="badge badge-info text-xs">
+                            {member.max_workload}h/week
+                          </span>
+                        </td>
+
+                        <td className="table-cell">
+                          <span className="badge badge-success text-xs">
+                            {member.status}
+                          </span>
+                        </td>
+
+                        <td className="table-cell">
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleEditFaculty(member)}
+                              className="btn-ghost text-xs px-2 py-1"
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              onClick={() =>
+                                handleDeleteFaculty(member.id, member.faculty_name)
+                              }
+                              disabled={isDeleting === member.id}
+                              className="btn-danger text-xs px-2 py-1"
+                            >
+                              {isDeleting === member.id ? 'Deleting...' : 'Del'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
-              </table>
+                </table>
             </div>
 
             {/* Pagination Controls */}

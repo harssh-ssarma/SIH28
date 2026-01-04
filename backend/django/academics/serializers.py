@@ -212,21 +212,17 @@ class SchoolSerializer(serializers.ModelSerializer):
 
 class RoomSerializer(serializers.ModelSerializer):
     """Serializer for Room model (rooms table)"""
-    building = serializers.SerializerMethodField()
-    department = DepartmentSerializer(read_only=True)
-    
-    def get_building(self, obj):
-        if obj.building:
-            return {
-                "building_id": str(obj.building.building_id),
-                "building_code": obj.building.building_code,
-                "building_name": obj.building.building_name,
-            }
-        return None
+    building_name = serializers.CharField(source="building.building_name", read_only=True, allow_null=True)
+    department_name = serializers.CharField(source="department.dept_name", read_only=True, allow_null=True)
     
     class Meta:
         model = Room
-        exclude = ["features", "specialized_software"]
+        fields = [
+            "room_id", "room_code", "room_number", "room_name", "room_type",
+            "seating_capacity", "exam_capacity", "floor_number",
+            "building", "building_name", "department", "department_name",
+            "is_active", "room_status", "created_at", "updated_at"
+        ]
 
 # Alias for backward compatibility
 ClassroomSerializer = RoomSerializer
@@ -254,20 +250,46 @@ class TimetableSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class GenerationJobSerializer(serializers.ModelSerializer):
-    department_name = serializers.CharField(
-        source="department.department_name", read_only=True
+class GenerationJobListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for list view - excludes heavy timetable_data"""
+    organization_name = serializers.CharField(
+        source="organization.org_name", read_only=True
     )
-    batch_name = serializers.CharField(source="batch.batch_id", read_only=True)
-    created_by_username = serializers.CharField(
-        source="created_by.username", read_only=True
+    
+    # PERFORMANCE: Use cached model fields instead of loading timetable_data JSON
+    job_id = serializers.CharField(source='id', read_only=True)
+
+    class Meta:
+        model = GenerationJob
+        fields = [
+            "id",
+            "job_id",
+            "organization",
+            "organization_name",
+            "status",
+            "progress",
+            "academic_year",
+            "semester",
+            "created_at",
+            "updated_at",
+            "completed_at",
+            "error_message",
+        ]
+        # CRITICAL: Exclude timetable_data for fast list loading
+        # timetable_data can be 5-50MB per job!
+
+
+class GenerationJobSerializer(serializers.ModelSerializer):
+    """Full serializer for detail view - includes timetable_data"""
+    organization_name = serializers.CharField(
+        source="organization.org_name", read_only=True
     )
 
     class Meta:
         model = GenerationJob
         fields = "__all__"
         read_only_fields = [
-            "job_id",
+            "id",
             "status",
             "progress",
             "created_at",

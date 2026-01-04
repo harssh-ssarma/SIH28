@@ -1,200 +1,259 @@
 """
-Memory Management Utilities for Timetable Generation
-Monitors and optimizes memory usage across all stages
+Enterprise Memory Management System
+Implements Google Chrome + Linux Kernel memory strategies
 """
-import psutil
 import gc
+import os
 import logging
-from typing import Optional, Dict, Any
-from functools import wraps
+import psutil
+import threading
+import time
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
 
-class MemoryManager:
-    """
-    Smart memory manager for timetable generation pipeline
-    """
+class MemoryPressure(Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+@dataclass
+class MemoryBudget:
+    total_gb: float
+    reserved_for_os_gb: float = 2.0
+    max_usage_percent: float = 75.0
     
-    def __init__(self, max_memory_percent: float = 80.0):
-        """
-        Initialize memory manager
+    @property
+    def available_gb(self) -> float:
+        return max(0.5, self.total_gb - self.reserved_for_os_gb)
+    
+    @property
+    def budget_gb(self) -> float:
+        return self.available_gb * 0.7
+
+
+class StreamingPopulation:
+    """Lazy evaluation population - generates individuals on-the-fly"""
+    
+    def __init__(self, initial_solution: Dict, size: int, perturbation_fn):
+        self.initial_solution = initial_solution
+        self.size = size
+        self.perturbation_fn = perturbation_fn
+        self._best_solution = initial_solution.copy()
+        self._best_fitness = -float('inf')
+    
+    def __len__(self):
+        return self.size
+    
+    def __iter__(self):
+        yield self.initial_solution
+        for i in range(self.size - 1):
+            individual = self.perturbation_fn(self.initial_solution)
+            yield individual
+    
+    def generate(self):
+        """Alias for __iter__ for compatibility"""
+        return self.__iter__()
+    
+    def evaluate_streaming(self, fitness_fn) -> List[tuple]:
+        results = []
+        for i, individual in enumerate(self):
+            fitness = fitness_fn(individual)
+            results.append((individual, fitness))
+            
+            if fitness > self._best_fitness:
+                self._best_fitness = fitness
+                self._best_solution = individual.copy()
+            
+            if i % 5 == 0:
+                gc.collect(generation=0)
         
-        Args:
-            max_memory_percent: Maximum memory usage threshold (default 80%)
-        """
-        self.max_memory_percent = max_memory_percent
-        self.process = psutil.Process()
-        self.initial_memory = self.get_memory_usage()
+        return results
+    
+    @property
+    def best_solution(self):
+        return self._best_solution
+
+
+class BoundedCache:
+    """Fixed-size LRU cache"""
+    
+    def __init__(self, max_size: int = 50):
+        self.max_size = max_size
+        self._cache = {}
+        self._access_order = []
+    
+    def get(self, key):
+        if key in self._cache:
+            self._access_order.remove(key)
+            self._access_order.append(key)
+            return self._cache[key]
+        return None
+    
+    def set(self, key, value):
+        if key in self._cache:
+            self._access_order.remove(key)
+            self._access_order.append(key)
+            self._cache[key] = value
+        else:
+            if len(self._cache) >= self.max_size:
+                lru_key = self._access_order.pop(0)
+                del self._cache[lru_key]
+            self._cache[key] = value
+            self._access_order.append(key)
+    
+    def clear(self):
+        self._cache.clear()
+        self._access_order.clear()
+    
+    def __len__(self):
+        return len(self._cache)
+
+
+class MemoryMonitor:
+    """Background memory pressure monitor"""
+    
+    def __init__(self, check_interval: float = 1.0):
+        self.check_interval = check_interval
+        self.running = False
+        self._thread = None
+        self._callbacks = []
+        self._last_pressure = MemoryPressure.LOW
+    
+    def register_callback(self, pressure: MemoryPressure, callback):
+        self._callbacks.append((pressure, callback))
+    
+    def get_pressure(self) -> MemoryPressure:
+        mem = psutil.virtual_memory()
+        percent = mem.percent
         
-    def get_memory_usage(self) -> Dict[str, float]:
-        """Get current memory usage statistics"""
-        memory_info = self.process.memory_info()
-        virtual_memory = psutil.virtual_memory()
+        if percent > 85:
+            return MemoryPressure.CRITICAL
+        elif percent > 75:
+            return MemoryPressure.HIGH
+        elif percent > 60:
+            return MemoryPressure.MEDIUM
+        else:
+            return MemoryPressure.LOW
+    
+    def start(self):
+        if self.running:
+            return
+        self.running = True
+        self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self._thread.start()
+        logger.info("[MONITOR] Memory pressure monitor started")
+    
+    def stop(self):
+        self.running = False
+        if self._thread:
+            self._thread.join(timeout=2.0)
+    
+    def _monitor_loop(self):
+        while self.running:
+            try:
+                pressure = self.get_pressure()
+                if pressure != self._last_pressure:
+                    logger.warning(f"[MONITOR] Memory pressure: {self._last_pressure.value} -> {pressure.value}")
+                    self._trigger_callbacks(pressure)
+                    self._last_pressure = pressure
+                time.sleep(self.check_interval)
+            except Exception as e:
+                logger.error(f"[MONITOR] Error: {e}")
+    
+    def _trigger_callbacks(self, pressure: MemoryPressure):
+        for callback_pressure, callback in self._callbacks:
+            if pressure.value == callback_pressure.value:
+                try:
+                    callback()
+                except Exception as e:
+                    logger.error(f"[MONITOR] Callback error: {e}")
+
+
+class MemoryManager:
+    """Master memory manager"""
+    
+    def __init__(self):
+        self.budget = self._calculate_budget()
+        self.monitor = MemoryMonitor()
+        self._register_pressure_handlers()
+        self.cleanup_count = 0
+        self.total_freed_mb = 0.0
+        logger.info(f"[MEMORY] Budget: {self.budget.budget_gb:.1f}GB (of {self.budget.total_gb:.1f}GB total)")
+    
+    def _calculate_budget(self) -> MemoryBudget:
+        mem = psutil.virtual_memory()
+        total_gb = mem.total / (1024**3)
+        return MemoryBudget(total_gb=total_gb)
+    
+    def _register_pressure_handlers(self):
+        self.monitor.register_callback(MemoryPressure.HIGH, lambda: self.cleanup(level='aggressive'))
+        self.monitor.register_callback(MemoryPressure.CRITICAL, lambda: self.cleanup(level='emergency'))
+    
+    def start_monitoring(self):
+        self.monitor.start()
+    
+    def stop_monitoring(self):
+        self.monitor.stop()
+    
+    def cleanup(self, level: str = 'normal'):
+        before = self._get_usage()
         
+        if level == 'normal':
+            gc.collect(generation=0)
+        elif level == 'aggressive':
+            for i in range(2):
+                gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except:
+                pass
+        elif level == 'emergency':
+            for i in range(3):
+                gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+            except:
+                pass
+            logger.critical(f"[MEMORY] EMERGENCY CLEANUP at {before['percent']:.1f}%")
+        
+        after = self._get_usage()
+        freed_mb = before['rss_mb'] - after['rss_mb']
+        self.cleanup_count += 1
+        self.total_freed_mb += max(0, freed_mb)
+        
+        logger.info(f"[MEMORY] Cleanup ({level}): {before['rss_mb']:.0f}MB -> {after['rss_mb']:.0f}MB (freed {freed_mb:.0f}MB)")
         return {
-            'rss_mb': memory_info.rss / (1024 * 1024),  # Resident Set Size
-            'vms_mb': memory_info.vms / (1024 * 1024),  # Virtual Memory Size
-            'percent': self.process.memory_percent(),
-            'available_mb': virtual_memory.available / (1024 * 1024),
-            'total_mb': virtual_memory.total / (1024 * 1024),
-            'system_percent': virtual_memory.percent
+            'before': before,
+            'after': after,
+            'freed_mb': freed_mb
         }
     
-    def check_memory_threshold(self) -> bool:
-        """Check if memory usage exceeds threshold"""
-        usage = self.get_memory_usage()
-        return usage['system_percent'] > self.max_memory_percent
+    def _get_usage(self) -> dict:
+        process = psutil.Process(os.getpid())
+        mem_info = process.memory_info()
+        return {
+            'rss_mb': mem_info.rss / (1024 * 1024),
+            'percent': process.memory_percent()
+        }
     
-    def force_cleanup(self):
-        """Force garbage collection and memory cleanup"""
-        gc.collect()
-        logger.info("Forced garbage collection completed")
-    
-    def log_memory_stats(self, stage: str):
-        """Log memory statistics for a stage"""
-        usage = self.get_memory_usage()
-        logger.info(
-            f"[{stage}] Memory: RSS={usage['rss_mb']:.1f}MB, "
-            f"Process={usage['percent']:.1f}%, System={usage['system_percent']:.1f}%"
-        )
-    
-    def get_memory_delta(self) -> float:
-        """Get memory increase since initialization"""
-        current = self.get_memory_usage()
-        return current['rss_mb'] - self.initial_memory['rss_mb']
+    def get_max_population_size(self, bytes_per_individual: int = 20 * 1024 * 1024) -> int:
+        budget_bytes = self.budget.budget_gb * 1024 * 1024 * 1024
+        max_pop = int(budget_bytes / bytes_per_individual)
+        max_pop = max(3, min(max_pop, 50))
+        logger.info(f"[MEMORY] Max population: {max_pop} (budget: {self.budget.budget_gb:.1f}GB)")
+        return max_pop
 
 
-def memory_monitored(stage_name: str):
-    """
-    Decorator to monitor memory usage for a function
-    
-    Usage:
-        @memory_monitored("Stage 1: Clustering")
-        def cluster_courses(self, courses):
-            ...
-    """
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            manager = MemoryManager()
-            
-            # Log before execution
-            manager.log_memory_stats(f"{stage_name} - START")
-            
-            # Check memory threshold
-            if manager.check_memory_threshold():
-                logger.warning(f"{stage_name}: Memory threshold exceeded, forcing cleanup")
-                manager.force_cleanup()
-            
-            # Execute function
-            result = func(*args, **kwargs)
-            
-            # Log after execution
-            manager.log_memory_stats(f"{stage_name} - END")
-            delta = manager.get_memory_delta()
-            logger.info(f"{stage_name}: Memory delta = {delta:+.1f}MB")
-            
-            # Cleanup after stage
-            manager.force_cleanup()
-            
-            return result
-        return wrapper
-    return decorator
-
-
-def optimize_dict_memory(data: Dict[Any, Any], max_size: int = 10000) -> Dict[Any, Any]:
-    """
-    Optimize dictionary memory by limiting size
-    
-    Args:
-        data: Dictionary to optimize
-        max_size: Maximum number of entries to keep
-        
-    Returns:
-        Optimized dictionary
-    """
-    if len(data) > max_size:
-        logger.warning(f"Dictionary size {len(data)} exceeds max {max_size}, truncating")
-        # Keep only most recent entries
-        items = list(data.items())[-max_size:]
-        return dict(items)
-    return data
-
-
-def batch_process(items: list, batch_size: int = 100):
-    """
-    Generator to process items in batches for memory efficiency
-    
-    Usage:
-        for batch in batch_process(large_list, batch_size=50):
-            process(batch)
-    """
-    for i in range(0, len(items), batch_size):
-        yield items[i:i + batch_size]
-
-
-class MemoryLimitExceeded(Exception):
-    """Exception raised when memory limit is exceeded"""
-    pass
-
-
-def check_memory_limit(max_percent: float = 90.0):
-    """
-    Check if memory usage exceeds critical limit
-    
-    Args:
-        max_percent: Maximum allowed memory percentage
-        
-    Raises:
-        MemoryLimitExceeded: If memory usage exceeds limit
-    """
-    memory = psutil.virtual_memory()
-    if memory.percent > max_percent:
-        raise MemoryLimitExceeded(
-            f"Memory usage {memory.percent:.1f}% exceeds limit {max_percent}%"
-        )
-
-
-def get_optimal_batch_size(total_items: int, available_memory_mb: float = 1000) -> int:
-    """
-    Calculate optimal batch size based on available memory
-    
-    Args:
-        total_items: Total number of items to process
-        available_memory_mb: Available memory in MB
-        
-    Returns:
-        Optimal batch size
-    """
-    # Estimate ~1KB per item (conservative)
-    item_size_kb = 1
-    items_per_mb = 1024 / item_size_kb
-    
-    # Use 50% of available memory for batch
-    max_batch_items = int((available_memory_mb * 0.5) * items_per_mb)
-    
-    # Clamp between 10 and 1000
-    batch_size = max(10, min(max_batch_items, 1000))
-    
-    logger.info(f"Calculated optimal batch size: {batch_size} for {total_items} items")
-    return batch_size
-
-
-# Global memory manager instance
-_global_memory_manager: Optional[MemoryManager] = None
-
-
-def get_memory_manager() -> MemoryManager:
-    """Get or create global memory manager instance"""
-    global _global_memory_manager
-    if _global_memory_manager is None:
-        _global_memory_manager = MemoryManager()
-    return _global_memory_manager
-
-
-def reset_memory_manager():
-    """Reset global memory manager"""
-    global _global_memory_manager
-    _global_memory_manager = None
-    gc.collect()
+# Global instance
+memory_manager = MemoryManager()

@@ -265,13 +265,7 @@ export default function AdminUsersPage() {
           </div>
         </div>
 
-        {/* Loading indicator */}
-        {isLoading && (
-          <div className="flex items-center justify-center py-8">
-            <div className="loading-spinner w-6 h-6 mr-2"></div>
-            <span className="text-gray-600 dark:text-gray-400">Loading users...</span>
-          </div>
-        )}
+        
 
         {/* Mobile Card View */}
         <div className="block sm:hidden space-y-3 relative">
@@ -356,56 +350,76 @@ export default function AdminUsersPage() {
                 <th className="table-header-cell">Actions</th>
               </tr>
             </thead>
+        
             <tbody>
-              {filteredUsers.map((user, index) => (
-                <tr key={user.id} className="table-row">
-                  <td className="table-cell">
-                    <div className="font-medium text-gray-800 dark:text-gray-200">
-                      {(currentPage - 1) * 100 + index + 1}
-                    </div>
-                  </td>
-                  <td className="table-cell">
-                    <div className="font-medium text-gray-800 dark:text-gray-200">
-                      {user.first_name} {user.last_name}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 md:hidden">
-                      {user.email}
-                    </div>
-                  </td>
-                  <td className="table-cell">{user.email}</td>
-                  <td className="table-cell">
-                    <span className="badge badge-neutral text-xs">{user.role}</span>
-                  </td>
-                  <td className="table-cell">{user.department || 'N/A'}</td>
-                  <td className="table-cell">
-                    <span
-                      className={`badge ${
-                        user.is_active ? 'badge-success' : 'badge-error'
-                      } text-xs`}
-                    >
-                      {user.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td className="table-cell">
-                    <div className="flex gap-1 sm:gap-2">
-                      <button
-                        onClick={() => handleEditUser(user)}
-                        className="btn-ghost text-xs px-2 py-1"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteUser(user.id)}
-                        className="btn-danger text-xs px-2 py-1"
-                      >
-                        Del
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+  {isLoading ? (
+    <tr>
+      <td colSpan="7">
+        <div className="flex items-center justify-center py-8">
+          <div className="loading-spinner w-6 h-6 mr-2"></div>
+          <span className="text-gray-600 dark:text-gray-400">
+            Loading Users...
+          </span>
+        </div>
+      </td>
+    </tr>
+  ) : (
+    filteredUsers.map((user, index) => (
+      <tr key={user.id} className="table-row">
+        <td className="table-cell">
+          <div className="font-medium text-gray-800 dark:text-gray-200">
+            {(currentPage - 1) * 100 + index + 1}
+          </div>
+        </td>
+
+        <td className="table-cell">
+          <div className="font-medium text-gray-800 dark:text-gray-200">
+            {user.first_name} {user.last_name}
+          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 md:hidden">
+            {user.email}
+          </div>
+        </td>
+
+        <td className="table-cell">{user.email}</td>
+
+        <td className="table-cell">
+          <span className="badge badge-neutral text-xs">{user.role}</span>
+        </td>
+
+        <td className="table-cell">{user.department || 'N/A'}</td>
+
+        <td className="table-cell">
+          <span
+            className={`badge ${
+              user.is_active ? 'badge-success' : 'badge-error'
+            } text-xs`}
+          >
+            {user.is_active ? 'Active' : 'Inactive'}
+          </span>
+        </td>
+
+        <td className="table-cell">
+          <div className="flex gap-1 sm:gap-2">
+            <button
+              onClick={() => handleEditUser(user)}
+              className="btn-ghost text-xs px-2 py-1"
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => handleDeleteUser(user.id)}
+              className="btn-danger text-xs px-2 py-1"
+            >
+              Del
+            </button>
+          </div>
+        </td>
+      </tr>
+    ))
+  )}
+</tbody>
+ </table>
         </div>
 
         {/* Pagination Controls */}

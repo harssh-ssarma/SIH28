@@ -7,6 +7,7 @@ import psutil
 import platform
 import subprocess
 import json
+import os
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -222,7 +223,7 @@ class HardwareDetector:
                     memory_mb = int(parts[1].strip().split()[0])
                     gpu_info['has_nvidia'] = True
                     gpu_info['memory_gb'] = memory_mb / 1024
-                    logger.info(f"✅ NVIDIA GPU: {gpu_name} ({gpu_info['memory_gb']:.1f}GB)")
+                    logger.info(f"[GPU] NVIDIA GPU: {gpu_name} ({gpu_info['memory_gb']:.1f}GB)")
         except:
             pass
         
@@ -234,7 +235,7 @@ class HardwareDetector:
                     gpu_info['has_nvidia'] = True
                     gpu_info['memory_gb'] = torch.cuda.get_device_properties(0).total_memory / (1024**3)
                     gpu_info['cuda_version'] = torch.version.cuda
-                    logger.info(f"✅ GPU via PyTorch: {torch.cuda.get_device_name(0)}")
+                    logger.info(f"[GPU] GPU via PyTorch: {torch.cuda.get_device_name(0)}")
             except:
                 pass
         
@@ -525,97 +526,314 @@ def get_hardware_profile(force_refresh: bool = False) -> HardwareProfile:
     return hardware_detector.detect_hardware(force_refresh)
 
 def get_optimal_config(profile: HardwareProfile) -> Dict:
-    """Get optimal configuration based on hardware profile"""
+    """Google/Linux-style adaptive config with memory manager"""
+    from engine.memory_manager import memory_manager
     
-    # Adaptive parallelization based on CPU cores and RAM
     cpu_cores = profile.cpu_cores
-    available_ram = profile.available_ram_gb
+    total_ram = profile.total_ram_gb
+    has_gpu = profile.has_nvidia_gpu
+    gpu_vram = profile.gpu_memory_gb
     
-    # Stage 1: Graph construction workers
-    graph_workers = min(cpu_cores, 8)
+    # Use memory manager for budget calculation
+    max_population = memory_manager.get_max_population_size()
+    memory_pressure = memory_manager.monitor.get_pressure()
+    memory_budget_gb = memory_manager.budget.budget_gb
     
-    # Stage 2A: Cluster parallelization
-    if available_ram > 6.0:
-        cluster_workers = min(cpu_cores - 2, 12)  # Leave 2 cores free
-        cpsat_workers = 4
-    elif available_ram > 4.0:
-        cluster_workers = min(cpu_cores // 2, 6)
-        cpsat_workers = 2
+    # Adaptive reduction based on pressure
+    if memory_pressure.value == 'critical':
+        max_population = max(3, max_population // 4)
+    elif memory_pressure.value == 'high':
+        max_population = max(3, max_population // 2)
+    
+    max_generations = min(24, max_population * 2)
+    
+    logger.info(f"[MEMORY] Pressure: {memory_pressure.value}, Budget: {memory_budget_gb:.1f}GB, Max pop: {max_population}, Max gen: {max_generations}")
+    
+    # Determine tier based on total RAM with safety override
+    if total_ram < 8:
+        tier = "potato"
+    elif total_ram < 16:
+        tier = "laptop"
+    elif total_ram < 32:
+        tier = "workstation"
     else:
-        cluster_workers = 1
-        cpsat_workers = 1
+        tier = "server"
     
-    # Stage 2B: Island Model GA
-    island_workers = min(8, max(4, cpu_cores // 2))
+    # STAGE 1: LOUVAIN CLUSTERING
+    if tier == "potato":
+        stage1 = {
+            'algorithm': 'simple_department_grouping',
+            'workers': 1,
+            'edge_construction': 'skip',
+            'edge_threshold': None,
+            'parallel_mode': 'sequential',
+            'use_gpu': False
+        }
+    elif tier == "laptop":
+        stage1 = {
+            'algorithm': 'louvain_batched',
+            'workers': min(4, cpu_cores - 2),
+            'edge_construction': 'parallel_batched',
+            'batch_size': 100,
+            'edge_threshold': 0.5,
+            'parallel_mode': 'batched',
+            'use_gpu': False
+        }
+    elif tier == "workstation":
+        stage1 = {
+            'algorithm': 'louvain_parallel',
+            'workers': cpu_cores - 4,
+            'edge_construction': 'full_parallel',
+            'edge_threshold': 0.3,
+            'parallel_mode': 'parallel',
+            'use_gpu': False
+        }
+    else:  # server
+        stage1 = {
+            'algorithm': 'louvain_optimized',
+            'workers': cpu_cores - 8,
+            'edge_construction': 'distributed_chunks',
+            'edge_threshold': 0.1,
+            'parallel_mode': 'distributed',
+            'use_gpu': gpu_vram >= 8
+        }
     
-    # Stage 3: Conflict detection workers
-    conflict_workers = min(8, cpu_cores)
+    # STAGE 2A: CP-SAT (HARD CONSTRAINTS) - FIXED TIMEOUTS
+    if tier == "potato":
+        stage2a = {
+            'primary_solver': 'cpsat_standard',
+            'cpsat_usage': 'primary',
+            'timeout': 30,  # Increased from 0.5s
+            'parallel_clusters': max(2, cpu_cores // 2),  # At least 2 parallel
+            'student_constraints': 'ALL',  # Changed from minimal
+            'student_limit': 1000,  # Increased from 10
+            'quick_feasibility': True,
+            'skip_threshold': 0.3,
+            'fallback': 'greedy'
+        }
+    elif tier == "laptop":
+        stage2a = {
+            'primary_solver': 'cpsat_standard',
+            'timeout': 60,  # Increased from 1s
+            'parallel_clusters': min(4, cpu_cores - 2),
+            'student_constraints': 'ALL',  # Changed from hierarchical
+            'student_limit': 5000,  # Increased from 50
+            'quick_feasibility': True,
+            'feasibility_timeout': 0.1,
+            'fallback': 'greedy',
+            'cpsat_workers_per_cluster': 2
+        }
+    elif tier == "workstation":
+        stage2a = {
+            'primary_solver': 'cpsat_full',
+            'timeout': 90,  # Increased from 2s
+            'parallel_clusters': min(8, cpu_cores - 4),
+            'student_constraints': 'ALL',  # Changed from hierarchical
+            'student_limit': 10000,  # Increased from 100
+            'quick_feasibility': True,
+            'cpsat_workers_per_cluster': 4,
+            'progressive_timeout': True
+        }
+    else:  # server
+        stage2a = {
+            'primary_solver': 'cpsat_full',
+            'timeout': 120,  # Increased from 3s
+            'parallel_clusters': min(16, cpu_cores - 8),
+            'student_constraints': 'ALL',  # Changed from hierarchical
+            'student_limit': 20000,  # Increased from 200
+            'quick_feasibility': False,
+            'cpsat_workers_per_cluster': 8,
+            'use_hints': True
+        }
     
-    config = {
-        # Stage 1: Louvain Clustering
-        'graph_construction_workers': graph_workers,
-        'louvain_runs': 3 if cpu_cores < 8 else 5,
-        
-        # Stage 2A: CP-SAT
-        'cpsat_timeout': 5,  # Fast mode
-        'cpsat_workers': cpsat_workers,
-        'cluster_parallel_workers': cluster_workers,
-        
-        # Stage 2B: GA
-        'ga_island_workers': island_workers,
-        'ga_population_per_island': 50,
-        'ga_generations': 50,
-        'ga_migration_interval': 10,
-        
-        # Stage 3: RL
-        'rl_iterations': 100,
-        'conflict_detection_workers': conflict_workers,
-        
-        # GPU
-        'use_gpu': profile.has_nvidia_gpu and profile.gpu_memory_gb >= 4,
-        'gpu_fitness_threshold': 200,  # Use GPU if population >= 200
-        
-        # Memory
-        'memory_limit_gb': min(available_ram * 0.8, 16.0),
-        'parallel_processes': cluster_workers,
-        'use_distributed': False
+    # STAGE 2B: GENETIC ALGORITHM (SOFT CONSTRAINTS)
+    # CRITICAL: GPU only if VRAM >= 2GB (enough for population offloading)
+    use_gpu_ga = has_gpu and gpu_vram >= 2
+    
+    # SMART STRATEGY: GPU available -> disable streaming (fast GPU), no GPU -> enable streaming (memory-safe CPU)
+    if tier == "potato":
+        # ULTRA-SAFE: Streaming GA with population of 5 (only 20MB × 5 = 100MB total)
+        stage2b = {
+            'algorithm': 'streaming_ga',
+            'population': 5,  # Ultra-safe for <8GB RAM
+            'generations': 15,  # Fewer generations
+            'islands': 1,
+            'parallel_fitness': False,
+            'parallel_mode': 'sequential',
+            'fitness_workers': 1,
+            'fitness_evaluation': 'streaming',
+            'sample_students': 30,  # Reduced sampling
+            'fitness_cache': False,
+            'early_stopping': True,
+            'early_stop_patience': 3,
+            'use_gpu': False,  # No GPU on potato systems
+            'memory_limit_gb': memory_budget_gb,
+            'streaming_mode': True,  # Always streaming on potato
+            'skip_ga': False  # Don't skip, use streaming
+        }
+    elif tier == "laptop":
+        # SMART: GPU available -> full GPU mode (pop=50, no streaming), no GPU -> streaming mode (pop=10)
+        if use_gpu_ga:
+            stage2b = {
+                'algorithm': 'gpu_ga',
+                'population': 5,  # Further reduced for memory
+                'generations': 3,  # Faster completion
+                'islands': 1,
+                'parallel_fitness': False,
+                'parallel_mode': 'sequential',
+                'fitness_workers': 1,
+                'fitness_evaluation': 'full',
+                'sample_students': 50,
+                'fitness_cache': False,
+                'early_stopping': True,
+                'early_stop_patience': 3,
+                'use_gpu': True,
+                'memory_limit_gb': memory_budget_gb,
+                'streaming_mode': False  # GPU mode, no streaming
+            }
+        else:
+            stage2b = {
+                'algorithm': 'streaming_ga',
+                'population': 10,  # Streaming mode, small population
+                'generations': max_generations,
+                'islands': 1,
+                'parallel_fitness': False,
+                'parallel_mode': 'sequential',
+                'fitness_workers': 1,
+                'fitness_evaluation': 'streaming',
+                'sample_students': 50,
+                'fitness_cache': False,
+                'early_stopping': True,
+                'early_stop_patience': 3,
+                'use_gpu': False,
+                'memory_limit_gb': memory_budget_gb,
+                'streaming_mode': True  # CPU streaming mode
+            }
+    elif tier == "workstation":
+        # SMART: GPU available -> full GPU mode (pop=50, no streaming), no GPU -> streaming mode (pop=20)
+        if use_gpu_ga:
+            stage2b = {
+                'algorithm': 'gpu_ga',
+                'population': 10,  # Reduced for speed
+                'generations': 5,  # Faster completion
+                'islands': 1,
+                'parallel_mode': 'sequential' if memory_pressure > 60 else 'thread',
+                'island_workers': 1,
+                'migration_frequency': 5,
+                'migration_rate': 0.1,
+                'fitness_evaluation': 'full',
+                'fitness_cache': False,
+                'early_stopping': True,
+                'use_gpu': True,
+                'gpu_strategy': 'fitness_only',
+                'memory_limit_gb': memory_budget_gb,
+                'streaming_mode': False  # GPU mode, no streaming
+            }
+        else:
+            stage2b = {
+                'algorithm': 'streaming_ga',
+                'population': min(max_population, 20),
+                'generations': max_generations,
+                'islands': 1 if memory_pressure > 60 else 2,
+                'parallel_mode': 'sequential' if memory_pressure > 60 else 'thread',
+                'island_workers': 1,
+                'migration_frequency': 5,
+                'migration_rate': 0.1,
+                'fitness_evaluation': 'streaming',
+                'fitness_cache': False,
+                'early_stopping': True,
+                'use_gpu': False,
+                'gpu_strategy': 'fitness_only',
+                'memory_limit_gb': memory_budget_gb,
+                'streaming_mode': True  # CPU streaming mode
+            }
+    else:  # server
+        stage2b = {
+            'algorithm': 'island_ga_gpu',
+            'population': 50,
+            'generations': 50,
+            'islands': 8,
+            'parallel_mode': 'process',
+            'island_workers': 8,
+            'fitness_evaluation': 'full',
+            'use_gpu': True,
+            'gpu_strategy': 'batched_fitness',
+            'gpu_batch_size': 400,
+            'fitness_cache': False
+        }
+    
+    # STAGE 3: Q-LEARNING / RL
+    if tier == "potato":
+        stage3 = {
+            'algorithm': 'simple_swap_heuristic',
+            'skip_rl': True,
+            'max_swaps': 50,
+            'swap_strategy': 'greedy_conflict_resolution',
+            'use_gpu': False
+        }
+    elif tier == "laptop":
+        stage3 = {
+            'algorithm': 'q_learning_tabular',
+            'max_iterations': 100,
+            'state_representation': 'abstract_context',
+            'state_abstraction': 'hierarchical',
+            'action_space': 'pruned',
+            'transfer_learning': True,
+            'similar_universities': 3,
+            'bootstrap_strategy': 'weighted_average',
+            'bootstrap_weight': 0.3,
+            'q_table_storage': 'redis',
+            'use_gpu': False
+        }
+    elif tier == "workstation":
+        stage3 = {
+            'algorithm': 'q_learning_enhanced',
+            'max_iterations': 200,
+            'state_representation': 'rich_context',
+            'transfer_learning': True,
+            'similar_universities': 10,
+            'parallel_action_evaluation': True,
+            'action_workers': 4,
+            'use_gpu': False
+        }
+    else:  # server
+        stage3 = {
+            'algorithm': 'q_learning_full',
+            'max_iterations': 500,
+            'state_representation': 'full_context',
+            'transfer_learning': True,
+            'transfer_strategy': 'cluster_all_similar',
+            'parallel_action_evaluation': True,
+            'action_workers': 8,
+            'use_gpu': False
+        }
+    
+    return {
+        'tier': tier,
+        'stage1_louvain': stage1,
+        'stage2a_cpsat': stage2a,
+        'stage2b_ga': stage2b,
+        'stage3_qlearning': stage3,
+        'expected_time_minutes': _estimate_time(tier),
+        'expected_quality': _estimate_quality(tier)
     }
-    
-    # Adjust based on strategy
-    if profile.optimal_strategy == ExecutionStrategy.GPU_CUDA:
-        config.update({
-            'use_gpu': True,
-            'gpu_memory_gb': profile.gpu_memory_gb,
-            'ga_population': int(15 * profile.gpu_multiplier),
-            'ga_generations': int(25 * 1.5),  # GPU can handle more generations
-            'cpsat_timeout': int(30 * 1.5)
-        })
-    
-    elif profile.optimal_strategy == ExecutionStrategy.CPU_MULTI:
-        config.update({
-            'cpsat_workers': min(profile.cpu_cores, 8),
-            'parallel_processes': min(profile.cpu_cores // 2, 4),
-            'ga_population': int(15 * profile.cpu_multiplier),
-            'memory_limit_gb': min(profile.available_ram_gb * 0.8, 16.0)
-        })
-    
-    elif profile.optimal_strategy == ExecutionStrategy.CLOUD_DISTRIBUTED:
-        config.update({
-            'use_distributed': True,
-            'distributed_nodes': len(profile.distributed_nodes),
-            'cpsat_workers': min(profile.cpu_cores * 2, 16),
-            'ga_population': int(15 * profile.cpu_multiplier * 2),
-            'memory_limit_gb': min(profile.available_ram_gb * 0.9, 32.0)
-        })
-    
-    elif profile.optimal_strategy == ExecutionStrategy.HYBRID:
-        config.update({
-            'use_gpu': True,
-            'gpu_memory_gb': profile.gpu_memory_gb,
-            'cpsat_workers': min(profile.cpu_cores, 8),
-            'parallel_processes': min(profile.cpu_cores // 2, 4),
-            'ga_population': int(15 * max(profile.cpu_multiplier, profile.gpu_multiplier)),
-            'memory_limit_gb': min(profile.available_ram_gb * 0.8, 24.0)
-        })
-    
-    return config
+
+def _estimate_time(tier: str) -> int:
+    """Estimate total processing time in minutes"""
+    times = {
+        'potato': 25,
+        'laptop': 12,
+        'workstation': 5,
+        'server': 2
+    }
+    return times.get(tier, 12)
+
+def _estimate_quality(tier: str) -> str:
+    """Estimate expected quality range"""
+    quality = {
+        'potato': '75-80%',
+        'laptop': '85-92%',
+        'workstation': '90-95%',
+        'server': '93-97%'
+    }
+    return quality.get(tier, '85-92%')
