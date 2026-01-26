@@ -62,19 +62,26 @@ class TenantLimits:
         Get organization tier from database or cache
         Default: 'free' tier
         """
-        # Try cache first
+        # Try cache first with error handling
         cache_key = f"org_tier:{org_id}"
-        tier = cache.get(cache_key)
-        
-        if tier:
-            return tier
+        try:
+            tier = cache.get(cache_key)
+            if tier:
+                return tier
+        except Exception as e:
+            # Log warning but continue without cache
+            logger.warning(f"Cache unavailable for org_tier lookup: {e}")
         
         # TODO: Query from database when org tiers are implemented
         # For now, return 'free' for all
         tier = 'free'
         
-        # Cache for 1 hour
-        cache.set(cache_key, tier, 3600)
+        # Try to cache for 1 hour, but don't fail if cache is unavailable
+        try:
+            cache.set(cache_key, tier, 3600)
+        except Exception:
+            pass  # Silently fail if cache is unavailable
+            
         return tier
     
     @staticmethod
@@ -126,9 +133,13 @@ class TenantLimits:
         """
         limits = TenantLimits.get_limits(org_id)
         
-        # Check current concurrent generations
+        # Check current concurrent generations with error handling
         cache_key = f"org_concurrent:{org_id}"
-        current_concurrent = cache.get(cache_key, 0)
+        try:
+            current_concurrent = cache.get(cache_key, 0)
+        except Exception as e:
+            logger.warning(f"Cache unavailable, checking database directly: {e}")
+            current_concurrent = 0
         
         # Verify against actual running jobs in database
         if current_concurrent >= limits['max_concurrent_generations']:
@@ -142,11 +153,17 @@ class TenantLimits:
                 
                 # If cache is stale, reset it
                 if actual_running == 0:
-                    cache.set(cache_key, 0, timeout=7200)
+                    try:
+                        cache.set(cache_key, 0, timeout=7200)
+                    except Exception:
+                        pass  # Continue even if cache fails
                     current_concurrent = 0
                     logger.info(f"Reset stale concurrent count for org {org_id}")
                 elif actual_running < current_concurrent:
-                    cache.set(cache_key, actual_running, timeout=7200)
+                    try:
+                        cache.set(cache_key, actual_running, timeout=7200)
+                    except Exception:
+                        pass  # Continue even if cache fails
                     current_concurrent = actual_running
                     logger.info(f"Corrected concurrent count for org {org_id} to {actual_running}")
             except Exception as e:
@@ -165,18 +182,24 @@ class TenantLimits:
     def increment_concurrent(org_id: str):
         """Increment concurrent generation count"""
         cache_key = f"org_concurrent:{org_id}"
-        current = cache.get(cache_key, 0)
-        cache.set(cache_key, current + 1, timeout=7200)  # 2 hours
-        logger.info(f"Org {org_id} concurrent generations: {current + 1}")
+        try:
+            current = cache.get(cache_key, 0)
+            cache.set(cache_key, current + 1, timeout=7200)  # 2 hours
+            logger.info(f"Org {org_id} concurrent generations: {current + 1}")
+        except Exception as e:
+            logger.warning(f"Could not increment concurrent count: {e}")
     
     @staticmethod
     def decrement_concurrent(org_id: str):
         """Decrement concurrent generation count"""
         cache_key = f"org_concurrent:{org_id}"
-        current = cache.get(cache_key, 0)
-        if current > 0:
-            cache.set(cache_key, current - 1, timeout=7200)
-            logger.info(f"Org {org_id} concurrent generations: {current - 1}")
+        try:
+            current = cache.get(cache_key, 0)
+            if current > 0:
+                cache.set(cache_key, current - 1, timeout=7200)
+                logger.info(f"Org {org_id} concurrent generations: {current - 1}")
+        except Exception as e:
+            logger.warning(f"Could not decrement concurrent count: {e}")
     
     @staticmethod
     def get_priority(org_id: str) -> int:

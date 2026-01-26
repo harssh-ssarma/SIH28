@@ -650,12 +650,13 @@ class AdaptiveCPSATSolver:
             # This is the key to 100x speedup: only consider realistic room candidates
             eligible_rooms = []
             min_capacity = student_count
-            max_capacity = int(student_count * 1.3)  # Max 30% oversized (balance flexibility vs speed)
+            # REAL WORLD LOGIC: Room just needs to fit students (no upper limit rejection)
+            # If course has >60 students, it's already split into sections with separate faculty
             required_type = getattr(course, 'room_type_required', None)
             
             for room in self.rooms:
-                # Capacity: must fit students but not be wastefully large
-                if not (min_capacity <= room.capacity <= max_capacity):
+                # Capacity: must fit all students (no maximum limit - universities use available rooms)
+                if room.capacity < min_capacity:
                     continue
                 
                 # Room type: exact match if specified (lab, lecture hall, seminar room)
@@ -670,7 +671,7 @@ class AdaptiveCPSATSolver:
             
             # Log filtering effectiveness
             if course_idx < 3:  # Log first 3 courses to show filtering
-                logger.info(f"[DOMAINS] Course {course.course_id}: {len(eligible_rooms)}/{len(self.rooms)} eligible rooms (students={student_count}, capacity range={min_capacity}-{max_capacity})")
+                logger.info(f"[DOMAINS] Course {course.course_id}: {len(eligible_rooms)}/{len(self.rooms)} eligible rooms (students={student_count}, min_capacity={min_capacity})")
             
             for session in range(course.duration):
                 valid_pairs = []
@@ -699,7 +700,7 @@ class AdaptiveCPSATSolver:
                     logger.warning(f"  - Time slots available: {len(dept_slots)}")
                     logger.warning(f"  - Eligible rooms (after filtering): {len(eligible_rooms)}")
                     logger.warning(f"  - Total rooms in system: {len(self.rooms)}")
-                    logger.warning(f"  - Student count: {student_count}, capacity range: {min_capacity}-{max_capacity}")
+                    logger.warning(f"  - Student count: {student_count}, min_capacity: {min_capacity}")
                     logger.warning(f"  - Rejected by faculty availability: {rejected_faculty}")
                     logger.warning(f"  - Rejected by faculty: {rejected_faculty}")
                     logger.warning(f"  - Required features: {course_features}")

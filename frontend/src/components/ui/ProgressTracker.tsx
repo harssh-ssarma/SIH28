@@ -161,7 +161,10 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
           const newProgress = data.progress || 0
           const newStatus = data.status || 'running'
           const newPhase = data.stage || data.message || 'Processing...'
-          const newTimeRemaining = data.time_remaining_seconds || null
+          // Fix: Use nullish coalescing to properly handle 0 and undefined/null
+          const newTimeRemaining = data.time_remaining_seconds !== undefined && data.time_remaining_seconds !== null 
+            ? data.time_remaining_seconds 
+            : null
 
           setProgress(newProgress)
           setTargetProgress(newProgress) // Set target for smooth animation
@@ -378,15 +381,15 @@ export default function TimetableProgressTracker({ jobId, onComplete, onCancel }
             </div>
             <div className="text-right">
               <div className="text-4xl font-bold text-[#2196F3]">{Math.round(displayProgress)}%</div>
-              {timeRemaining !== null && timeRemaining > 0 ? (
+              {timeRemaining !== null && timeRemaining >= 0 ? (
                 <div className="text-xs text-[#606060] dark:text-[#aaaaaa] font-medium mt-1">
-                  {formatTime(timeRemaining)} remaining
+                  {timeRemaining > 0 ? `${formatTime(timeRemaining)} remaining` : 'Almost done...'}
                 </div>
-              ) : progress < 100 && (
+              ) : (status === 'running' || status === 'initializing') && progress < 100 ? (
                 <div className="text-xs text-[#606060] dark:text-[#aaaaaa] font-medium mt-1">
-                  Calculating...
+                  Calculating time...
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 

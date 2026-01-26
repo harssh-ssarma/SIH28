@@ -237,6 +237,9 @@ class TimetableGenerationSaga:
         # Start monitoring in background
         monitor_task = asyncio.create_task(monitor.start_monitoring(job_id, interval=30))
         
+        # Start cancellation monitor task
+        cancel_monitor_task = asyncio.create_task(self._monitor_cancellation(job_id))
+        
         try:
             for step_name, execute_func, compensate_func in self.steps:
                 # Check cancellation before each step
@@ -265,6 +268,7 @@ class TimetableGenerationSaga:
             
             self.job_data[job_id]['status'] = 'completed'
             monitor.stop_monitoring()
+            cancel_monitor_task.cancel()  # Stop cancellation monitor
             await self.progress_task.stop()
             
             # Get results before cleanup
@@ -278,6 +282,7 @@ class TimetableGenerationSaga:
         except asyncio.CancelledError as e:
             logger.warning(f"[SAGA] Job {job_id} cancelled: {e}")
             monitor.stop_monitoring()
+            cancel_monitor_task.cancel()  # Stop cancellation monitor
             await self.progress_task.stop()
             await self._compensate(job_id)
             self.job_data[job_id]['status'] = 'cancelled'
@@ -1267,10 +1272,32 @@ class TimetableGenerationSaga:
         try:
             if redis_client_global:
                 cancel_flag = redis_client_global.get(f"cancel:job:{job_id}")
-                return cancel_flag is not None and cancel_flag
+                if cancel_flag is not None and cancel_flag:
+                    logger.warning(f"[CANCEL] Job {job_id} cancellation detected")
+                    return True
         except Exception as e:
             logger.error(f"[CANCEL] Error checking cancellation: {e}")
         return False
+    
+    async def _monitor_cancellation(self, job_id: str):
+        """Background task to monitor cancellation and raise CancelledError"""
+        try:
+            while True:
+                await asyncio.sleep(0.5)  # Check every 500ms
+                if await self._check_cancellation(job_id):
+                    logger.warning(f"[CANCEL] Cancellation detected for job {job_id}, raising CancelledError")
+                    # Find and cancel the current execution task
+                    current_task = asyncio.current_task()
+                    if current_task:
+                        for task in asyncio.all_tasks():
+                            if task != current_task and not task.done():
+                                logger.info(f"[CANCEL] Cancelling task: {task.get_name()}")
+                                task.cancel()
+                    raise asyncio.CancelledError("Job cancelled by user")
+        except asyncio.CancelledError:
+            logger.info(f"[CANCEL] Cancellation monitor stopped for job {job_id}")
+        except Exception as e:
+            logger.error(f"[CANCEL] Error in cancellation monitor: {e}")
     
     # Removed unused _update_progress_final - EnterpriseProgressTracker.complete() and .fail() handle all final status updates
 

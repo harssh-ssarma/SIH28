@@ -285,13 +285,20 @@ REDIS_USE_TLS = REDIS_URL.startswith("rediss://")
 
 CACHE_OPTIONS = {
     "CLIENT_CLASS": "django_redis.client.DefaultClient",
-    "IGNORE_EXCEPTIONS": False,  # Show errors during development
+    "IGNORE_EXCEPTIONS": DEBUG == False,  # Only ignore exceptions in production
     "CONNECTION_POOL_KWARGS": {
         "max_connections": 50,
         "retry_on_timeout": True,
+        "socket_keepalive": True,
+        "socket_keepalive_options": {
+            1: 1,  # TCP_KEEPIDLE
+            2: 1,  # TCP_KEEPINTVL  
+            3: 3,  # TCP_KEEPCNT
+        } if os.name != 'nt' else {},  # Windows doesn't support these options
     },
-    "SOCKET_CONNECT_TIMEOUT": 10,  # Longer timeout for Upstash
-    "SOCKET_TIMEOUT": 10,
+    "SOCKET_CONNECT_TIMEOUT": 30,  # Increased timeout for Upstash
+    "SOCKET_TIMEOUT": 30,
+    "RETRY_ON_TIMEOUT": True,
 }
 
 # Add TLS/SSL support for Upstash Redis
@@ -340,6 +347,16 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_CONNECTION_RETRY = True
+CELERY_BROKER_CONNECTION_MAX_RETRIES = 10
+CELERY_BROKER_POOL_LIMIT = 50
+CELERY_BROKER_HEARTBEAT = 30
+CELERY_BROKER_CONNECTION_TIMEOUT = 30
+CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
+    'socket_timeout': 30,
+    'socket_connect_timeout': 30,
+    'retry_on_timeout': True,
+}
 
 # SSL configuration for Upstash Redis (rediss://)
 if REDIS_USE_TLS:
