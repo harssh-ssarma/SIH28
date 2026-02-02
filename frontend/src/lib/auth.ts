@@ -1,6 +1,4 @@
-// Search for harsh user or use search term
-const searchQuery = searchTerm || 'harsh'
-url += `&search=${encodeURIComponent(searchQuery)}`/**
+/**
  * Google-Like Secure Authentication with HttpOnly Cookies
  * NO localStorage - tokens stored in secure HttpOnly cookies only
  * Auto-refresh handled by backend cookie rotation

@@ -64,13 +64,14 @@ export default function AdminUsersPage() {
 
     setError(null)
     try {
-      // Build query params - Search for specific users
-      let url = `/users/?page=${currentPage}&_t=${Date.now()}`
+      // Build query params - Fetch all users with large page size
+      let url = `/users/?page=1&page_size=1000&_t=${Date.now()}`
 
-      if (selectedRole) url += `&role=${selectedRole}`
+      // Note: Backend doesn't support role filtering, so we filter client-side below
+      // if (selectedRole) url += `&role=${selectedRole}`
       if (selectedDepartment) url += `&department=${selectedDepartment}`
 
-      // Add search term if provided
+      // Add search term if provided (for username, email, first_name, last_name)
       if (searchTerm) {
         url += `&search=${encodeURIComponent(searchTerm)}`
       }
@@ -80,18 +81,21 @@ export default function AdminUsersPage() {
       if (response.error) {
         setError(response.error)
       } else if (response.data) {
-        // Filter to show only administrative users
+        // Filter to show only administrative users (client-side filtering)
         const allUsers = response.data.results || []
 
-        const adminUsers = allUsers.filter(
+        let adminUsers = allUsers.filter(
           u => {
-            const role = u.role?.toLowerCase()
-            return role === 'admin' ||
-              role === 'org_admin' ||
-              role === 'super_admin' ||
-              role === 'staff'
+            const role = u.role?.toUpperCase()
+            // Only show ADMIN and STAFF roles (database constraint values)
+            return role === 'ADMIN' || role === 'STAFF'
           }
         )
+
+        // Apply role filter if selected
+        if (selectedRole) {
+          adminUsers = adminUsers.filter(u => u.role?.toUpperCase() === selectedRole.toUpperCase())
+        }
 
         setUsers(adminUsers)
         setTotalCount(adminUsers.length)
