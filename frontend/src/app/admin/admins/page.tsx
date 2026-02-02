@@ -70,7 +70,7 @@ export default function AdminUsersPage() {
       // Note: Backend doesn't support role filtering, so we filter client-side below
       // if (selectedRole) url += `&role=${selectedRole}`
       if (selectedDepartment) url += `&department=${selectedDepartment}`
-
+      //added timestamp to avoid caching issues
       // Add search term if provided (for username, email, first_name, last_name)
       if (searchTerm) {
         url += `&search=${encodeURIComponent(searchTerm)}`
