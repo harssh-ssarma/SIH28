@@ -95,13 +95,7 @@ boto3==1.35.76  # AWS S3 client
 minio==7.2.11  # MinIO client (S3-compatible)
 django-storages==1.14.4  # Django S3 integration
 
-# Testing & Development
-pytest==7.4.3
-pytest-django==4.7.0
-pytest-asyncio==0.21.1  # FastAPI async testing
-pytest-cov==4.1.0
-faker==20.1.0
-locust==2.20.0
+# Development Tools
 bandit==1.7.5
 black==23.12.1
 flake8==6.1.0
