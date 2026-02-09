@@ -27,6 +27,10 @@ class GenerationRequest(BaseModel):
     organization_id: str
     semester: int
     time_config: Optional[TimeConfig] = None
+    job_id: Optional[str] = None  # For Celery compatibility
+    department_id: Optional[str] = None  # For Celery compatibility
+    batch_ids: Optional[List[str]] = None  # For Celery compatibility
+    academic_year: Optional[str] = None  # For Celery compatibility
 
 
 class GenerationResponse(BaseModel):
@@ -38,6 +42,7 @@ class GenerationResponse(BaseModel):
 
 
 @router.post("/generate", response_model=GenerationResponse)
+@router.post("/generate_variants", response_model=GenerationResponse)  # Alias for Celery compatibility
 async def generate_timetable(
     request: GenerationRequest,
     background_tasks: BackgroundTasks,
@@ -60,8 +65,8 @@ async def generate_timetable(
         Job ID and estimated completion time
     """
     try:
-        # Generate unique job ID
-        job_id = str(uuid.uuid4())
+        # Generate unique job ID (use provided job_id from Celery if available)
+        job_id = request.job_id or str(uuid.uuid4())
         
         logger.info(f"[GENERATION] New job {job_id} for org {request.organization_id}, semester {request.semester}")
         
@@ -148,4 +153,44 @@ async def preview_generation(
         
     except Exception as e:
         logger.error(f"[PREVIEW] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/variants/{job_id}")
+async def get_job_variants(
+    job_id: str,
+    redis = Depends(get_redis_client)
+):
+    """
+    Get generated timetable variants for a completed job.
+    
+    Args:
+        job_id: Job identifier
+        
+    Returns:
+        List of timetable variants
+    """
+    try:
+        # Get job result from Redis
+        result_key = f"result:job:{job_id}"
+        result = redis.get(result_key)
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Job not found or results expired")
+        
+        import json
+        result_data = json.loads(result) if isinstance(result, (str, bytes)) else result
+        
+        return {
+            "job_id": job_id,
+            "status": "completed",
+            "variants": result_data.get("variants", []),
+            "timetable": result_data.get("timetable", {}),
+            "metadata": result_data.get("metadata", {})
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[VARIANTS] Error fetching variants for {job_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

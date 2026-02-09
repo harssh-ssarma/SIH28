@@ -448,19 +448,6 @@ class ApiClient {
       return { data: null, error: 'Failed to fetch timetable' };
     }
   }
-
-  // Attendance
-  async getAttendance(studentId?: string) {
-    const query = studentId ? `?student=${studentId}` : '';
-    return this.request<any>(`/attendance/${query}`);
-  }
-
-  async markAttendance(attendanceData: any) {
-    return this.request<any>('/attendance/', {
-      method: 'POST',
-      body: JSON.stringify(attendanceData),
-    });
-  }
 }
 
 // Create singleton instance
