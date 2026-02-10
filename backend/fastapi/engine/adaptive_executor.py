@@ -1,6 +1,27 @@
 """
 Adaptive Execution Engine
 Dynamically selects and executes optimal algorithms based on hardware
+
+DESIGN FREEZE (Production-Safe Architecture):
+=========================================
+✅ ENABLED:
+- CP-SAT for hard feasibility (deterministic, provably correct)
+- Aggressive domain reduction (biggest performance win)
+- Clustering with greedy fallback (prevents worst-case explosion)
+- Context Engine (READ-ONLY, feature provider not decision maker)
+- Tabular Q-learning (FROZEN during runtime, offline training only)
+- Semester-wise transfer learning (offline trained, frozen policy)
+
+❌ DISABLED FOR PRODUCTION:
+- GPU usage (nondeterministic, race conditions, minimal benefit for Python dicts)
+- Runtime RL learning (causes non-reproducible schedules)
+- Deep learning / high-dimensional encodings (research only)
+- Parallel RL (experimental)
+
+EXECUTIVE VERDICT:
+"We deliberately removed GPU and deep learning to reduce nondeterminism
+and bugs. System relies on CP-SAT for correctness, domain pruning for
+performance, and lightweight frozen RL for optional refinement."
 """
 import logging
 import asyncio
@@ -9,10 +30,10 @@ from typing import Dict, List, Optional, Any
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import multiprocessing as mp
 
-from .hardware_detector import HardwareProfile, ExecutionStrategy, get_hardware_profile, get_optimal_config
-from .stage2_cpsat import AdaptiveCPSATSolver
-from .stage2_ga import GeneticAlgorithmOptimizer
-from .stage3_rl import RLConflictResolver
+from .hardware import HardwareProfile, ExecutionStrategy, HardwareDetector, get_hardware_profile, get_optimal_config
+from .cpsat import AdaptiveCPSATSolver
+from .ga import GeneticAlgorithmOptimizer
+from .rl import SimpleTabularQLearning
 from models.timetable_models import Course, Faculty, Room, TimeSlot
 
 logger = logging.getLogger(__name__)
@@ -49,15 +70,11 @@ class AdaptiveExecutor:
         # Always initialize CPU executor as fallback
         self.cpu_executor = CPUExecutor(self.config)
         
-        # Initialize GPU executor if available
-        if self.config.get('use_gpu', False):
-            try:
-                self.gpu_executor = GPUExecutor(self.config)
-                await self.gpu_executor.initialize()
-                logger.info("GPU executor initialized")
-            except Exception as e:
-                logger.warning(f"GPU executor initialization failed: {e}")
-                self.gpu_executor = None
+        # DESIGN FREEZE: GPU executor DISABLED for production correctness
+        # Removed due to: nondeterminism, race conditions, minimal benefit
+        # Python dicts + branching logic incompatible with GPU optimization
+        self.gpu_executor = None
+        logger.info("[DESIGN FREEZE] GPU disabled - CPU-only mode for deterministic behavior")
         
         # Initialize distributed executor if available
         if self.config.get('use_distributed', False):
@@ -77,19 +94,15 @@ class AdaptiveExecutor:
         strategy = self.hardware_profile.optimal_strategy
         
         try:
-            if strategy == ExecutionStrategy.GPU_CUDA and self.gpu_executor:
-                return await self.gpu_executor.execute_stage2(courses, faculty, rooms, time_slots, clusters)
-            
-            elif strategy == ExecutionStrategy.CLOUD_DISTRIBUTED and self.distributed_executor:
+            # DESIGN FREEZE: Force CPU-only execution (GPU disabled)
+            if strategy == ExecutionStrategy.CLOUD_DISTRIBUTED and self.distributed_executor:
                 return await self.distributed_executor.execute_stage2(courses, faculty, rooms, time_slots, clusters)
-            
-            elif strategy == ExecutionStrategy.HYBRID and self.gpu_executor:
-                return await self._execute_hybrid_stage2(courses, faculty, rooms, time_slots, clusters)
             
             elif strategy == ExecutionStrategy.CPU_MULTI:
                 return await self.cpu_executor.execute_stage2_parallel(courses, faculty, rooms, time_slots, clusters)
             
             else:
+                # Always use CPU executor for deterministic, bug-free execution
                 return await self.cpu_executor.execute_stage2(courses, faculty, rooms, time_slots, clusters)
                 
         except Exception as e:
@@ -104,16 +117,11 @@ class AdaptiveExecutor:
         strategy = self.hardware_profile.optimal_strategy
         
         try:
-            if strategy == ExecutionStrategy.GPU_CUDA and self.gpu_executor:
-                return await self.gpu_executor.execute_stage3(schedule, courses, faculty, rooms, time_slots)
-            
-            elif strategy == ExecutionStrategy.CLOUD_DISTRIBUTED and self.distributed_executor:
+            # DESIGN FREEZE: Force CPU-only execution (GPU disabled)
+            if strategy == ExecutionStrategy.CLOUD_DISTRIBUTED and self.distributed_executor:
                 return await self.distributed_executor.execute_stage3(schedule, courses, faculty, rooms, time_slots)
-            
-            elif strategy == ExecutionStrategy.HYBRID and self.gpu_executor:
-                return await self._execute_hybrid_stage3(schedule, courses, faculty, rooms, time_slots)
-            
             else:
+                # Always use CPU executor for deterministic, bug-free execution
                 return await self.cpu_executor.execute_stage3(schedule, courses, faculty, rooms, time_slots)
                 
         except Exception as e:
@@ -291,15 +299,18 @@ class CPUExecutor:
                            faculty: Dict, rooms: List[Room], time_slots: List[TimeSlot]) -> Dict:
         """Execute Stage 3 on CPU"""
         
-        resolver = RLConflictResolver(
+        # DESIGN FREEZE: RL policy FROZEN during runtime scheduling
+        # Learning disabled to ensure deterministic, reproducible schedules
+        # Offline training only - no exploration during production
+        resolver = SimpleTabularQLearning(
             courses=courses,
             faculty=faculty,
             rooms=rooms,
             time_slots=time_slots,
             learning_rate=0.15,
-            discount_factor=0.85,
-            epsilon=0.10,
-            max_iterations=self.config['rl_iterations']
+            gamma=0.85,
+            epsilon=0.05,  # Minimal exploration (mostly exploit)
+            frozen=True  # CRITICAL: No learning during runtime
         )
         
         return await asyncio.get_event_loop().run_in_executor(
@@ -307,12 +318,26 @@ class CPUExecutor:
         )
 
 class GPUExecutor:
-    """GPU-accelerated execution engine"""
+    """
+    ⚠️ EXPERIMENTAL / ARCHIVED (DESIGN FREEZE)
+    ============================================
+    GPU-accelerated execution engine
+    
+    STATUS: Disabled for production
+    REASON: 
+    - Python dicts + branching logic = poor fit for GPUs
+    - Nondeterminism and race conditions
+    - Minimal correctness benefit
+    - Research/paper use only
+    
+    DO NOT USE in production. Kept for ablation studies and experiments.
+    """
     
     def __init__(self, config: Dict):
         self.config = config
         self.device = None
         self.torch = None
+        logger.warning("[GPUExecutor] EXPERIMENTAL - Not for production use")
         
     async def initialize(self):
         """Initialize GPU resources"""
@@ -382,17 +407,18 @@ class GPUExecutor:
                            faculty: Dict, rooms: List[Room], time_slots: List[TimeSlot]) -> Dict:
         """Execute Stage 3 with GPU acceleration"""
         
-        resolver = RLConflictResolver(
+        # DESIGN FREEZE: RL policy FROZEN during runtime scheduling
+        # Learning disabled to ensure deterministic, reproducible schedules
+        # Offline training only - no exploration during production
+        resolver = SimpleTabularQLearning(
             courses=courses,
             faculty=faculty,
             rooms=rooms,
             time_slots=time_slots,
             learning_rate=0.15,
-            discount_factor=0.85,
-            epsilon=0.10,
-            max_iterations=self.config['rl_iterations'],
-            use_gpu=True,
-            gpu_device=self.device
+            gamma=0.85,
+            epsilon=0.05,  # Minimal exploration (mostly exploit)
+            frozen=True  # CRITICAL: No learning during runtime
         )
         
         return await asyncio.get_event_loop().run_in_executor(
@@ -400,11 +426,18 @@ class GPUExecutor:
         )
 
 class DistributedExecutor:
-    """Distributed execution engine for cloud/cluster environments"""
+    """
+    Distributed execution engine for cloud/cluster environments
+    
+    STATUS: Optional (Celery-based horizontal scaling)
+    NOTE: Not affected by DESIGN FREEZE (CPU-based, deterministic)
+    USE: Only when Celery workers available
+    """
     
     def __init__(self, config: Dict):
         self.config = config
         self.cluster_nodes = []
+        logger.info("[DistributedExecutor] Optional Celery-based distribution")
         
     async def initialize(self):
         """Initialize distributed resources"""

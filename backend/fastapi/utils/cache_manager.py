@@ -310,3 +310,57 @@ class CacheManager:
                 logger.warning(f"[CACHE] Stats fetch error: {e}")
         
         return stats
+    
+    def clear_memory_cache(self) -> int:
+        """
+        Clear in-memory cache (for memory pressure relief)
+        
+        Returns:
+            Approximate bytes freed
+        
+        Use case: Called by MemoryMonitor during cleanup
+        """
+        count = len(self.memory_cache)
+        # Estimate size (rough approximation)
+        size_bytes = sum(len(str(v)) for v in self.memory_cache.values()) * 2
+        
+        self.memory_cache.clear()
+        logger.info(f"[CACHE] Cleared {count} in-memory cache entries (~{size_bytes/(1024**2):.1f} MB)")
+        
+        return size_bytes
+    
+    def clear_all(self) -> int:
+        """
+        Clear ALL caches (memory + Redis)
+        
+        Returns:
+            Approximate bytes freed
+        
+        WARNING: This clears everything. Use only for:
+        - Manual admin action
+        - Critical memory pressure
+        - Testing
+        """
+        total_freed = 0
+        
+        # Clear memory cache
+        total_freed += self.clear_memory_cache()
+        
+        # Clear Redis cache
+        if self.redis_client:
+            try:
+                keys_deleted = 0
+                # Delete only our namespace keys (careful!)
+                for pattern in ['courses:*', 'faculty:*', 'rooms:*', 'students:*', 'time_slots:*', 'config:*', 'departments:*']:
+                    keys = self.redis_client.keys(pattern)
+                    if keys:
+                        self.redis_client.delete(*keys)
+                        keys_deleted += len(keys)
+                
+                logger.info(f"[CACHE] Cleared {keys_deleted} Redis keys")
+                # Rough estimate: assume 10KB per key
+                total_freed += keys_deleted * 10 * 1024
+            except Exception as e:
+                logger.error(f"[CACHE] Redis clear error: {e}")
+        
+        return total_freed

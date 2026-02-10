@@ -73,8 +73,6 @@ urlpatterns = [
     # Faculty and Student profile - MUST be before router to avoid conflict
     path("faculty/profile/", faculty_profile_and_courses, name="faculty-profile"),
     path("student/profile/", student_profile_and_courses, name="student-profile"),
-    # New Attendance management routes (takes priority)
-    path("attendance/", include("academics.attendance_urls")),
     # Timetable viewing endpoints (RBAC-based)
     path(
         "timetable/department/<str:dept_id>/",

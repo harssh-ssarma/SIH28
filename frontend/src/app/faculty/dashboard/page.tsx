@@ -75,7 +75,7 @@ export default function FacultyDashboard() {
   const [todaysClasses, setTodaysClasses] = useState<ClassSession[]>([])
   const [mySchedule, setMySchedule] = useState<TimeSlot[]>([])
   const [selectedClass, setSelectedClass] = useState<ClassSession | null>(null)
-  const [showAttendanceModal, setShowAttendanceModal] = useState(false)
+  // REMOVED: showAttendanceModal - attendance feature removed
   const [loading, setLoading] = useState(true)
   const [timetableData, setTimetableData] = useState<any>(null)
 
@@ -174,14 +174,12 @@ export default function FacultyDashboard() {
 
 
   const handleTakeAttendance = (subjectId?: string) => {
-    // Redirect to attendance page
-    router.push('/faculty/attendance')
+    // REMOVED: Attendance system has been removed
+    // TODO: Implement alternative functionality if needed
+    console.warn('Attendance feature has been removed')
   }
 
-  const closeAttendanceModal = () => {
-    setShowAttendanceModal(false)
-    setSelectedClass(null)
-  }
+  // REMOVED: closeAttendanceModal - attendance feature removed
 
   return (
     <DashboardLayout role="faculty">
@@ -190,7 +188,7 @@ export default function FacultyDashboard() {
         <div className="card">
           <div className="card-header">
             <h3 className="card-title">Assigned Subjects</h3>
-            <p className="card-description">Subjects assigned to you for attendance management</p>
+            <p className="card-description">Subjects assigned to you for teaching</p>
           </div>
 
           {loading ? (
@@ -217,12 +215,7 @@ export default function FacultyDashboard() {
                     </p>
                   </div>
 
-                  <button
-                    onClick={() => handleTakeAttendance(subject.offering_id)}
-                    className="btn-primary w-full sm:w-auto"
-                  >
-                    📝 Take Attendance
-                  </button>
+                  {/* REMOVED: Attendance button - feature has been removed */}
                 </div>
               ))}
             </div>

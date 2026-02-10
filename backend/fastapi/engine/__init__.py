@@ -1,10 +1,10 @@
 """Hardware-Adaptive Engine Package"""
-from .hardware_detector import HardwareDetector, get_hardware_profile
+from .hardware import HardwareDetector, get_hardware_profile
 from .adaptive_executor import AdaptiveExecutor, get_adaptive_executor
 from .stage1_clustering import LouvainClusterer
-from .stage2_cpsat import AdaptiveCPSATSolver
-from .stage2_ga import GeneticAlgorithmOptimizer
-from .stage3_rl import RLConflictResolver, ContextAwareRLAgent
+from .cpsat import AdaptiveCPSATSolver
+from .ga import GeneticAlgorithmOptimizer
+from .rl import SimpleTabularQLearning
 
 __all__ = [
     'HardwareDetector', 'get_hardware_profile',
@@ -12,5 +12,5 @@ __all__ = [
     'LouvainClusterer',
     'AdaptiveCPSATSolver',
     'GeneticAlgorithmOptimizer',
-    'RLConflictResolver', 'ContextAwareRLAgent'
+    'SimpleTabularQLearning'
 ]

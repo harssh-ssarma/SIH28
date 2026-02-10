@@ -225,21 +225,6 @@ class CanViewStudentData(permissions.BasePermission):
         return False
 
 
-class CanManageAttendance(permissions.BasePermission):
-    """
-    Permission for managing attendance (faculty and staff)
-    """
-
-    message = "Only faculty and staff can manage attendance."
-
-    def has_permission(self, request, view):
-        return (
-            request.user
-            and request.user.is_authenticated
-            and request.user.role in ["admin", "staff", "faculty"]
-        )
-
-
 class CanSubmitLeaveRequest(permissions.BasePermission):
     """
     Permission for submitting leave requests (faculty only)

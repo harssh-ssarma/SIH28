@@ -23,7 +23,6 @@ const getNavigationItems = (role: string) => {
         { name: 'Admins', href: '/admin/admins', icon: '👨‍💼' },
         { name: 'Faculty', href: '/admin/faculty', icon: '👨‍🏫' },
         { name: 'Students', href: '/admin/students', icon: '🎓' },
-        { name: 'Attendance', href: '/admin/attendance', icon: '📝' },
         { name: 'academic', href: '/admin/academic/rooms', icon: '🗂️' },
         { name: 'Timetables', href: '/admin/timetables', icon: '📅' },
         { name: 'Approvals', href: '/admin/approvals', icon: '✅' },
@@ -43,7 +42,6 @@ const getNavigationItems = (role: string) => {
     case 'faculty':
       return [
         ...baseItems,
-        { name: 'Attendance', href: '/faculty/attendance', icon: '📝' },
         { name: 'Schedule', href: '/faculty/schedule', icon: '📅' },
         { name: 'Preferences', href: '/faculty/preferences', icon: '⚙️' },
         { name: 'Leave Requests', href: '/faculty/leave-requests', icon: '🏦️' },
@@ -52,7 +50,6 @@ const getNavigationItems = (role: string) => {
     case 'student':
       return [
         ...baseItems,
-        { name: 'Attendance', href: '/student/attendance', icon: '✅' },
         { name: 'Timetable', href: '/student/timetable', icon: '📅' },
         { name: 'Enrollments', href: '/student/enrollments', icon: '📝' },
         { name: 'Notifications', href: '/student/notifications', icon: '🔔' },
