@@ -373,7 +373,7 @@ export default function AdminUsersPage() {
             <tbody>
   {isLoading ? (
     <tr>
-      <td colSpan="7">
+      <td colSpan={7}>
         <div className="flex items-center justify-center py-8">
           <div className="loading-spinner w-6 h-6 mr-2"></div>
           <span className="text-gray-600 dark:text-gray-400">
