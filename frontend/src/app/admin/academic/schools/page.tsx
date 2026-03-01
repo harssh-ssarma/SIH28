@@ -99,11 +99,11 @@ export default function SchoolsPage() {
 
       {/* ── Page Header ───────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>Schools</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-            {isLoading ? 'Loading…' : `${totalCount.toLocaleString()} schools`}
-          </p>
+        <div className="flex items-baseline gap-2.5">
+          <h1 className="text-2xl font-normal tracking-tight [color:var(--color-text-primary)]">Schools</h1>
+          {!isLoading && totalCount > 0 && (
+            <span className="text-sm tabular-nums [color:var(--color-text-muted)]">{totalCount.toLocaleString()}</span>
+          )}
         </div>
         <button className="btn-primary w-full sm:w-auto" onClick={handleAdd}>
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

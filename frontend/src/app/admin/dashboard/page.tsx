@@ -138,10 +138,8 @@ export default function AdminDashboard() {
 
       {/* ── Page Header ───────────────────────────────────────────────────── */}
       <div>
-        <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>Dashboard</h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-          Overview of your institution’s academic operations.
-        </p>
+        <h1 className="text-2xl font-normal tracking-tight [color:var(--color-text-primary)]">Dashboard</h1>
+
       </div>
 
       {/* ── Stats Grid ──────────────────────────────────────────────────── */}

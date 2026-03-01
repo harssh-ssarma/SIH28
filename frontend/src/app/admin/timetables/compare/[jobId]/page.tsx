@@ -179,7 +179,7 @@ export default function CompareVariantsPage() {
           <ArrowLeft size={18} />
         </button>
         <div>
-          <h1 className="text-xl font-bold [color:var(--color-text-primary)]">
+          <h1 className="text-2xl font-normal tracking-tight [color:var(--color-text-primary)]">
             {inCompareMode
               ? `${labelFor(compareIds![0])} vs ${labelFor(compareIds![1])}`
               : 'Timetable Variants'}

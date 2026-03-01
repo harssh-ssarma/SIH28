@@ -3,7 +3,7 @@ export default function PreferencesPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-800 dark:text-gray-200">
+          <h1 className="text-2xl font-normal tracking-tight [color:var(--color-text-primary)]">
             Teaching Preferences
           </h1>
           <button className="btn-primary w-full sm:w-auto">Save Preferences</button>

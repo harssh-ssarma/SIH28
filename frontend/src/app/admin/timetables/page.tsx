@@ -405,9 +405,6 @@ export default function AdminTimetablesPage() {
           <h1 className="text-2xl font-normal tracking-tight [color:var(--color-text-primary)]">
             Timetables
           </h1>
-          <p className="text-sm mt-0.5 [color:var(--color-text-secondary)]">
-            {totalCount} schedule{totalCount !== 1 ? 's' : ''} across all semesters
-          </p>
         </div>
         <Link href="/admin/timetables/new" className="btn-primary shrink-0">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

@@ -164,10 +164,10 @@ export function Breadcrumb() {
                 {crumb.label}
               </span>
             ) : (
-              /* Ancestor — grey text, rectangular hover pill like sidebar, no underline, no color change */
+              /* Ancestor — grey text, pill hover (rounded-full = stadium shape, Material 3 style), no underline, no color change */
               <Link
                 href={crumb.href}
-                className="text-2xl font-normal no-underline cursor-pointer rounded-lg px-2 py-0.5 -mx-2 transition-colors [color:var(--color-text-secondary)] hover:bg-black/[0.06] dark:hover:bg-white/[0.08] hover:[color:var(--color-text-secondary)]"
+                className="text-2xl font-normal no-underline cursor-pointer rounded-full px-3 py-0.5 -mx-3 transition-colors [color:var(--color-text-secondary)] hover:bg-black/[0.06] dark:hover:bg-white/[0.08] hover:[color:var(--color-text-secondary)]"
               >
                 {crumb.label}
               </Link>

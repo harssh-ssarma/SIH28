@@ -266,12 +266,9 @@ export default function AdminApprovals() {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+          <h1 className="text-2xl font-normal tracking-tight [color:var(--color-text-primary)]">
             Approvals
           </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-            Review and act on pending timetable generation requests
-          </p>
         </div>
         <button
           onClick={fetchWorkflows}

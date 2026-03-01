@@ -73,7 +73,7 @@ export default function CreateTimetablePage() {
     <div className="max-w-5xl mx-auto">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold mb-2" style={{ color: 'var(--color-text-primary)' }}>Generate TimeTable</h1>
+          <h1 className="text-2xl font-normal tracking-tight mb-2 [color:var(--color-text-primary)]">Generate TimeTable</h1>
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Configure time slots and generate timetable for all departments</p>
         </div>
         <button
