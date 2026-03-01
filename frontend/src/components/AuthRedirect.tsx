@@ -1,8 +1,23 @@
 'use client'
 
 /**
- * Drop this component into any page that authenticated users should NOT see
- * (marketing landing, login). It silently redirects them to their dashboard.
+ * AuthRedirect - Google-style authentication redirect
+ * 
+ * PURPOSE:
+ *   Redirects already-authenticated users away from auth pages (login/signup)
+ *   to their role-based dashboard.
+ * 
+ * USAGE:
+ *   ✅ Use ONLY on authentication pages (/login, /signup, /forgot-password)
+ *   ❌ Do NOT use on marketing pages (/, /pricing, /contact, /blog)
+ * 
+ * BEHAVIOR:
+ *   - If user is logged in → redirect to dashboard
+ *   - If user is NOT logged in → do nothing (stay on page)
+ * 
+ * GOOGLE EXAMPLE:
+ *   - google.com (marketing) → accessible to everyone, no redirect
+ *   - accounts.google.com/signin → redirects if already logged in
  */
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'

@@ -189,3 +189,28 @@ export async function fetchVariantDepartments(
     total_entries: count as number,
   }))
 }
+
+// ---------------------------------------------------------------------------
+// Department name lookup (for DepartmentTree display names)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch all active departments and return a UUID → { name, code } map.
+ * Used by the review page to show real department names in DepartmentTree
+ * instead of raw UUIDs.
+ */
+export async function fetchDepartmentNames(): Promise<Map<string, { name: string; code: string }>> {
+  const data = await apiFetch<unknown>('/departments/?is_active=true&page_size=500')
+  const items: any[] = Array.isArray(data) ? data : ((data as any).results ?? [])
+  const map = new Map<string, { name: string; code: string }>()
+  items.forEach((d: any) => {
+    const id: string | undefined = d.dept_id ?? d.id
+    if (id) {
+      map.set(id, {
+        name: d.dept_name ?? d.name ?? id,
+        code: d.dept_short_name ?? d.dept_code ?? id,
+      })
+    }
+  })
+  return map
+}

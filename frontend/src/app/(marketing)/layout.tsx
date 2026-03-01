@@ -1,7 +1,6 @@
 import type { Metadata } from 'next'
 import { MarketingNav } from '@/components/marketing/MarketingNav'
 import { MarketingFooter } from '@/components/marketing/MarketingFooter'
-import { AuthRedirect } from '@/components/AuthRedirect'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://cadence.edu'),
@@ -37,7 +36,6 @@ export default function MarketingLayout({
 }) {
   return (
     <>
-      <AuthRedirect />
       <MarketingNav />
       <main>{children}</main>
       <MarketingFooter />

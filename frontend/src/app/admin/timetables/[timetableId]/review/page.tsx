@@ -15,7 +15,9 @@ import { TimetableGridSkeleton, VariantCardSkeleton, Skeleton } from '@/componen
 import { VariantGrid } from '@/components/timetables/VariantGrid'
 import { DepartmentTree } from '@/components/timetables/DepartmentTree'
 import { SlotDetailPanel } from '@/components/timetables/SlotDetailPanel'
-import type { VariantSummary, VariantScoreCard, TimetableSlotDetailed, DepartmentOption } from '@/types/timetable'
+import { TimetableGridFiltered } from '@/components/timetables/TimetableGridFiltered'
+import { fetchDepartmentNames } from '@/lib/api/timetable-variants'
+import type { VariantSummary, VariantScoreCard, TimetableSlotDetailed, DepartmentOption, BackendTimetableEntry } from '@/types/timetable'
 
 // Backend types matching Django models
 interface TimetableEntry {
@@ -291,6 +293,8 @@ export default function TimetableReviewPage() {
   const [departmentFilter, setDepartmentFilter] = useState<string>('all')
   // SlotDetailPanel state — open on cell click
   const [selectedSlot, setSelectedSlot] = useState<TimetableSlotDetailed | null>(null)
+  // Department display-name lookup (UUID → { name, code })
+  const [deptNames, setDeptNames] = useState<Map<string, { name: string; code: string }>>(() => new Map())
 
   // Re-attach observer whenever the active variant changes (including null → first variant).
   // rootMargin 400px means the grid starts building before it even enters the viewport.
@@ -310,6 +314,11 @@ export default function TimetableReviewPage() {
       loadWorkflowData()
     }
   }, [workflowId])
+
+  // Load department names once on mount so DepartmentTree shows real names
+  useEffect(() => {
+    fetchDepartmentNames().then(setDeptNames).catch(() => {})
+  }, [])
 
   /**
    * Fetch workflow metadata + variants list in parallel (Round 1), then fetch
@@ -837,11 +846,16 @@ export default function TimetableReviewPage() {
     ;(activeVariant?.timetable_entries ?? []).forEach(e => {
       if (e.department_id && !seen.has(e.department_id)) {
         seen.add(e.department_id)
-        opts.push({ id: e.department_id, name: e.department_id, code: e.department_id })
+        const resolved = deptNames.get(e.department_id)
+        opts.push({
+          id:   e.department_id,
+          name: resolved?.name ?? e.department_id,
+          code: resolved?.code ?? e.department_id,
+        })
       }
     })
     return opts
-  }, [activeVariant?.timetable_entries])
+  }, [activeVariant?.timetable_entries, deptNames])
 
   // Block the full page ONLY while workflow metadata + variant list are loading.
   // Entries for the grid load in the background and show an inline skeleton.
@@ -1083,7 +1097,15 @@ export default function TimetableReviewPage() {
               <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
                 <div className="px-4 py-4 sm:px-5 sm:py-5">
                   {gridInView
-                    ? renderTimetableGrid(activeVariant)
+                    ? <TimetableGridFiltered
+                        entries={(activeVariant.timetable_entries ?? []) as BackendTimetableEntry[]}
+                        departmentFilter={departmentFilter}
+                        activeDay={activeDay}
+                        onDayChange={setActiveDay}
+                        isLoading={loadingVariantId === activeVariant.id && (activeVariant.timetable_entries ?? []).length === 0}
+                        onSlotClick={setSelectedSlot}
+                        onRetry={() => loadVariantEntries(activeVariant)}
+                      />
                     : <TimetableGridSkeleton days={5} slots={8} />
                   }
                 </div>

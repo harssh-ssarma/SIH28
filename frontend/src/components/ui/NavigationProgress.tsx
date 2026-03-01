@@ -47,7 +47,6 @@ export function NavigationProgress() {
 
   // DOM refs (manipulated directly — avoids React re-render overhead)
   const barRef  = useRef<HTMLDivElement>(null)
-  const glowRef = useRef<HTMLDivElement>(null)
 
   // State refs (no re-renders needed)
   const prevPathRef = useRef(pathname)
@@ -61,8 +60,6 @@ export function NavigationProgress() {
     widthRef.current = w
     if (!barRef.current) return
     barRef.current.style.width   = `${w}%`
-    // Glow follows the bar tip
-    if (glowRef.current) glowRef.current.style.opacity = w > 0 && w < 100 ? '1' : '0'
   }, [])
 
   const applyOpacity = useCallback((op: number, durationMs = 0) => {
@@ -136,8 +133,6 @@ export function NavigationProgress() {
       barRef.current.style.transition = 'width 200ms cubic-bezier(0.4, 0, 0.2, 1)'
     }
     applyWidth(100)
-    if (glowRef.current) glowRef.current.style.opacity = '0'
-
     // Hold briefly at full width, then fade out wrapper
     hideRef.current = setTimeout(() => {
       applyOpacity(0, CFG.FADE_MS)
@@ -241,22 +236,7 @@ export function NavigationProgress() {
           }}
         />
 
-        {/* ── Animated glow tip (the bright "head" of Google's bar) ── */}
-        <div
-          ref={glowRef}
-          style={{
-            position:        'absolute',
-            top:             '-2px',
-            right:           0,
-            width:           '80px',
-            height:          '7px',
-            background:      'radial-gradient(ellipse at right center, rgba(26,115,232,0.8) 0%, transparent 70%)',
-            opacity:         0,
-            transition:      'opacity 150ms ease',
-            pointerEvents:   'none',
-            filter:          'blur(1px)',
-          }}
-        />
+
       </div>
     </>
   )

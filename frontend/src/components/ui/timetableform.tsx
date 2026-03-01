@@ -90,13 +90,13 @@ export default function NEP2020TimetableForm() {
           // Check if cache actually exists
           if (cacheResponse.exists && cacheResponse.data) {
             cachedData = cacheResponse.data
-            console.log('✅ Cache HIT - Loading from Redis')
+            console.log(' Cache HIT - Loading from Redis')
           } else {
-            console.log('ℹ️ Cache MISS - Cache does not exist')
+            console.log(' Cache MISS - Cache does not exist')
           }
         }
       } catch (err) {
-        console.log('⚠️ Cache check failed:', err)
+        console.log(' Cache check failed:', err)
       }
 
       if (cachedData && cachedData.subjects && cachedData.subjects.length > 0) {
@@ -105,7 +105,7 @@ export default function NEP2020TimetableForm() {
         setFaculty(cachedData.faculty || [])
         setCacheKey(generatedCacheKey)
         console.log(
-          `✅ Loaded from cache: ${cachedData.subjects.length} subjects, ${
+          ` Loaded from cache: ${cachedData.subjects.length} subjects, ${
             cachedData.faculty?.length || 0
           } faculty`
         )
@@ -130,9 +130,9 @@ export default function NEP2020TimetableForm() {
           // Backend returns {summary: [...], enrollments: [...], cross_department_summary: [...]}
           const subjects = enrollData.summary || enrollData.results || enrollData
           setEnrollmentSummary(Array.isArray(subjects) ? subjects : [])
-          console.log(`✅ Loaded ${subjects?.length || 0} subjects with enrollments`)
+          console.log(` Loaded ${subjects?.length || 0} subjects with enrollments`)
         } else {
-          console.error('❌ Failed to fetch enrollments:', enrollmentRes.status)
+          console.error(' Failed to fetch enrollments:', enrollmentRes.status)
           setEnrollmentSummary([])
         }
 
@@ -140,9 +140,9 @@ export default function NEP2020TimetableForm() {
           facultyData = await facultyRes.json()
           const faculties = facultyData.results || facultyData
           setFaculty(Array.isArray(faculties) ? faculties : [])
-          console.log(`✅ Loaded ${faculties?.length || 0} faculty members`)
+          console.log(` Loaded ${faculties?.length || 0} faculty members`)
         } else {
-          console.error('❌ Failed to fetch faculty:', facultyRes.status)
+          console.error(' Failed to fetch faculty:', facultyRes.status)
           setFaculty([])
         }
 
@@ -164,14 +164,14 @@ export default function NEP2020TimetableForm() {
               }),
             })
             setCacheKey(generatedCacheKey)
-            console.log('✅ Data cached in Redis')
+            console.log(' Data cached in Redis')
           } catch (cacheErr) {
-            console.warn('⚠️ Failed to cache data:', cacheErr)
+            console.warn(' Failed to cache data:', cacheErr)
           }
         }
       }
     } catch (err) {
-      console.error('❌ Failed to load enrollment data:', err)
+      console.error(' Failed to load enrollment data:', err)
       setError('Failed to load enrollment data')
     } finally {
       setIsLoading(false)

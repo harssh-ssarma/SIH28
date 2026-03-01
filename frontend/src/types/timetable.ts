@@ -85,6 +85,28 @@ export interface TimetableEntry {
   is_elective: boolean
 }
 
+/**
+ * Backend entry shape as returned by /timetable/variants/{id}/entries/
+ * Uses day as a number (0 = Monday…5 = Saturday) unlike the legacy TimetableEntry.
+ */
+export interface BackendTimetableEntry {
+  day: number          // 0 = Monday … 5 = Saturday
+  time_slot: string
+  start_time?: string
+  end_time?: string
+  subject_id?: string
+  subject_name?: string
+  subject_code?: string
+  faculty_id?: string
+  faculty_name?: string
+  batch_id?: string
+  batch_name?: string
+  classroom_id?: string
+  room_number?: string
+  duration_minutes?: number
+  department_id?: string
+}
+
 export interface TimetableReview {
   id: string
   workflow: string // UUID reference

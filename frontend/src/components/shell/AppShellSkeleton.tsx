@@ -8,8 +8,8 @@
  * blank page or an out-of-context spinning indicator.
  */
 
-const Shimmer = ({ className = '' }: { className?: string }) => (
-  <div className={`animate-pulse rounded-md bg-gray-200 dark:bg-[#333537] ${className}`} />
+const Shimmer = ({ className = '', style }: { className?: string; style?: React.CSSProperties }) => (
+  <div className={`animate-pulse rounded-md bg-gray-200 dark:bg-[#333537] ${className}`} style={style} />
 )
 
 export function AppShellSkeleton() {
