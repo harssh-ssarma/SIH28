@@ -48,16 +48,24 @@ def _get_db_pool() -> psycopg2.pool.ThreadedConnectionPool:
         if _db_pool is not None:  # double-checked locking
             return _db_pool
         db_url = os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/sih28')
+        # min=5, max=15 — saga._load_data fires 6 parallel fetch_* calls plus
+        # the primary __init__ connection; we need at least 7 slots concurrently.
+        # Headroom to 15 avoids PoolError exhaustion under retry pressure.
         _db_pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=2,
-            maxconn=10,
+            minconn=5,
+            maxconn=15,
             dsn=db_url,
             cursor_factory=RealDictCursor,
             connect_timeout=10,
+            # TCP keepalives prevent Neon.tech / cloud providers from silently
+            # closing idle SSL connections (saves us from OperationalError on checkout).
+            keepalives=1,
+            keepalives_idle=60,
+            keepalives_interval=10,
+            keepalives_count=5,
         )
-        # Apply statement timeout to all new connections via connection init
         logger.info(
-            "[DB-POOL] ThreadedConnectionPool created (min=2, max=10)",
+            "[DB-POOL] ThreadedConnectionPool created (min=5, max=15, keepalives=60s)",
             extra={"dsn_host": db_url.split("@")[-1].split("/")[0]},
         )
     return _db_pool
@@ -102,6 +110,102 @@ def _on_conn_closed(conn) -> None:
     _initialized_conn_ids.discard(id(conn))
 
 
+def _ping_conn(conn) -> bool:
+    """Return True if *conn* is alive (responds to SELECT 1).
+
+    Used to validate pool connections before use.  A failed ping means the
+    connection was closed by the server (common on Neon.tech / cloud PG after
+    idle timeout) and must be discarded.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
+def _reset_pool() -> None:
+    """Null out the current pool so _get_db_pool() will create a fresh one.
+
+    Deliberately does NOT call closeall() — doing so kills every open TCP
+    connection immediately, including ones currently executing queries on
+    parallel threads (the 6 concurrent fetch_* calls in saga._load_data).
+    Those in-flight threads still hold a reference to the old pool object
+    via self._pool, so they can return their connections normally via
+    old_pool.putconn().  The old pool becomes unreachable from new callers
+    and will be GC'd once all in-flight threads finish.
+    """
+    global _db_pool
+    with _pool_lock:
+        if _db_pool is not None:
+            _db_pool = None          # orphan; GC collects after in-flight threads finish
+        _initialized_conn_ids.clear()
+    logger.warning("[DB-POOL] Pool nulled — will recreate on next borrow (old pool orphaned for GC)")
+
+
+def _get_healthy_conn(
+    pool: psycopg2.pool.ThreadedConnectionPool,
+    max_retries: int = 3,
+):
+    """Check out a connection that is confirmed alive, replacing stale ones.
+
+    Neon.tech and other cloud PostgreSQL providers drop idle SSL connections
+    after an inactivity timeout (~300 s on the free tier).  When the pool
+    hands back a stale connection any immediate query raises::
+
+        psycopg2.OperationalError: SSL connection has been closed unexpectedly
+
+    This helper catches that at checkout time rather than deep inside a query,
+    discards the dead connection, and retries up to *max_retries* times.
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(max_retries):
+        try:
+            conn = pool.getconn()
+        except psycopg2.pool.PoolError as exc:
+            last_exc = exc
+            logger.warning(
+                "[DB-POOL] getconn failed (attempt %d/%d): %s",
+                attempt + 1, max_retries, exc,
+            )
+            time.sleep(0.5 * (attempt + 1))
+            continue
+
+        # Quick liveness check — cheaper than discovering the connection is
+        # dead partway through a real query.
+        if not _ping_conn(conn):
+            logger.warning(
+                "[DB-POOL] Stale connection detected on attempt %d — discarding",
+                attempt + 1,
+            )
+            _on_conn_closed(conn)
+            try:
+                pool.putconn(conn, close=True)
+            except Exception:
+                pass
+            continue
+
+        # Connection is alive — apply one-time session settings if needed.
+        if not _is_conn_initialized(conn):
+            try:
+                _init_conn(conn)
+            except Exception as exc:
+                # _init_conn itself failed (race condition / second drop).
+                last_exc = exc
+                _on_conn_closed(conn)
+                try:
+                    pool.putconn(conn, close=True)
+                except Exception:
+                    pass
+                continue
+
+        return conn
+
+    raise psycopg2.OperationalError(
+        f"Could not obtain a healthy DB connection after {max_retries} attempts"
+    ) from last_exc
+
 
 class DjangoAPIClient:
     """Client for fetching data directly from Django database with intelligent caching.
@@ -115,38 +219,81 @@ class DjangoAPIClient:
         self._pool = _get_db_pool()
         # Keep a single borrowed connection for the resolve_org_id / close() flow
         # that is NOT used by parallel fetch_* calls (those borrow their own).
-        self.db_conn = self._pool.getconn()
-        _init_conn(self.db_conn)
+        # _get_healthy_conn handles stale/dropped SSL connections automatically.
+        try:
+            self.db_conn = _get_healthy_conn(self._pool)
+        except psycopg2.OperationalError:
+            # Pool may be entirely stale — rebuild it once and retry.
+            logger.warning("[DB-POOL] All connections stale in __init__ — resetting pool")
+            _reset_pool()
+            self._pool = _get_db_pool()
+            self.db_conn = _get_healthy_conn(self._pool, max_retries=2)
+        # Pin the primary connection to its birth pool.  If _borrow_conn later
+        # replaces self._pool (via a pool reset), close() still returns this
+        # connection to the correct pool instead of hitting 'unkeyed connection'.
+        self._primary_pool = self._pool
         self.cache_manager = CacheManager(redis_client=redis_client, db_conn=self.db_conn)
 
     # ------------------------------------------------------------------
     # Connection helpers
     # ------------------------------------------------------------------
     def _borrow_conn(self):
-        """Borrow a connection from the pool for one query.
+        """Borrow a healthy connection from the pool for one query.
 
-        Calls _init_conn only for connections that have not yet been configured.
-        Already-initialised connections (autocommit=True, timeout set) are
-        returned directly without any extra setup.
+        Routes through _get_healthy_conn so stale SSL connections are detected
+        and replaced before any real query is executed.  If every connection in
+        the pool has been dropped by the server the pool is reset and rebuilt.
         """
-        conn = self._pool.getconn()
-        if not _is_conn_initialized(conn):
-            _init_conn(conn)
-        return conn
-
-    def _return_conn(self, conn) -> None:
-        """Return a borrowed connection back to the pool."""
         try:
-            self._pool.putconn(conn)
+            return _get_healthy_conn(self._pool)
+        except psycopg2.OperationalError:
+            logger.warning("[DB-POOL] All connections stale in _borrow_conn — resetting pool")
+            _reset_pool()
+            self._pool = _get_db_pool()
+            return _get_healthy_conn(self._pool, max_retries=2)
+
+    def _return_conn(self, conn, pool=None) -> None:
+        """Return a borrowed connection back to its pool.
+
+        Args:
+            conn:  The psycopg2 connection to return.
+            pool:  The pool it was borrowed from.  Defaults to self._pool.
+                   Pass the pool explicitly when self._pool may have been
+                   replaced by a reset since the connection was checked out.
+
+        If the connection is physically closed, or if putconn() rejects it
+        (e.g. 'unkeyed connection' after a pool reset), we close the socket
+        directly to avoid leaking the file descriptor.
+        """
+        target_pool = pool if pool is not None else self._pool
+        try:
+            # conn.closed != 0 means psycopg2 already knows it is broken.
+            if getattr(conn, 'closed', 0):
+                _on_conn_closed(conn)
+                try:
+                    target_pool.putconn(conn, close=True)
+                except Exception:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+            else:
+                target_pool.putconn(conn)
         except Exception as exc:
-            # Connection is unusable — discard tracking entry and drop it
+            # 'unkeyed connection' happens when self._pool was replaced by a
+            # reset after this connection was checked out from the old pool.
+            # Close the socket directly so the file-descriptor is not leaked.
             _on_conn_closed(conn)
-            logger.warning("[DB-POOL] putconn error: %s", exc)
+            try:
+                conn.close()
+            except Exception:
+                pass
+            logger.warning("[DB-POOL] putconn failed (%s) — connection closed directly", exc)
 
     async def close(self):
-        """Return the primary connection back to the pool (not closed)."""
+        """Return the primary connection back to its original pool (not closed)."""
         if self.db_conn:
-            self._return_conn(self.db_conn)
+            self._return_conn(self.db_conn, pool=self._primary_pool)
             self.db_conn = None
     
     def resolve_org_id(self, org_identifier: str) -> str:

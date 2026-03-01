@@ -1,7 +1,6 @@
 'use client'
 
 import React from 'react'
-import { GoogleSpinner } from '@/components/ui/GoogleSpinner'
 
 // Base Skeleton component
 export function Skeleton({ className = '', style, ...props }: React.HTMLAttributes<HTMLDivElement>) {
@@ -135,18 +134,6 @@ export function MobileCardsSkeleton({ cards = 5 }: { cards?: number }) {
   )
 }
 
-// Card Skeleton
-export function CardSkeleton() {
-  return (
-    <div className="bg-white rounded-lg shadow-md p-6">
-      <Skeleton className="h-6 w-1/3 mb-4" />
-      <Skeleton className="h-4 w-full mb-2" />
-      <Skeleton className="h-4 w-5/6 mb-2" />
-      <Skeleton className="h-4 w-4/6" />
-    </div>
-  )
-}
-
 // List Skeleton (for mobile card views)
 export function ListSkeleton({ items = 5 }: { items?: number }) {
   return (
@@ -172,83 +159,6 @@ export function ListSkeleton({ items = 5 }: { items?: number }) {
       ))}
     </div>
   )
-}
-
-// Form Skeleton
-export function FormSkeleton({ fields = 6 }: { fields?: number }) {
-  return (
-    <div className="space-y-6">
-      {Array.from({ length: fields }).map((_, i) => (
-        <div key={i}>
-          <Skeleton className="h-4 w-32 mb-2" />
-          <Skeleton className="h-10 w-full rounded-md" />
-        </div>
-      ))}
-      <div className="flex gap-3 pt-4">
-        <Skeleton className="h-10 w-32 rounded-md" />
-        <Skeleton className="h-10 w-32 rounded-md" />
-      </div>
-    </div>
-  )
-}
-
-// Dashboard Stats Skeleton
-export function StatsSkeleton({ count = 4 }: { count?: number }) {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="bg-white rounded-lg shadow-sm p-6">
-          <Skeleton className="h-4 w-24 mb-3" />
-          <Skeleton className="h-8 w-20 mb-2" />
-          <Skeleton className="h-3 w-32" />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/**
- * PageLoader — full-screen shimmer overlay.
- * Use only when you need to block the entire viewport while
- * critical content is loading (rare — prefer inline skeletons instead).
- */
-export function PageLoader() {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex flex-col gap-4 p-6"
-      style={{ background: 'var(--color-bg-page)' }}
-    >
-      {/* Header bar */}
-      <Skeleton style={{ height: '56px', width: '100%', borderRadius: '12px' }} />
-      <div className="flex gap-4 flex-1">
-        {/* Sidebar */}
-        <Skeleton style={{ width: '220px', borderRadius: '12px', flexShrink: 0 }} />
-        {/* Content */}
-        <div className="flex-1 space-y-4">
-          <Skeleton style={{ height: '48px', width: '40%', borderRadius: '8px' }} />
-          <Skeleton style={{ height: '120px', borderRadius: '12px' }} />
-          <Skeleton style={{ height: '80px', borderRadius: '12px' }} />
-          <Skeleton style={{ height: '80px', borderRadius: '12px' }} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/**
- * Spinner — convenience wrapper around GoogleSpinner.
- * ONLY appropriate for button/action loading states (size="sm") and small
- * inline indicators. Do NOT use for page-level or section-level loading.
- */
-export function Spinner({
-  size = 'md',
-  className = '',
-}: {
-  size?: 'sm' | 'md' | 'lg'
-  className?: string
-}) {
-  const sizeMap = { sm: 16, md: 32, lg: 48 }
-  return <GoogleSpinner size={sizeMap[size]} className={className} />
 }
 
 // ── Timetable-specific skeletons ──────────────────────────────────────────────

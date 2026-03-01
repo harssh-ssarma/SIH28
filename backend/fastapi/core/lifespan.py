@@ -117,11 +117,13 @@ async def lifespan(app: FastAPI):
         redis_url = settings.REDIS_URL
         
         try:
-            # decode_responses=True: values are strings (not bytes), matching
-            # Django's redis client.  ssl_cert_reqs="none" disables cert
-            # validation for Upstash TLS — same as Django settings.py.
+            # decode_responses=False (default): CacheManager uses a binary wire
+            # protocol (1-byte tag + zstd-compressed payload).  decode_responses=True
+            # would cause redis-py to UTF-8 decode the raw bytes, raising
+            # "invalid start byte" on zstd magic bytes (e.g. 0xb5).
+            # All encode/decode is handled by CacheManager._redis_get_smart /
+            # _redis_set_smart, so the client must return raw bytes.
             redis_kwargs: dict = {
-                "decode_responses": True,
                 "socket_connect_timeout": 5,
                 # 30 s: accommodates large-ish Redis writes (e.g. student/faculty
                 # blobs up to 5 MB) without triggering spurious timeout warnings.

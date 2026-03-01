@@ -7,25 +7,6 @@
 let refreshPromise: Promise<boolean> | null = null;
 
 /**
- * 🔐 SECURE: No token access needed - cookies sent automatically
- * This function is kept for backward compatibility but returns null
- */
-export async function getAccessToken(): Promise<string | null> {
-  // Tokens are in HttpOnly cookies - not accessible to JavaScript
-  // This is intentional for security (prevents XSS attacks)
-  return null;
-}
-
-/**
- * 🔐 DEPRECATED: Token expiry checking not needed with HttpOnly cookies
- * Backend automatically handles token refresh via cookie rotation
- */
-function isTokenExpiringSoon(token: string): boolean {
-  // Not used - kept for backward compatibility
-  return false;
-}
-
-/**
  * 🔐 SECURE: Refresh using HttpOnly cookies (NO localStorage)
  * Backend automatically rotates tokens and sets new cookies
  */
