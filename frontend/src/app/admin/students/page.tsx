@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import AddEditStudentModal from './components/AddEditStudentModal'
+import StudentDetailPanel from './components/StudentDetailPanel'
 import { SimpleStudentInput } from '@/lib/validations'
 import apiClient from '@/lib/api'
 import { useToast } from '@/components/Toast'
@@ -29,8 +30,8 @@ const COLUMNS: Column<Record<string, unknown>>[] = [
     header: 'Student',
     render: (v, row) => (
       <div>
-        <div className="font-medium" style={{ fontSize: '14px', color: 'var(--color-text-primary)' }}>{v as string}</div>
-        <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontFamily: 'monospace' }}>{row['student_id'] as string}</div>
+        <div className="font-medium text-sm text-[var(--color-text-primary)]">{v as string}</div>
+        <div className="text-xs text-[var(--color-text-secondary)] font-mono">{row['student_id'] as string}</div>
       </div>
     ),
   },
@@ -38,7 +39,7 @@ const COLUMNS: Column<Record<string, unknown>>[] = [
   { key: 'course', header: 'Course', render: v => (v as Student['course'])?.course_name || '—' },
   { key: 'year', header: 'Year', width: '70px', render: v => <span className="badge badge-info">Year {v as number}</span> },
   { key: 'semester', header: 'Sem', width: '70px', render: v => <span className="badge badge-success">Sem {v as number}</span> },
-  { key: 'faculty_advisor', header: 'Advisor', render: v => (v as Student['faculty_advisor'])?.faculty_name || <span style={{ color: 'var(--color-text-secondary)' }}>Unassigned</span> },
+  { key: 'faculty_advisor', header: 'Advisor', render: v => (v as Student['faculty_advisor'])?.faculty_name || <span className="text-[var(--color-text-secondary)]">Unassigned</span> },
 ]
 
 export default function StudentsPage() {
@@ -51,6 +52,7 @@ export default function StudentsPage() {
   const itemsPerPage = 25
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
+  const [detailStudent, setDetailStudent] = useState<Student | null>(null)
 
   const fetchStudents = useCallback(async (page = currentPage) => {
     setIsLoading(true)
@@ -113,6 +115,7 @@ export default function StudentsPage() {
         avatarColumn={row => (row as unknown as Student).name}
         onDelete={handleBulkDelete}
         onEdit={row => { setSelectedStudent(row as unknown as Student); setIsModalOpen(true) }}
+        onRowClick={row => setDetailStudent(row as unknown as Student)}
         emptyState={{ icon: GraduationCap, title: 'No students found', description: 'Add students to get started.' }}
       />
       <AddEditStudentModal
@@ -121,6 +124,14 @@ export default function StudentsPage() {
         onSave={handleSaveStudent}
         student={selectedStudent}
       />
+      {detailStudent && (
+        <StudentDetailPanel
+          student={detailStudent}
+          onClose={() => setDetailStudent(null)}
+          onEdit={() => { setSelectedStudent(detailStudent); setDetailStudent(null); setIsModalOpen(true) }}
+          onDelete={() => { handleBulkDelete([String(detailStudent.id)]); setDetailStudent(null) }}
+        />
+      )}
     </div>
   )
 }

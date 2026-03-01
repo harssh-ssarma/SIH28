@@ -143,23 +143,23 @@ export default function ClassroomsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-2">Room Code</label>
-                <input type="text" value={formData.room_code} onChange={e => setFormData({ ...formData, room_code: e.target.value })} className="input-primary" required />
+                <input type="text" value={formData.room_code} onChange={e => setFormData({ ...formData, room_code: e.target.value })} className="input-primary" placeholder="Room Code" title="Room Code" required />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2">Room Number</label>
-                <input type="text" value={formData.room_number} onChange={e => setFormData({ ...formData, room_number: e.target.value })} className="input-primary" required />
+                <input type="text" value={formData.room_number} onChange={e => setFormData({ ...formData, room_number: e.target.value })} className="input-primary" placeholder="Room Number" title="Room Number" required />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2">Room Name</label>
-                <input type="text" value={formData.room_name} onChange={e => setFormData({ ...formData, room_name: e.target.value })} className="input-primary" />
+                <input type="text" value={formData.room_name} onChange={e => setFormData({ ...formData, room_name: e.target.value })} className="input-primary" placeholder="Room Name" title="Room Name" />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2">Capacity</label>
-                <input type="number" value={formData.seating_capacity} onChange={e => setFormData({ ...formData, seating_capacity: e.target.value })} className="input-primary" required />
+                <input type="number" value={formData.seating_capacity} onChange={e => setFormData({ ...formData, seating_capacity: e.target.value })} className="input-primary" placeholder="Seating Capacity" title="Seating Capacity" required />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2">Type</label>
-                <select value={formData.room_type} onChange={e => setFormData({ ...formData, room_type: e.target.value })} className="input-primary">
+                <select value={formData.room_type} onChange={e => setFormData({ ...formData, room_type: e.target.value })} className="input-primary" title="Room Type">
                   <option value="lecture_hall">Lecture Hall</option>
                   <option value="laboratory">Laboratory</option>
                   <option value="tutorial_room">Tutorial Room</option>

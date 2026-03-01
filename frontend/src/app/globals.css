@@ -715,8 +715,8 @@
     display: flex;
     align-items: center;
     padding: 8px 12px;
-    background: var(--color-sidebar-active-bg);
-    color: var(--color-sidebar-active-text);
+    background: #1967D2;
+    color: white;
     border-radius: var(--radius-md);
     font-size: 14px;
     font-weight: 600;

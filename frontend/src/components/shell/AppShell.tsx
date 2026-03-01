@@ -481,8 +481,8 @@ export default function AppShell({ children }: DashboardLayoutProps) {
             <Image
               src="/logo2.png"
               alt="Cadence"
-              width={32}
-              height={32}
+              width={44}
+              height={44}
               className="rounded-full object-contain"
               style={{ mixBlendMode: 'multiply', flexShrink: 0 }}
             />

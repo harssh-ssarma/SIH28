@@ -283,8 +283,8 @@ export default function LoginPage() {
             <Image
               src="/logo2.png"
               alt="Cadence"
-              width={40}
-              height={40}
+              width={72}
+              height={72}
               priority
               quality={100}
               className="rounded-full object-contain"

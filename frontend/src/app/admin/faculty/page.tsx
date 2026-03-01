@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import AddEditFacultyModal from './components/AddEditFacultyModal'
+import FacultyDetailPanel from './components/FacultyDetailPanel'
 import { SimpleFacultyInput } from '@/lib/validations'
 import apiClient from '@/lib/api'
 import { useToast } from '@/components/Toast'
@@ -33,8 +34,8 @@ const COLUMNS: Column<Record<string, unknown>>[] = [
       const name = [row['first_name'], row['middle_name'], row['last_name']].filter(Boolean).join(' ')
       return (
         <div>
-          <div className="font-medium" style={{ fontSize: '14px', color: 'var(--color-text-primary)' }}>{name}</div>
-          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>{row['faculty_code'] as string}</div>
+          <div className="font-medium text-sm text-[var(--color-text-primary)]">{name}</div>
+          <div className="text-xs text-[var(--color-text-secondary)]">{row['faculty_code'] as string}</div>
         </div>
       )
     },
@@ -56,6 +57,7 @@ export default function FacultyManagePage() {
   const itemsPerPage = 25
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [selectedFaculty, setSelectedFaculty] = useState<Faculty | null>(null)
+  const [detailFaculty, setDetailFaculty] = useState<Faculty | null>(null)
 
   const fetchFaculty = useCallback(async (page = currentPage) => {
     setIsLoading(true)
@@ -127,6 +129,7 @@ export default function FacultyManagePage() {
         }}
         onDelete={handleBulkDelete}
         onEdit={row => { setSelectedFaculty(row as unknown as Faculty); setIsModalOpen(true) }}
+        onRowClick={row => setDetailFaculty(row as unknown as Faculty)}
         emptyState={{ icon: Users, title: 'No faculty found', description: 'Add faculty members to get started.' }}
       />
       <AddEditFacultyModal
@@ -135,6 +138,14 @@ export default function FacultyManagePage() {
         faculty={selectedFaculty}
         onSave={handleSaveFaculty}
       />
+      {detailFaculty && (
+        <FacultyDetailPanel
+          faculty={detailFaculty}
+          onClose={() => setDetailFaculty(null)}
+          onEdit={() => { setSelectedFaculty(detailFaculty); setDetailFaculty(null); setIsModalOpen(true) }}
+          onDelete={() => { handleBulkDelete([String(detailFaculty.id)]); setDetailFaculty(null) }}
+        />
+      )}
     </div>
   )
 }

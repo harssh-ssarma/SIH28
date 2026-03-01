@@ -52,6 +52,8 @@ export interface DataTableProps<T extends Record<string, unknown>> {
    * Pass a function: row => nameString (or null to skip for that row).
    */
   avatarColumn?: (row: T) => string | null
+  /** Called when the user clicks a data row (not the avatar/checkbox or action buttons) */
+  onRowClick?: (row: T) => void
 }
 
 /* ─── Skeleton ──────────────────────────────────────────────────────────────── */
@@ -353,6 +355,7 @@ export default function DataTable<T extends Record<string, unknown>>({
   onPrint,
   onExport,
   avatarColumn,
+  onRowClick,
 }: DataTableProps<T>) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -778,17 +781,18 @@ export default function DataTable<T extends Record<string, unknown>>({
                 return (
                   <tr
                     key={id}
-                    className={`group transition-colors duration-75 cursor-default${selected ? ' table-row-selected' : ''}`}
+                    className={`group transition-colors duration-75${onRowClick ? ' cursor-pointer' : ' cursor-default'}${selected ? ' table-row-selected' : ''}`}
                     style={{
                       height: rowH,
                       backgroundColor: selected ? 'var(--row-selected-bg)' : undefined,
                       outline: 'none',
                     }}
+                    onClick={onRowClick ? () => onRowClick(row) : undefined}
                     onMouseEnter={e => { if (!selected) (e.currentTarget as HTMLTableRowElement).style.backgroundColor = 'var(--row-hover-bg)' }}
                     onMouseLeave={e => { if (!selected) (e.currentTarget as HTMLTableRowElement).style.backgroundColor = '' }}
                   >
                     {selectable && (
-                      <td className="pl-3 pr-2 w-12">
+                      <td className="pl-3 pr-2 w-12" onClick={e => e.stopPropagation()}>
                         {avatarColumn ? (
                           /* Google Contacts avatar ↔ checkbox flip */
                           <div
@@ -847,7 +851,7 @@ export default function DataTable<T extends Record<string, unknown>>({
                     ))}
                     {/* Row actions (edit / delete) — appear on hover */}
                     {(onEdit || onDelete) && (
-                      <td className="pr-2 text-right" style={{ width: '104px' }}>
+                      <td className="pr-2 text-right" style={{ width: '104px' }} onClick={e => e.stopPropagation()}>
                         <span className="inline-flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-75">
                           {onEdit && (
                             <button

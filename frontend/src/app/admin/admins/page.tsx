@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import apiClient from '@/lib/api'
 import AddEditUserModal from './components/AddEditUserModal'
+import UserDetailPanel from './components/UserDetailPanel'
 import { useToast } from '@/components/Toast'
 import PageHeader from '@/components/shared/PageHeader'
 import DataTable, { Column } from '@/components/shared/DataTable'
@@ -53,6 +54,7 @@ export default function AdminUsersPage() {
   const [totalCount, setTotalCount] = useState(0)
   const [showModal, setShowModal] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
+  const [detailUser, setDetailUser] = useState<User | null>(null)
 
   const fetchUsers = useCallback(async (page = currentPage, search = searchTerm) => {
     setIsLoading(true)
@@ -120,6 +122,7 @@ export default function AdminUsersPage() {
         }}
         onDelete={handleBulkDelete}
         onEdit={row => { setEditingUser(row as unknown as User); setShowModal(true) }}
+        onRowClick={row => setDetailUser(row as unknown as User)}
         emptyState={{ icon: UserCog, title: 'No admin users found', description: 'Create an admin account to get started.' }}
       />
       <AddEditUserModal
@@ -128,6 +131,14 @@ export default function AdminUsersPage() {
         user={editingUser}
         onSave={handleSaveUser}
       />
+      {detailUser && (
+        <UserDetailPanel
+          user={detailUser}
+          onClose={() => setDetailUser(null)}
+          onEdit={() => { setEditingUser(detailUser); setDetailUser(null); setShowModal(true) }}
+          onDelete={() => { handleBulkDelete([String(detailUser.id)]); setDetailUser(null) }}
+        />
+      )}
     </div>
   )
 }
