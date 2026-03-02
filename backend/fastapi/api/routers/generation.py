@@ -15,11 +15,27 @@ logger = logging.getLogger(__name__)
 
 
 class TimeConfig(BaseModel):
-    """Time configuration model"""
+    """Time configuration model.
+
+    Enterprise fix: all fields that Celery's ``generate_timetable_task`` sends in
+    ``time_config`` are explicitly declared here so that Pydantic does NOT silently
+    drop them.  Before this fix, ``end_time``, ``lunch_break_enabled``,
+    ``lunch_break_start``, and ``lunch_break_end`` were missing from the model —
+    Pydantic's default ``extra='ignore'`` behaviour caused ``TimeConfig.dict()`` to
+    return only the four declared fields, so ``fetch_time_slots`` always used
+    hard-coded defaults regardless of what the admin configured.
+    """
+
     working_days: int = 6
     slots_per_day: int = 9
-    start_time: str = "09:00"
+    start_time: str = "08:00"
+    end_time: str = "17:00"
     slot_duration_minutes: int = 60
+    lunch_break_enabled: bool = True
+    lunch_break_start: str = "12:00"
+    lunch_break_end: str = "13:00"
+
+    model_config = {"extra": "ignore"}  # explicit — never silently expand
 
 
 class GenerationRequest(BaseModel):

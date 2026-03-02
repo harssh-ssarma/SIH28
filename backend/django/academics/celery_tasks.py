@@ -105,8 +105,27 @@ def generate_timetable_task(self, job_id, org_id, academic_year, semester):
                     job.status = 'running'
                     job.save(update_fields=['status'])
                 return {'status': 'queued', 'job_id': job_id}
+
+            elif response.status_code in (429, 503):
+                # Transient server-side overload — eligible for Celery auto-retry.
+                # Without this branch, non-200 always fell through to the outer
+                # ``except Exception`` which: (a) marked the job as 'failed' and
+                # (b) did NOT trigger self.retry() — so no retry ever happened.
+                logger.warning(
+                    f"[CELERY] FastAPI returned {response.status_code} for job {job_id} "
+                    f"(transient overload).  Retrying in 30 s."
+                )
+                raise self.retry(
+                    exc=Exception(f"FastAPI {response.status_code}: {response.text[:200]}"),
+                    countdown=30,
+                )
+
             else:
-                raise Exception(f"FastAPI returned {response.status_code}: {response.text}")
+                # A persistent error (e.g., 422 Validation Error, 500).
+                # Surface the full response body so operators can diagnose quickly.
+                raise Exception(
+                    f"FastAPI returned {response.status_code}: {response.text[:500]}"
+                )
                 
         except requests.exceptions.Timeout:
             # FastAPI did not respond within 30 s, but it may have already received

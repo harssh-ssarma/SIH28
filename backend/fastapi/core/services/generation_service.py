@@ -113,7 +113,7 @@ class GenerationService:
     
     async def _handle_timeout(self, job_id: str):
         """Handle job timeout — write failed status to Redis and DB so Django SSE terminates."""
-        import time, json, os
+        import time, json
         if self.redis:
             self.redis.delete(f"cancel:job:{job_id}")
             self.redis.delete(f"start_time:job:{job_id}")
@@ -139,27 +139,47 @@ class GenerationService:
                 logger.info(f"[JOB {job_id}] Wrote failed status to Redis")
             except Exception as e:
                 logger.warning(f"[JOB {job_id}] Could not write failed status to Redis: {e}")
-        # Also update the Django DB directly
+        # Also update the Django DB directly — use the shared pool to avoid
+        # paying the TCP+TLS connect cost and leaking connections.
         try:
-            import psycopg2
             from datetime import datetime, timezone
-            db_url = os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/sih28')
-            db_conn = psycopg2.connect(db_url, connect_timeout=5)
-            db_conn.autocommit = False
-            with db_conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE generation_jobs
-                    SET status = 'failed',
-                        error_message = 'Generation timed out (60-minute limit exceeded)',
-                        updated_at = %s
-                    WHERE id = %s AND status NOT IN ('completed', 'approved', 'cancelled')
-                    """,
-                    (datetime.now(timezone.utc), job_id)
-                )
-            db_conn.commit()
-            db_conn.close()
-            logger.info(f"[JOB {job_id}] Marked as failed in DB (timeout)")
+            from utils.django_client import _get_db_pool, _get_healthy_conn
+
+            _pool = _get_db_pool()
+            _conn = _get_healthy_conn(_pool)
+            _conn.autocommit = False
+            try:
+                with _conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE generation_jobs
+                        SET status = 'failed',
+                            error_message = 'Generation timed out (60-minute limit exceeded)',
+                            updated_at = %s
+                        WHERE id = %s AND status NOT IN ('completed', 'approved', 'cancelled')
+                        """,
+                        (datetime.now(timezone.utc), job_id)
+                    )
+                _conn.commit()
+                logger.info(f"[JOB {job_id}] Marked as failed in DB (timeout)")
+            except Exception:
+                try:
+                    _conn.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                try:
+                    _conn.autocommit = True
+                except Exception:
+                    pass
+                try:
+                    _get_db_pool().putconn(_conn)
+                except Exception:
+                    try:
+                        _conn.close()
+                    except Exception:
+                        pass
         except Exception as db_err:
             logger.warning(f"[JOB {job_id}] Could not update DB on timeout: {db_err}")
     
@@ -215,25 +235,45 @@ class GenerationService:
         # returns 'running' for this job on subsequent polls (which would cause
         # an infinite SSE-reconnect loop in the frontend).
         try:
-            import os, psycopg2
+            import os
             from datetime import datetime, timezone
-            db_url = os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/sih28')
-            db_conn = psycopg2.connect(db_url, connect_timeout=5)
-            db_conn.autocommit = False
-            with db_conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE generation_jobs
-                    SET status = 'failed',
-                        error_message = %s,
-                        updated_at = %s
-                    WHERE id = %s AND status NOT IN ('completed', 'cancelled', 'approved')
-                    """,
-                    (str(error)[:500], datetime.now(timezone.utc), job_id)
-                )
-            db_conn.commit()
-            db_conn.close()
-            logger.info(f"[JOB {job_id}] Fallback: marked as failed in DB (_handle_error)")
+            from utils.django_client import _get_db_pool, _get_healthy_conn
+
+            _pool = _get_db_pool()
+            _conn = _get_healthy_conn(_pool)
+            _conn.autocommit = False
+            try:
+                with _conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE generation_jobs
+                        SET status = 'failed',
+                            error_message = %s,
+                            updated_at = %s
+                        WHERE id = %s AND status NOT IN ('completed', 'cancelled', 'approved')
+                        """,
+                        (str(error)[:500], datetime.now(timezone.utc), job_id)
+                    )
+                _conn.commit()
+                logger.info(f"[JOB {job_id}] Fallback: marked as failed in DB (_handle_error)")
+            except Exception:
+                try:
+                    _conn.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                try:
+                    _conn.autocommit = True
+                except Exception:
+                    pass
+                try:
+                    _get_db_pool().putconn(_conn)
+                except Exception:
+                    try:
+                        _conn.close()
+                    except Exception:
+                        pass
         except Exception as db_err:
             logger.warning(f"[JOB {job_id}] Fallback DB write failed: {db_err}")
     

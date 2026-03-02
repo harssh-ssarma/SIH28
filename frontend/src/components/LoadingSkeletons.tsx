@@ -150,7 +150,8 @@ export function ListSkeleton({ items = 5 }: { items?: number }) {
         >
           <div className="flex justify-between items-start" style={{ marginBottom: '12px' }}>
             <Skeleton style={{ height: '20px', width: '128px' }} />
-            <Skeleton style={{ height: '24px', width: '80px', borderRadius: 'var(--radius-pill)' }} />
+            <Skeleton style={{ height: '24px', width:
+               '80px', borderRadius: 'var(--radius-pill)' }} />
           </div>
           <Skeleton style={{ height: '16px', width: '100%', marginBottom: '8px' }} />
           <Skeleton style={{ height: '16px', width: '75%', marginBottom: '8px' }} />

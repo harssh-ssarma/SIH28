@@ -1072,23 +1072,44 @@ class DjangoAPIClient:
             # NEP 2020 FIX: Generate UNIVERSAL time slots (ONE grid for ALL departments)
             days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'][:working_days]
             time_slots = []
-            
+
+            # Parse end_time for boundary guard
+            end_time = parse_time(end_time_str)
+
             # Global slot ID counter (0 to 53 for 9 periods × 6 days)
             global_slot_id = 0
-            
+
             for day_idx, day in enumerate(days):
                 current_time = start_time
-                period_idx = 0
-                
-                for _ in range(slots_per_day):
+                # Enterprise fix: count only ACTUAL slots created (not loop iterations).
+                # Previously used ``for _ in range(slots_per_day)`` — a lunch-break
+                # ``continue`` ate one iteration so the day produced ``slots_per_day - 1``
+                # actual periods instead of ``slots_per_day``.  For the user's config of
+                # 9 periods the day ended at 16:00 (8 slots) rather than 17:00 (9 slots).
+                actual_slots_today = 0
+
+                while actual_slots_today < slots_per_day:
+                    # Hard boundary: never generate a slot that starts at or past end_time.
+                    # Enterprise guardrail — prevents runaway generation when
+                    # slots_per_day × slot_duration > (end_time - start_time - lunch).
+                    if current_time >= end_time:
+                        logger.warning(
+                            "[TIME_SLOTS] reached end_time=%s before completing "
+                            "slots_per_day=%d on day '%s' (got %d slots). "
+                            "Verify slots_per_day × slot_duration ≤ working_window.",
+                            end_time_str, slots_per_day, day, actual_slots_today,
+                        )
+                        break
+
                     # Calculate slot end time
                     slot_end = current_time + timedelta(minutes=slot_duration)
-                    
+
                     # Check if this slot overlaps with lunch break
                     if lunch_break_enabled and lunch_start and lunch_end:
                         # Skip if slot starts during lunch break
                         if lunch_start <= current_time < lunch_end:
                             current_time = lunch_end  # Jump to end of lunch break
+                            # Do NOT count this as a slot; do NOT increment actual_slots_today
                             continue
                     
                     # Create UNIVERSAL time slot (shared by all departments)
@@ -1099,16 +1120,16 @@ class DjangoAPIClient:
                         slot_id=str(global_slot_id),  # Sequential: 0, 1, 2, ..., 53
                         day_of_week=day,
                         day=day_idx,
-                        period=period_idx,
+                        period=actual_slots_today,
                         start_time=start_str,
                         end_time=end_str,
-                        slot_name=f"{day.capitalize()} P{period_idx+1} ({start_str}-{end_str})"
+                        slot_name=f"{day.capitalize()} P{actual_slots_today+1} ({start_str}-{end_str})"
                     )
                     time_slots.append(slot)
                     
                     # Move to next slot
                     current_time = slot_end
-                    period_idx += 1
+                    actual_slots_today += 1
                     global_slot_id += 1
             
             logger.info(f"[NEP 2020] Generated {len(time_slots)} time slots ({working_days}d x {len(time_slots)//working_days if working_days else 0} slots/day)")

@@ -110,8 +110,6 @@ const CSS_KEYFRAMES = `
   margin: -12px;
   min-height: calc(100vh - 4.5rem);
   background-color: var(--color-bg-page);
-  background-image: radial-gradient(circle, #CBD5E1 1px, transparent 1px);
-  background-size: 24px 24px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -120,43 +118,8 @@ const CSS_KEYFRAMES = `
   overflow: hidden;
   border-radius: inherit;
 }
-.dark .page-bg {
-  background-image: radial-gradient(circle, #2C3040 1px, transparent 1px);
-}
 @media (min-width: 768px) {
   .page-bg { margin: -24px; }
-}
-/* Orb 1 — blue, top-left */
-.page-bg::before {
-  content: '';
-  position: absolute;
-  width: 520px; height: 520px;
-  top: -160px; left: -120px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(26,115,232,0.22) 0%, transparent 70%);
-  filter: blur(32px);
-  animation: orbDrift1 12s ease-in-out infinite;
-  pointer-events: none;
-  z-index: 0;
-}
-.dark .page-bg::before {
-  background: radial-gradient(circle, rgba(138,180,248,0.14) 0%, transparent 70%);
-}
-/* Orb 2 — indigo, bottom-right */
-.page-bg::after {
-  content: '';
-  position: absolute;
-  width: 480px; height: 480px;
-  bottom: -140px; right: -100px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(99,102,241,0.18) 0%, transparent 70%);
-  filter: blur(36px);
-  animation: orbDrift2 15s ease-in-out infinite;
-  pointer-events: none;
-  z-index: 0;
-}
-.dark .page-bg::after {
-  background: radial-gradient(circle, rgba(139,92,246,0.13) 0%, transparent 70%);
 }
 /* Shared modal card */
 .modal-card { box-shadow: 0 4px 24px rgba(15,23,42,0.06); padding: 28px 36px; z-index: 1; }
