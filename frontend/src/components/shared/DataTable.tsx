@@ -978,6 +978,7 @@ export default function DataTable<T extends Record<string, unknown>>({
               <div
                 key={id}
                 role={onRowClick ? 'button' : undefined}
+                aria-label={onRowClick ? `View details${nameStr ? ` for ${nameStr}` : ''}` : undefined}
                 tabIndex={onRowClick ? 0 : undefined}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 onKeyDown={onRowClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') onRowClick(row) } : undefined}
@@ -1016,7 +1017,7 @@ export default function DataTable<T extends Record<string, unknown>>({
             className="flex items-center justify-between px-4 py-3 border-t border-[rgba(0,0,0,0.06)]"
             style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}
           >
-            <span>{pageStart}–{pageEnd} of {totalCount}</span>
+            <span>{pageStart}{'–'}{pageEnd} of {totalCount}</span>
             <div className="flex items-center gap-1">
               <button onClick={() => onPageChange?.(page - 1)} disabled={page <= 1}
                 className="p-1.5 rounded-full hover:bg-[var(--row-hover-bg)] disabled:opacity-30 disabled:cursor-not-allowed"
@@ -1035,7 +1036,7 @@ export default function DataTable<T extends Record<string, unknown>>({
           className="hidden md:flex items-center justify-end gap-1 px-4"
           style={{ height: '52px', borderTop: '1px solid rgba(0,0,0,0.06)', fontSize: '13px', color: 'var(--color-text-secondary)' }}
         >
-          <span className="mr-2">{pageStart}–{pageEnd} of {totalCount}</span>
+          <span className="mr-2">{pageStart}{'–'}{pageEnd} of {totalCount}</span>
           <button
             onClick={() => onPageChange?.(page - 1)}
             disabled={page <= 1}

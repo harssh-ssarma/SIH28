@@ -115,9 +115,15 @@
   --color-header-bg:     #FFFFFF;
   --color-header-border: #DADCE0;
   --color-search-bg:     #F1F3F4;
-  --header-height: 56px;
+  --header-height:       56px;
+  --header-height-md:    64px;          /* desktop header (md+: h-16) */
   --sidebar-width-expanded:  256px;
   --sidebar-width-collapsed: 72px;
+
+  /* ── NEW: ProfileDropdown — Dropdown & Sheet surfaces ── */
+  --color-dropdown-bg:   #fcfcfc;       /* Profile dropdown surface */
+  --color-sheet-bg:      #fcfcfc;       /* Mobile sheet surface */
+  --color-sheet-shadow:  0 -2px 12px rgba(60,64,67,0.15);
 
   /* Elevation */
   --shadow-card:     0 1px 2px rgba(60,64,67,0.10), 0 1px 3px 1px rgba(60,64,67,0.08);
@@ -275,6 +281,11 @@
   --shadow-card:     0 1px 2px rgba(0,0,0,0.30), 0 1px 3px 1px rgba(0,0,0,0.25);
   --shadow-dropdown: 0 1px 2px rgba(0,0,0,0.40), 0 2px 6px 2px rgba(0,0,0,0.30);
   --shadow-modal:    0 2px 6px rgba(0,0,0,0.50), 0 4px 24px rgba(0,0,0,0.40);
+
+  /* ── NEW: ProfileDropdown — dark surfaces ── */
+  --color-dropdown-bg:   #202124;
+  --color-sheet-bg:      #2D2E30;
+  --color-sheet-shadow:  0 -2px 12px rgba(0,0,0,0.50);
 }
 
 /* ── Material-Design indeterminate spinner (Play Store / Google Files style) ─ */
@@ -1228,6 +1239,283 @@
     font-weight: 600;
     color: var(--color-text-secondary);
   }
+
+  /* ── ProfileDropdown — floating panel (all screen sizes) ──────────────── */
+  .profile-dropdown {
+    position: fixed;
+    top: calc(var(--header-height-md) + 6px);
+    right: 11px;
+    width: 360px;
+    background: var(--color-dropdown-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-extra-large);
+    box-shadow: var(--shadow-modal);
+    overflow: hidden;
+    z-index: 991;
+    display: flex;
+    flex-direction: column;
+  }
+  /* Mobile: full-width, just below shorter (56px) header */
+  @media (max-width: 639px) {
+    .profile-dropdown {
+      top: calc(56px + 6px);
+      right: 8px;
+      left: 8px;
+      width: auto;
+    }
+    .sheet-scrim,
+    .sheet-container { display: none !important; }
+  }
+
+  .profile-load-bar {
+    height: 100%;
+    width: 100%;
+    background: var(--color-primary);
+    animation: profileLoad 1.4s ease-in-out infinite;
+  }
+
+  .profile-header-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 48px;
+    padding: 0 var(--space-12);
+    flex-shrink: 0;
+  }
+  .profile-email {
+    font-size: 15px;
+    font-weight: 400;
+    font-family: var(--font-body);
+    color: var(--color-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .profile-close-btn {
+    position: absolute;
+    right: var(--space-3);
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background 120ms;
+  }
+  .profile-close-btn:hover { background: rgba(0,0,0,0.08); }
+  .dark .profile-close-btn:hover { background: rgba(255,255,255,0.08); }
+
+  .profile-avatar-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--space-5) var(--space-6) var(--space-4);
+    flex-shrink: 0;
+  }
+  .profile-cam-badge {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-full);
+    background: rgba(31,31,31,0.70);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .profile-greeting {
+    margin-top: var(--space-4);
+    font-size: 22px;
+    font-weight: 400;
+    font-family: var(--font-heading);
+    color: var(--color-text-primary);
+    line-height: 1.3;
+  }
+  .profile-subtext {
+    margin-top: 2px;
+    margin-bottom: var(--space-4);
+    font-size: 13px;
+    font-family: var(--font-body);
+    color: var(--color-text-secondary);
+  }
+  .profile-card {
+    background: #FFFFFF;
+    border-radius: var(--radius-extra-large);
+    border: 1px solid var(--color-border);
+    overflow: hidden;
+  }
+  .dark .profile-card { background: var(--color-bg-surface-2); }
+  .profile-card-split {
+    display: flex;
+    min-height: 52px;
+  }
+  .profile-card-split-item {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5);
+    font-size: 14px;
+    font-weight: 500;
+    font-family: var(--font-label);
+    color: var(--color-text-primary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background 120ms;
+    text-decoration: none;
+  }
+  .profile-card-split-item:hover { background: var(--color-bg-surface-2); }
+  .profile-card-split-divider {
+    width: 1px;
+    margin: var(--space-2) 0;
+    background: var(--color-border);
+    flex-shrink: 0;
+  }
+  .profile-menu-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 0 var(--space-4);
+    height: var(--row-height);
+    font-size: 14px;
+    font-family: var(--font-body);
+    color: var(--color-text-primary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background 120ms;
+    text-decoration: none;
+    width: 100%;
+    text-align: left;
+  }
+  .profile-menu-item:hover { background: var(--color-bg-surface-2); }
+  .profile-menu-divider {
+    height: 1px;
+    background: var(--color-border);
+    margin: 0 var(--space-4);
+  }
+  .profile-icon {
+    color: var(--color-text-secondary);
+    flex-shrink: 0;
+  }
+  .profile-footer {
+    text-align: center;
+    font-size: 12px;
+    font-family: var(--font-label);
+    color: var(--color-text-secondary);
+    padding: var(--space-1) 0 var(--space-2);
+  }
+  .profile-footer a {
+    color: var(--color-text-secondary);
+    text-decoration: none;
+  }
+  .profile-footer a:hover { text-decoration: underline; }
+
+  /* ── NEW: Bottom Sheet — mobile profile panel ───────────────────────────── */
+  .sheet-scrim {
+    position: fixed;
+    inset: 0;
+    background: var(--color-bg-overlay);
+    z-index: 980;
+    animation: sheet-scrim-in 200ms ease forwards;
+  }
+  .sheet-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 990;
+    background: var(--color-sheet-bg);
+    border-radius: var(--radius-extra-large) var(--radius-extra-large) 0 0;
+    box-shadow: var(--color-sheet-shadow);
+    padding-bottom: env(safe-area-inset-bottom);
+    max-width: 640px;
+    margin: 0 auto;
+    animation: sheet-up 200ms ease-out forwards;
+  }
+  .sheet-handle {
+    width: 32px;
+    height: 4px;
+    background: var(--color-border-strong);
+    border-radius: var(--radius-full);
+    margin: var(--space-3) auto 0;
+    flex-shrink: 0;
+    align-self: center;
+  }
+  .sheet-account-header {
+    padding: var(--space-4) var(--space-4) var(--space-3);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    text-align: center;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .sheet-account-name {
+    font-size: 16px;
+    font-weight: 500;
+    font-family: var(--font-heading);
+    color: var(--color-text-primary);
+  }
+  .sheet-account-email {
+    font-size: 14px;
+    font-family: var(--font-body);
+    color: var(--color-text-secondary);
+  }
+  .sheet-manage-btn {
+    display: inline-flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 var(--space-4);
+    margin-top: var(--space-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    font-size: 14px;
+    font-weight: 500;
+    font-family: var(--font-label);
+    color: var(--color-text-primary);
+    background: transparent;
+    cursor: pointer;
+    transition: background 150ms;
+    text-decoration: none;
+  }
+  .sheet-manage-btn:hover { background: rgba(var(--color-primary-rgb), 0.08); }
+  .sheet-nav-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    height: var(--row-height);
+    padding: 0 var(--space-4);
+    font-size: 14px;
+    font-family: var(--font-body);
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition: background 120ms;
+    border-radius: 0;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    text-decoration: none;
+  }
+  .sheet-nav-item:hover     { background: rgba(0,0,0,0.08); }
+  .dark .sheet-nav-item:hover { background: rgba(255,255,255,0.08); }
+  .sheet-divider {
+    height: 1px;
+    background: var(--color-border);
+    margin: var(--space-1) 0;
+  }
 }
 
 @layer utilities {
@@ -1334,6 +1622,13 @@
   }
   .animate-sheet-up   { animation: sheet-up   200ms ease-out forwards; }
   .animate-sheet-down { animation: sheet-down 180ms ease-in  forwards; }
+
+  /* ── NEW: sheet scrim fade-in ── */
+  @keyframes sheet-scrim-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .animate-sheet-scrim-in { animation: sheet-scrim-in 200ms ease forwards; }
 
   /* Reverse shimmer — used by progress bar animations below */
   @keyframes shimmer-reverse {
