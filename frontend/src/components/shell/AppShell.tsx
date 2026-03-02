@@ -174,7 +174,7 @@ function NavItemRow({
       <span
         className={[
           'hhIRA text-[14px] transition-all duration-200',
-          active ? 'font-bold text-[#1f1f1f]' : 'font-normal text-[#444746]',
+          active ? 'font-bold text-[#1f1f1f]' : 'font-medium text-[#444746]',
           collapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100',
         ].join(' ')}
       >
@@ -250,7 +250,7 @@ function NavGroupRow({
           className={`absolute left-1 shrink-0 transition-transform duration-200 ${open ? 'rotate-0' : '-rotate-90'}`}
         />
         <Icon size={20} strokeWidth={isChildActive ? 2.4 : 1.8} className="shrink-0" />
-        <span className={['hhIRA text-[14px] text-left', isChildActive ? 'font-bold text-[#1f1f1f]' : 'font-normal text-[#444746]'].join(' ')}>{group.label}</span>
+        <span className={['hhIRA text-[14px] text-left', isChildActive ? 'font-bold text-[#1f1f1f]' : 'font-medium text-[#444746]'].join(' ')}>{group.label}</span>
       </button>
 
       {/* Sub-items — stacked below the group header */}
@@ -272,7 +272,7 @@ function NavGroupRow({
                 ].join(' ')}
               >
                 <ChildIcon size={15} strokeWidth={active ? 2.2 : 1.8} className="shrink-0" />
-                <span className={['hhIRA text-[14px]', active ? 'font-bold text-[#1f1f1f]' : 'font-normal text-[#444746]'].join(' ')}>{child.label}</span>
+                <span className={['hhIRA text-[14px]', active ? 'font-bold text-[#1f1f1f]' : 'font-medium text-[#444746]'].join(' ')}>{child.label}</span>
               </Link>
             )
           })}
