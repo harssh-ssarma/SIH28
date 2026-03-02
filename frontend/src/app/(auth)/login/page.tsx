@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { loginSchema, type LoginFormData } from '@/lib/validations'
-import { useCardProgress } from '@/hooks/useCardProgress'
+import { CardProgress, type CardProgressHandle } from '@/components/ui/CardProgress'
 import { OutlinedInput } from '@/components/ui/OutlinedInput'
 import { EyeOpen, EyeOff } from '@/components/ui/PasswordToggleIcons'
 
@@ -19,7 +19,7 @@ export default function LoginPage() {
   const [loginError, setLoginError] = useState<string | null>(null)
   const { login, user } = useAuth()
   const router = useRouter()
-  const { start, finish, reset, BarElement } = useCardProgress()
+  const cardProgressRef = useRef<CardProgressHandle>(null)
 
   const {
     register,
@@ -40,15 +40,15 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginFormData) => {
     setIsLoading(true)
     setLoginError(null)
-    start()
+    cardProgressRef.current?.start()
     try {
       await login(data.username, data.password)
-      finish()
+      cardProgressRef.current?.finish()
       const raw = localStorage.getItem('user')
       const role = raw ? (JSON.parse(raw).role?.toLowerCase() ?? '') : ''
       router.push(ROLE_DASHBOARD[role] ?? '/admin/dashboard')
     } catch {
-      reset()
+      cardProgressRef.current?.reset()
       setLoginError('Wrong username or password. Try again.')
     } finally {
       setIsLoading(false)
@@ -78,7 +78,7 @@ export default function LoginPage() {
         <div className="relative w-full max-w-[450px] bg-white dark:bg-[#1e1e1e] border border-[#dadce0] dark:border-[#3c4043] rounded-[28px] px-10 py-10 sm:px-12 overflow-hidden">
 
           {/* ── In-card progress bar (Google-style, top of card) ── */}
-          {BarElement}
+          <CardProgress ref={cardProgressRef} />
 
           {/* ── Header ── */}
           <div className="flex flex-col items-center gap-2 mb-8">

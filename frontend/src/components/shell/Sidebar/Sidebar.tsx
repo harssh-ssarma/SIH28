@@ -1,5 +1,7 @@
 'use client'
 
+import Image from 'next/image'
+import Link from 'next/link'
 import SidebarNav from './SidebarNav'
 import type { NavEntry } from '../hooks/useNavItems'
 
@@ -9,6 +11,7 @@ interface SidebarProps {
   mobileOpen: boolean
   isCollapsed: boolean
   pendingApprovals: number
+  role: 'admin' | 'faculty' | 'student'
   onCloseMobile: () => void
 }
 
@@ -18,6 +21,7 @@ export default function Sidebar({
   mobileOpen,
   isCollapsed,
   pendingApprovals,
+  role,
   onCloseMobile,
 }: SidebarProps) {
   return (
@@ -25,7 +29,7 @@ export default function Sidebar({
       {/* ══ Mobile backdrop ══════════════════════════════════════════════════ */}
       {mobileOpen && (
         <div
-          className="md:hidden fixed inset-0 z-40 bg-black/40"
+          className="md:hidden fixed inset-0 z-[51] bg-black/40"
           onClick={onCloseMobile}
           aria-hidden="true"
         />
@@ -34,9 +38,10 @@ export default function Sidebar({
       {/* ══ Sidebar aside ═══════════════════════════════════════════════════ */}
       <aside
         className={[
-          'fixed left-0 top-0 h-full z-[45] flex flex-col',
+          'fixed left-0 top-0 h-full flex flex-col',
+          mobileOpen ? 'z-[55]' : 'z-[45]',        /* above header (z-50) when drawer open */
           'bg-[#f6f8fc] dark:bg-[#111111]',
-          'pt-[56px] md:pt-[64px]',
+          /* no pt-* — brand strip below acts as the top spacer */
           'transition-[width,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]',
           mobileOpen ? 'translate-x-0 w-[284px]' : '-translate-x-full w-[284px] md:translate-x-0',
           !mobileOpen && (sidebarOpen ? 'md:w-[284px]' : 'md:w-[72px]'),
@@ -44,6 +49,34 @@ export default function Sidebar({
           .filter(Boolean)
           .join(' ')}
       >
+        {/* ── Brand strip ───────────────────────────────────────────────────
+            Height matches the top app bar so nav items always start below it.
+            Content visible only on mobile — desktop header already shows the
+            logo. When the drawer is open isCollapsed=false so brand renders.  */}
+        <div className="flex items-center h-14 md:h-16 shrink-0 overflow-hidden pl-3">
+          {mobileOpen && (
+            <Link
+              href={`/${role}/dashboard`}
+              onClick={onCloseMobile}
+              className="md:hidden flex items-center gap-2 px-1 select-none"
+              aria-label="Cadence home"
+            >
+              <Image
+                src="/logo2.png"
+                alt=""
+                width={40}
+                height={40}
+                className="rounded-full object-contain shrink-0"
+                style={{ mixBlendMode: 'multiply' }}
+                aria-hidden="true"
+              />
+              <span className="text-[22px] font-normal text-[#202124] dark:text-[#e8eaed] tracking-[-0.01em] whitespace-nowrap leading-none">
+                Cadence
+              </span>
+            </Link>
+          )}
+        </div>
+
         <SidebarNav
           navItems={navItems}
           collapsed={isCollapsed}

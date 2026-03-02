@@ -7,8 +7,6 @@ import { Search, Bell } from 'lucide-react'
 import Avatar from '@/components/shared/Avatar'
 import ProfileDropdown from '../ProfileDropdown'
 import SearchBar from './SearchBar'
-import NewMenu from './NewMenu'
-
 interface HeaderUser {
   email?: string
   first_name?: string
@@ -90,7 +88,8 @@ export default function Header({
           </svg>
         </button>
 
-        <Link href={`/${role}/dashboard`} className="flex items-center gap-2 px-1 select-none">
+        {/* Logo + name — desktop only. Mobile shows branding inside the sidebar drawer. */}
+        <Link href={`/${role}/dashboard`} className="hidden md:flex items-center gap-2 px-1 select-none">
           <Image
             src="/logo2.png"
             alt="Cadence"
@@ -99,7 +98,7 @@ export default function Header({
             className="rounded-full object-contain"
             style={{ mixBlendMode: 'multiply', flexShrink: 0 }}
           />
-          <span className="hidden sm:inline-flex items-center w-[92.75px] h-[48px] text-[22px] font-normal [color:var(--color-text-primary,#202124)] tracking-[-0.01em] overflow-hidden">
+          <span className="inline-flex items-center w-[92.75px] h-[48px] text-[22px] font-normal [color:var(--color-text-primary,#202124)] tracking-[-0.01em] overflow-hidden">
             Cadence
           </span>
         </Link>
@@ -119,9 +118,6 @@ export default function Header({
         >
           <Search size={20} />
         </button>
-
-        {/* + New dropdown — admin only */}
-        {role === 'admin' && <NewMenu />}
 
         {/* Bell */}
         <button

@@ -82,14 +82,15 @@ export default function StudentDetailPanel({ student, onClose, onEdit, onDelete 
       </div>
 
       {/* Scrollable body */}
-      <div className="flex-1 overflow-y-auto px-8 py-8">
+      <div className="flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-8">
         {/* Profile header */}
-        <div className="flex items-start gap-8 mb-8">
-          <Avatar name={student.name} size={162} className="shrink-0" />
-          <div className="pt-1">
+        <div className="flex flex-col items-center md:flex-row md:items-start gap-4 md:gap-8 mb-8">
+          <div className="md:hidden"><Avatar name={student.name} size={80} /></div>
+          <div className="hidden md:block"><Avatar name={student.name} size={162} className="shrink-0" /></div>
+          <div className="pt-1 text-center md:text-left">
             <h2 className="text-[28px] font-normal text-[var(--color-text-primary)] leading-tight">{student.name}</h2>
             <p className="text-[13px] text-[var(--color-text-secondary)] font-mono mt-0.5">{student.student_id}</p>
-            <div className="flex items-center gap-2 flex-wrap mt-2">
+            <div className="flex items-center justify-center md:justify-start gap-2 flex-wrap mt-2">
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#e8f0fe] text-[#1967d2]">
                 <GraduationCap size={11} /> Student
               </span>
@@ -103,7 +104,7 @@ export default function StudentDetailPanel({ student, onClose, onEdit, onDelete 
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-4 mb-8 pb-6 border-b border-[var(--color-border)]">
+        <div className="flex items-center justify-center md:justify-start gap-4 mb-8 pb-6 border-b border-[var(--color-border)]">
           {student.email && (
             <a href={`mailto:${student.email}`} className="flex flex-col items-center gap-1.5 p-3 rounded-xl transition-colors hover:bg-[var(--color-bg-surface-2)]">
               <span className="w-10 h-10 rounded-full flex items-center justify-center bg-[var(--color-bg-surface-2)] text-[var(--color-text-secondary)]"><Mail size={18} /></span>

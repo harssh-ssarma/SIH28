@@ -503,8 +503,8 @@ export default function DataTable<T extends Record<string, unknown>>({
 
   return (
     <div className="flex flex-col">
-      {/* Table */}
-      <div className="overflow-x-auto">
+      {/* ══ Desktop table — hidden on mobile ═══════════════════════════════ */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full border-collapse">
           {/* Column headers */}
           <thead>
@@ -946,10 +946,93 @@ export default function DataTable<T extends Record<string, unknown>>({
         </table>
       </div>
 
-      {/* Pagination */}
+      {/* ══ Mobile card list — Google Contacts style, visible <768 px only ═ */}
+      <div className="block md:hidden">
+        {loading ? (
+          Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-[rgba(0,0,0,0.06)] animate-pulse">
+              <span className="loading-skeleton w-10 h-10 rounded-full shrink-0" />
+              <div className="flex-1 space-y-2">
+                <span className="loading-skeleton block h-3.5 rounded w-2/3" />
+                <span className="loading-skeleton block h-3 rounded w-1/2" />
+              </div>
+              <span className="loading-skeleton h-5 w-16 rounded-full shrink-0" />
+            </div>
+          ))
+        ) : data.length === 0 ? (
+          emptyState ? (
+            <div className="flex flex-col items-center gap-3 py-16" style={{ color: 'var(--color-text-secondary)' }}>
+              {(() => { const Icon = emptyState.icon; return <Icon size={40} strokeWidth={1.5} /> })()}
+              <p className="font-medium" style={{ fontSize: '15px', color: 'var(--color-text-primary)' }}>{emptyState.title}</p>
+              {emptyState.description && <p style={{ fontSize: '13px' }}>{emptyState.description}</p>}
+              {emptyState.action && <button className="btn-primary mt-1" onClick={emptyState.action.onClick}>{emptyState.action.label}</button>}
+            </div>
+          ) : null
+        ) : (
+          data.map(row => {
+            const id = getId(row)
+            const nameStr = avatarColumn ? (avatarColumn(row) ?? '') : ''
+            const primaryCol = displayColumns[0]
+            const secondaryCol = displayColumns[1]
+            return (
+              <div
+                key={id}
+                role={onRowClick ? 'button' : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onKeyDown={onRowClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') onRowClick(row) } : undefined}
+                className="flex items-center gap-3 px-4 py-3 border-b border-[rgba(0,0,0,0.06)] transition-colors"
+                style={{
+                  cursor: onRowClick ? 'pointer' : 'default',
+                  background: 'var(--color-bg-surface)',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+                onTouchStart={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--row-hover-bg)' }}
+                onTouchEnd={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--color-bg-surface)' }}
+              >
+                {nameStr && <Avatar name={nameStr} size={40} className="shrink-0" />}
+                <div className="flex-1 min-w-0 overflow-hidden">
+                  {primaryCol && (
+                    <div className="truncate" style={{ fontSize: '14px', color: 'var(--color-text-primary)' }}>
+                      {primaryCol.render ? primaryCol.render(row[primaryCol.key], row) : String(row[primaryCol.key] ?? '')}
+                    </div>
+                  )}
+                </div>
+                {secondaryCol && (
+                  <div className="shrink-0 ml-2">
+                    {secondaryCol.render
+                      ? secondaryCol.render(row[secondaryCol.key], row)
+                      : <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>{String(row[secondaryCol.key] ?? '')}</span>
+                    }
+                  </div>
+                )}
+              </div>
+            )
+          })
+        )}
+        {/* Mobile pagination */}
+        {showPagination && !loading && (
+          <div
+            className="flex items-center justify-between px-4 py-3 border-t border-[rgba(0,0,0,0.06)]"
+            style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}
+          >
+            <span>{pageStart}–{pageEnd} of {totalCount}</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => onPageChange?.(page - 1)} disabled={page <= 1}
+                className="p-1.5 rounded-full hover:bg-[var(--row-hover-bg)] disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Previous page"><ChevronLeft size={18} /></button>
+              <button onClick={() => onPageChange?.(page + 1)} disabled={page >= totalPages}
+                className="p-1.5 rounded-full hover:bg-[var(--row-hover-bg)] disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Next page"><ChevronRight size={18} /></button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ══ Desktop pagination — hidden on mobile ═══════════════════════════ */}
       {showPagination && !loading && (
         <div
-          className="flex items-center justify-end gap-1 px-4"
+          className="hidden md:flex items-center justify-end gap-1 px-4"
           style={{ height: '52px', borderTop: '1px solid rgba(0,0,0,0.06)', fontSize: '13px', color: 'var(--color-text-secondary)' }}
         >
           <span className="mr-2">{pageStart}–{pageEnd} of {totalCount}</span>

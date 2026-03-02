@@ -197,6 +197,52 @@ export function TimetableCardSkeleton() {
 }
 
 /**
+ * VariantCardSkeleton – placeholder for a single timetable variant selection
+ * card on the review page. Mirrors the real card's header / score section /
+ * footer-button layout while data is loading.
+ */
+export function VariantCardSkeleton() {
+  return (
+    <div
+      style={{
+        background: 'var(--color-bg-surface)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-lg)',
+        padding: '20px',
+      }}
+      className="space-y-3"
+    >
+      {/* Header: title + recommended badge */}
+      <div className="flex justify-between items-start">
+        <Skeleton style={{ height: '20px', width: '96px' }} />
+        <Skeleton style={{ height: '20px', width: '104px', borderRadius: 'var(--radius-pill)' }} />
+      </div>
+      {/* Overall score */}
+      <Skeleton style={{ height: '36px', width: '72px' }} />
+      {/* Three metric rows */}
+      <div className="space-y-2 pt-1">
+        <div className="flex justify-between">
+          <Skeleton style={{ height: '13px', width: '100px' }} />
+          <Skeleton style={{ height: '13px', width: '40px' }} />
+        </div>
+        <div className="flex justify-between">
+          <Skeleton style={{ height: '13px', width: '112px' }} />
+          <Skeleton style={{ height: '13px', width: '40px' }} />
+        </div>
+        <div className="flex justify-between">
+          <Skeleton style={{ height: '13px', width: '88px' }} />
+          <Skeleton style={{ height: '13px', width: '32px' }} />
+        </div>
+      </div>
+      {/* Footer: select button */}
+      <div className="flex justify-end pt-2">
+        <Skeleton style={{ height: '36px', width: '112px', borderRadius: 'var(--radius-md)' }} />
+      </div>
+    </div>
+  )
+}
+
+/**
  * TimetableListSkeleton – renders N placeholder cards for the admin timetables
  * list page. Shown immediately on mount, replaced by real data once loaded.
  */

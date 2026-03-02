@@ -8,7 +8,7 @@ export function ClashDetectionCard() {
             <p className="card-description text-xs sm:text-sm">Check for scheduling conflicts in your course selection</p>
           </div>
           <button className="btn-primary text-xs sm:text-sm px-3 py-2 h-8 sm:h-10 w-full sm:w-auto">
-            <span className="mr-1 sm:mr-2">\u{1F50D}</span>
+            <span className="mr-1 sm:mr-2">🔍</span>
             Run Clash Check
           </button>
         </div>

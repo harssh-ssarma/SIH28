@@ -69,6 +69,7 @@ export default function AppShell({ children }: AppShellProps) {
         mobileOpen={mobileOpen}
         isCollapsed={isCollapsed}
         pendingApprovals={pendingApprovals}
+        role={role}
         onCloseMobile={closeMobile}
       />
 

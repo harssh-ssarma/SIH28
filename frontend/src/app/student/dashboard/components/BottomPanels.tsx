@@ -108,7 +108,7 @@ export function CourseMaterialsPanel() {
           <div className="space-y-2">
             <button className="w-full p-3 bg-primary-50 dark:bg-primary-900/10 border border-primary-200 dark:border-primary-800 rounded-lg text-left hover:bg-primary-100 dark:hover:bg-primary-900/20 transition-colors">
               <div className="flex items-center gap-2">
-                <span className="text-sm">\u{1F4AC}</span>
+                <span className="text-sm">💬</span>
                 <div>
                   <p className="text-xs sm:text-sm font-medium text-primary-700 dark:text-primary-300">Course Scheduling Feedback</p>
                   <p className="text-xs text-primary-600 dark:text-primary-400">Share your thoughts on timetable conflicts</p>
