@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import apiClient from '@/lib/api'
-import { StudentWelcomeCard } from './_components/StudentWelcomeCard'
-import { TodaysClassesCard } from './_components/TodaysClassesCard'
-import { EnrollmentCard } from './_components/EnrollmentCard'
-import { AcademicSidePanel } from './_components/AcademicSidePanel'
-import { AssignmentsPanel, NotificationsPanel, CourseMaterialsPanel } from './_components/BottomPanels'
-import { ClashDetectionCard } from './_components/ClashDetectionCard'
-import type { StudentProfile, TodayClass } from './_components/types'
+import { StudentWelcomeCard } from './components/StudentWelcomeCard'
+import { TodaysClassesCard } from './components/TodaysClassesCard'
+import { EnrollmentCard } from './components/EnrollmentCard'
+import { AcademicSidePanel } from './components/AcademicSidePanel'
+import { AssignmentsPanel, NotificationsPanel, CourseMaterialsPanel } from './components/BottomPanels'
+import { ClashDetectionCard } from './components/ClashDetectionCard'
+import type { StudentProfile, TodayClass } from './components/types'
 
 interface TimetableSlot {
   slot_id: string

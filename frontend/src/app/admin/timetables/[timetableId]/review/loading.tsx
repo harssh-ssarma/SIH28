@@ -1,6 +1,7 @@
 'use client'
 
-import { VariantCardSkeleton, TimetableGridSkeleton, Skeleton } from '@/components/LoadingSkeletons'
+import { VariantCardSkeleton } from '@/components/timetables/VariantGrid'
+import { TimetableGridSkeleton, Skeleton } from '@/components/LoadingSkeletons'
 
 export default function ReviewLoading() {
   return (

@@ -219,26 +219,6 @@ export function TimetableListSkeleton({ cards = 6 }: { cards?: number }) {
 }
 
 /**
- * VariantCardSkeleton – mimics a single variant comparison card on the review page.
- */
-export function VariantCardSkeleton() {
-  return (
-    <div className="rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 space-y-3 shadow-sm">
-      <div className="flex justify-between items-center">
-        <Skeleton className="h-5 w-28 dark:bg-gray-600" />
-        <Skeleton className="h-10 w-10 rounded-full dark:bg-gray-600" />
-      </div>
-      <div className="space-y-2">
-        <Skeleton className="h-3 w-full dark:bg-gray-600" />
-        <Skeleton className="h-3 w-4/5 dark:bg-gray-600" />
-        <Skeleton className="h-3 w-3/5 dark:bg-gray-600" />
-      </div>
-      <Skeleton className="h-8 w-full rounded-lg dark:bg-gray-600" />
-    </div>
-  )
-}
-
-/**
  * TimetableGridSkeleton – mimics the week-view table while entries are loading.
  * Shows 5 day columns × 8 time-slot rows of shimmering placeholders.
  */

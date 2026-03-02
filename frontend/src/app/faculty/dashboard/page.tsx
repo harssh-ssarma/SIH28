@@ -3,13 +3,13 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import apiClient from '@/lib/api'
-import { AssignedSubjectsCard } from './_components/AssignedSubjectsCard'
-import { WeeklyScheduleCard } from './_components/WeeklyScheduleCard'
-import { FacultyProfileCard } from './_components/FacultyProfileCard'
-import { FacultyQuickStats } from './_components/FacultyQuickStats'
-import type { Subject } from './_components/AssignedSubjectsCard'
-import type { FacultyProfile } from './_components/FacultyProfileCard'
-import type { TimeSlot } from './_components/WeeklyScheduleCard'
+import { AssignedSubjectsCard } from './components/AssignedSubjectsCard'
+import { WeeklyScheduleCard } from './components/WeeklyScheduleCard'
+import { FacultyProfileCard } from './components/FacultyProfileCard'
+import { FacultyQuickStats } from './components/FacultyQuickStats'
+import type { Subject } from './components/AssignedSubjectsCard'
+import type { FacultyProfile } from './components/FacultyProfileCard'
+import type { TimeSlot } from './components/WeeklyScheduleCard'
 
 interface TimetableSlot {
   slot_id: string

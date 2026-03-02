@@ -25,10 +25,10 @@ interface VariantGridProps {
 }
 
 // ---------------------------------------------------------------------------
-// Skeleton card
+// Skeleton card (exported so review/loading.tsx can use it directly)
 // ---------------------------------------------------------------------------
 
-function VariantCardSkeleton() {
+export function VariantCardSkeleton() {
   return (
     <div style={{
       background: 'var(--color-bg-surface)',
