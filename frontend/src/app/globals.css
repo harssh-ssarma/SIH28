@@ -31,28 +31,9 @@
   --text-4xl:  40px;
   --text-5xl:  48px;
 
-  /* Spacing */
-  --space-1:  4px;
-  --space-2:  8px;
-  --space-3:  12px;
-  --space-4:  16px;
-  --space-6:  24px;
-  --space-8:  32px;
-  --space-10: 40px;
-  --space-12: 48px;
+  /* Extended spacing — used by marketing pages (--space-1..12 in main token block) */
   --space-16: 64px;
   --space-20: 80px;
-
-  /* Radius */
-  --radius-sm:   8px;
-  --radius-md:   12px;
-  --radius-lg:   16px;
-  --radius-pill: 20px;
-
-  /* Elevation */
-  --shadow-sm: 0 1px 2px rgba(60,64,67,0.10), 0 1px 3px 1px rgba(60,64,67,0.08);
-  --shadow-md: 0 1px 2px rgba(60,64,67,0.15), 0 2px 6px 2px rgba(60,64,67,0.10);
-  --shadow-lg: 0 2px 6px rgba(60,64,67,0.15), 0 4px 24px rgba(60,64,67,0.12);
 }
 
 .dark {
@@ -115,14 +96,13 @@
   --color-header-bg:     #FFFFFF;
   --color-header-border: #DADCE0;
   --color-search-bg:     #F1F3F4;
-  --header-height:       56px;
   --header-height-md:    64px;          /* desktop header (md+: h-16) */
-  --sidebar-width-expanded:  256px;
+  --sidebar-width-expanded:  284px;
   --sidebar-width-collapsed: 72px;
 
   /* ── NEW: ProfileDropdown — Dropdown & Sheet surfaces ── */
-  --color-dropdown-bg:   #fcfcfc;       /* Profile dropdown surface */
-  --color-sheet-bg:      #fcfcfc;       /* Mobile sheet surface */
+  --color-dropdown-bg:   #eceff5;       /* Profile dropdown surface */
+  --color-sheet-bg:      #eceff5;       /* Mobile sheet surface */
   --color-sheet-shadow:  0 -2px 12px rgba(60,64,67,0.15);
 
   /* Elevation */
@@ -181,7 +161,7 @@
   --bulk-selected-text:  #202124;
 
   /* ── Sidebar nav tokens ── */
-  --nav-item-height:     40px;
+  --nav-item-height:     44px;
   --nav-item-radius:     24px;
   --nav-active-bg:       #c2e7ff;
   --nav-active-color:    #001d35;
@@ -719,25 +699,6 @@
     box-shadow: 0 0 0 2px var(--color-danger-subtle);
   }
 
-  .input-field {
-    width: 100%;
-    height: 36px;
-    padding: 0 12px;
-    background: var(--color-bg-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    font-size: 14px;
-    color: var(--color-text-primary);
-    transition: border-color 150ms;
-  }
-  .input-field::placeholder { color: var(--color-text-muted); }
-  .input-field:focus {
-    outline: none;
-    border-color: var(--color-border-focus);
-    box-shadow: 0 0 0 2px var(--color-primary-subtle);
-  }
-  .input-field:disabled { background: var(--color-bg-surface-2); cursor: not-allowed; opacity: 0.6; }
-
   /* Header search bar */
   .header-search {
     background: var(--color-bg-surface-2);
@@ -791,57 +752,6 @@
     margin-top: 2px;
   }
 
-  /* ── Header Buttons ──────────────────────────────────────────────────────── */
-  .header-circle-btn {
-    width: 40px;
-    height: 56px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--color-text-secondary);
-    border-radius: var(--radius-md);
-    transition: background-color 100ms;
-  }
-  .header-circle-btn:hover { background-color: var(--color-bg-surface-2); }
-
-  .header-circle-btn-primary {
-    width: 40px;
-    height: 40px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background-color: var(--color-primary);
-    color: var(--color-text-inverse);
-    border-radius: var(--radius-md);
-  }
-  .header-circle-btn-primary:hover { background-color: var(--color-primary-hover); }
-
-  .header-circle-notification {
-    width: 40px;
-    height: 56px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--color-text-secondary);
-    border-radius: var(--radius-md);
-    position: relative;
-    transition: background-color 100ms;
-  }
-  .header-circle-notification:hover { background-color: var(--color-bg-surface-2); }
-
-  .header-circle-logo {
-    width: 32px;
-    height: 32px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background-color: var(--color-primary-subtle);
-    color: var(--color-primary);
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    font-weight: 600;
-  }
-
   .notification-badge {
     position: absolute;
     top: 10px;
@@ -850,37 +760,6 @@
     height: 8px;
     background: var(--color-danger);
     border-radius: 9999px;
-  }
-
-  /* ── Navigation ──────────────────────────────────────────────────────────── */
-  .nav-link {
-    display: flex;
-    align-items: center;
-    padding: 8px 12px;
-    color: var(--color-text-secondary);
-    border-radius: var(--radius-md);
-    font-size: 14px;
-    font-weight: 500;
-    text-decoration: none;
-    min-height: 44px;
-    transition: background-color 100ms;
-  }
-  .nav-link:hover {
-    background-color: var(--color-bg-surface-2);
-    color: var(--color-text-primary);
-  }
-
-  .nav-link-active {
-    display: flex;
-    align-items: center;
-    padding: 8px 12px;
-    background: #1967D2;
-    color: white;
-    border-radius: var(--radius-md);
-    font-size: 14px;
-    font-weight: 600;
-    text-decoration: none;
-    min-height: 44px;
   }
 
   /* ── Badges ──────────────────────────────────────────────────────────────── */
@@ -1041,20 +920,11 @@
   }
 
   /* ── Material-Design indeterminate spinner — CSS class helper ──────────── */
-  /* For border-based divs: .loading-spinner .loading-spinner-dark            */
+  /* For border-based divs: .loading-spinner                                  */
   /* Single blue accent — no color transitions.                               */
 
   /* Loading States */
   .loading-spinner {
-    display: inline-block;
-    border-radius: 9999px;
-    border-style: solid;
-    border-color: var(--spinner-track);
-    border-top-color: var(--spinner-color);
-    animation: gsp-rotate 2s linear infinite;
-  }
-
-  .loading-spinner-dark {
     display: inline-block;
     border-radius: 9999px;
     border-style: solid;
@@ -1285,7 +1155,7 @@
   }
   .profile-email {
     font-size: 15px;
-    font-weight: 400;
+    font-weight: 500;
     font-family: var(--font-body);
     color: var(--color-text-primary);
     overflow: hidden;
@@ -1297,8 +1167,8 @@
   .profile-close-btn {
     position: absolute;
     right: var(--space-3);
-    width: 32px;
-    height: 32px;
+    width: 40px;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1353,10 +1223,14 @@
     border: 1px solid var(--color-border);
     overflow: hidden;
   }
-  .dark .profile-card { background: var(--color-bg-surface-2); }
-  .profile-card-split {
+  /* Split variant: no shared background/border — each item is its own button */
+  .profile-card.profile-card-split {
+    background: transparent;
+    border: none;
+    overflow: visible;
     display: flex;
-    min-height: 52px;
+    gap: 2px;
+    min-height: 56px;
   }
   .profile-card-split-item {
     flex: 1;
@@ -1364,31 +1238,41 @@
     align-items: center;
     justify-content: flex-start;
     gap: var(--space-2);
-    padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5);
+    padding: var(--space-3) var(--space-4);
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 400;
     font-family: var(--font-label);
     color: var(--color-text-primary);
-    background: transparent;
-    border: none;
+    background: #FFFFFF;
+    border: 1px solid var(--color-border);
     cursor: pointer;
     transition: background 120ms;
     text-decoration: none;
+    border-radius: var(--radius-extra-large);
+    height: 56px;
   }
-  .profile-card-split-item:hover { background: var(--color-bg-surface-2); }
-  .profile-card-split-divider {
-    width: 1px;
-    margin: var(--space-2) 0;
-    background: var(--color-border);
-    flex-shrink: 0;
+  .dark .profile-card-split-item {
+    background: var(--color-bg-surface-2);
   }
+  /* Left button — fully rounded left, slightly rounded right */
+  .profile-card-split-item:first-child {
+    border-radius: var(--radius-extra-large) 8px 8px var(--radius-extra-large);
+  }
+  /* Right button — slightly rounded left, fully rounded right */
+  .profile-card-split-item:last-child {
+    border-radius: 8px var(--radius-extra-large) var(--radius-extra-large) 8px;
+  }
+  .profile-card-split-item:hover { background: rgba(68,71,70,0.08); }
+  .dark .profile-card-split-item:hover { background: rgba(255,255,255,0.08); }
+  .profile-card-split-divider { display: none; }
   .profile-menu-item {
     display: flex;
     align-items: center;
     gap: var(--space-3);
     padding: 0 var(--space-4);
-    height: var(--row-height);
+    height: 56px;
     font-size: 14px;
+    font-weight: 400;
     font-family: var(--font-body);
     color: var(--color-text-primary);
     background: transparent;
@@ -1399,14 +1283,15 @@
     width: 100%;
     text-align: left;
   }
-  .profile-menu-item:hover { background: var(--color-bg-surface-2); }
+  .profile-menu-item:hover { background: rgba(68,71,70,0.08); }
+  .dark .profile-menu-item:hover { background: rgba(255,255,255,0.08); }
   .profile-menu-divider {
     height: 1px;
     background: var(--color-border);
     margin: 0 var(--space-4);
   }
   .profile-icon {
-    color: var(--color-text-secondary);
+    color: var(--color-text-primary);
     flex-shrink: 0;
   }
   .profile-footer {
@@ -1422,100 +1307,6 @@
   }
   .profile-footer a:hover { text-decoration: underline; }
 
-  /* ── NEW: Bottom Sheet — mobile profile panel ───────────────────────────── */
-  .sheet-scrim {
-    position: fixed;
-    inset: 0;
-    background: var(--color-bg-overlay);
-    z-index: 980;
-    animation: sheet-scrim-in 200ms ease forwards;
-  }
-  .sheet-container {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 990;
-    background: var(--color-sheet-bg);
-    border-radius: var(--radius-extra-large) var(--radius-extra-large) 0 0;
-    box-shadow: var(--color-sheet-shadow);
-    padding-bottom: env(safe-area-inset-bottom);
-    max-width: 640px;
-    margin: 0 auto;
-    animation: sheet-up 200ms ease-out forwards;
-  }
-  .sheet-handle {
-    width: 32px;
-    height: 4px;
-    background: var(--color-border-strong);
-    border-radius: var(--radius-full);
-    margin: var(--space-3) auto 0;
-    flex-shrink: 0;
-    align-self: center;
-  }
-  .sheet-account-header {
-    padding: var(--space-4) var(--space-4) var(--space-3);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-2);
-    text-align: center;
-    border-bottom: 1px solid var(--color-border);
-  }
-  .sheet-account-name {
-    font-size: 16px;
-    font-weight: 500;
-    font-family: var(--font-heading);
-    color: var(--color-text-primary);
-  }
-  .sheet-account-email {
-    font-size: 14px;
-    font-family: var(--font-body);
-    color: var(--color-text-secondary);
-  }
-  .sheet-manage-btn {
-    display: inline-flex;
-    align-items: center;
-    height: 36px;
-    padding: 0 var(--space-4);
-    margin-top: var(--space-2);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-full);
-    font-size: 14px;
-    font-weight: 500;
-    font-family: var(--font-label);
-    color: var(--color-text-primary);
-    background: transparent;
-    cursor: pointer;
-    transition: background 150ms;
-    text-decoration: none;
-  }
-  .sheet-manage-btn:hover { background: rgba(var(--color-primary-rgb), 0.08); }
-  .sheet-nav-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    height: var(--row-height);
-    padding: 0 var(--space-4);
-    font-size: 14px;
-    font-family: var(--font-body);
-    color: var(--color-text-primary);
-    cursor: pointer;
-    transition: background 120ms;
-    border-radius: 0;
-    width: 100%;
-    text-align: left;
-    background: transparent;
-    border: none;
-    text-decoration: none;
-  }
-  .sheet-nav-item:hover     { background: rgba(0,0,0,0.08); }
-  .dark .sheet-nav-item:hover { background: rgba(255,255,255,0.08); }
-  .sheet-divider {
-    height: 1px;
-    background: var(--color-border);
-    margin: var(--space-1) 0;
-  }
 }
 
 @layer utilities {
@@ -1530,7 +1321,7 @@
 
   /* ProfileDropdown scrollable cards area — 6px Google-style scrollbar */
   .profile-scroll {
-    max-height: 280px;
+    max-height: 400px;
     scrollbar-width: thin;
     scrollbar-color: rgba(95,99,104,0.35) transparent;
   }
@@ -1610,25 +1401,6 @@
     background-size: 800px 100%;
     animation: shimmer 1.6s infinite linear;
   }
-
-  /* Mobile bottom-sheet modal animations */
-  @keyframes sheet-up {
-    from { transform: translateY(100%); }
-    to   { transform: translateY(0); }
-  }
-  @keyframes sheet-down {
-    from { transform: translateY(0); }
-    to   { transform: translateY(100%); }
-  }
-  .animate-sheet-up   { animation: sheet-up   200ms ease-out forwards; }
-  .animate-sheet-down { animation: sheet-down 180ms ease-in  forwards; }
-
-  /* ── NEW: sheet scrim fade-in ── */
-  @keyframes sheet-scrim-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-  }
-  .animate-sheet-scrim-in { animation: sheet-scrim-in 200ms ease forwards; }
 
   /* Reverse shimmer — used by progress bar animations below */
   @keyframes shimmer-reverse {

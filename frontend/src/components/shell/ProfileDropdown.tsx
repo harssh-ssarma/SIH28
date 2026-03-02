@@ -60,7 +60,7 @@ export default function ProfileDropdown({
           : <span className="profile-email">{user?.email ?? ''}</span>
         }
         <button onClick={onClose} aria-label="Close" className="profile-close-btn">
-          <X size={16} />
+          <X size={20} />
         </button>
       </div>
 
@@ -87,25 +87,25 @@ export default function ProfileDropdown({
         {/* Profile | Sign out — pill split card */}
         <div className="profile-card profile-card-split">
           <Link href={`/${role}/profile`} onClick={onClose} className="profile-card-split-item">
-            <UserIcon size={15} className="profile-icon" /> Profile
+            <UserIcon size={20} className="profile-icon" /> Profile
           </Link>
           <div className="profile-card-split-divider" />
           <button onClick={onSignOut} className="profile-card-split-item">
-            <LogOut size={15} className="profile-icon" /> Sign out
+            <LogOut size={20} className="profile-icon" /> Sign out
           </button>
         </div>
 
         {/* Settings + Theme toggle */}
         <div className="profile-card">
           <Link href={`/${role}/settings`} onClick={onClose} className="profile-menu-item">
-            <Settings size={18} className="profile-icon" />
+            <Settings size={22} className="profile-icon" />
             <span className="flex-1">Settings</span>
           </Link>
           <div className="profile-menu-divider" />
           <button onClick={toggleTheme} className="profile-menu-item">
             {mounted && resolvedTheme === 'dark'
-              ? <Sun  size={18} className="profile-icon" />
-              : <Moon size={18} className="profile-icon" />
+              ? <Sun  size={22} className="profile-icon" />
+              : <Moon size={22} className="profile-icon" />
             }
             <span className="flex-1">
               {mounted && resolvedTheme === 'dark' ? 'Light mode' : 'Dark mode'}
@@ -116,12 +116,12 @@ export default function ProfileDropdown({
         {/* Language | Help */}
         <div className="profile-card profile-card-split">
           <button className="profile-card-split-item">
-            <Globe      size={17} className="profile-icon" />
+            <Globe      size={20} className="profile-icon" />
             <span>Language</span>
           </button>
           <div className="profile-card-split-divider" />
           <button className="profile-card-split-item">
-            <HelpCircle size={17} className="profile-icon" />
+            <HelpCircle size={20} className="profile-icon" />
             <span>Help</span>
           </button>
         </div>

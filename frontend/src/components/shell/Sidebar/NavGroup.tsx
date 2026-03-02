@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import type { NavGroup } from '../hooks/useNavItems'
 
@@ -29,59 +30,57 @@ export default function NavGroupRow({
   }, [isChildActive])
 
   const Icon = group.icon
+  const router = useRouter()
 
-  // Rail (collapsed sidebar): show only the icon; clicking goes to first child
-  if (collapsed) {
-    return (
-      <Link
-        href={group.children[0]?.href ?? '#'}
-        onClick={onLinkClick}
-        title={group.label}
-        className={[
-          'relative flex items-center justify-center w-[44px] h-[44px] rounded-full mx-auto transition-colors duration-150 select-none',
-          isChildActive
-            ? 'bg-[#c2e7ff] dark:bg-[#1C2B4A] text-[#001d35] dark:text-[#8AB4F8]'
-            : 'text-[#444746] dark:text-[#bdc1c6] hover:bg-[#e8f0fe] dark:hover:bg-[#1a2640]',
-        ].join(' ')}
-      >
-        <Icon size={20} strokeWidth={isChildActive ? 2.2 : 1.8} />
-        <span className="sr-only">{group.label}</span>
-      </Link>
-    )
-  }
-
+  // ── Single render path for both collapsed (rail) and expanded states ──
+  // Using CSS transitions (same approach as NavItem) avoids the React unmount/remount
+  // that caused Academics to appear "late" relative to other nav items.
   return (
-    <div className="flex flex-col items-center">
-      {/* Group header button */}
+    <div className="flex flex-col">
+      {/* Group header — behaves as a link in rail mode, button when expanded */}
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!collapsed) setOpen((v) => !v)
+          else if (group.children[0]) { router.push(group.children[0].href); onLinkClick?.() }
+        }}
+        title={collapsed ? group.label : undefined}
         className={[
-          'w-[244.8px] flex items-center gap-3 px-[18px] h-[44px] rounded-[24px] transition-colors duration-150 select-none relative',
-          isChildActive && !open
+          'relative flex items-center h-[44px] transition-colors duration-150 select-none',
+          collapsed
+            ? 'justify-center gap-0 w-[44px] rounded-full mx-auto'
+            : 'gap-3 px-[18px] w-[244.8px] rounded-[24px] mx-auto',
+          isChildActive
             ? 'bg-[#c2e7ff] dark:bg-[#1C2B4A] text-[#001d35] dark:text-[#e3e3e3]'
             : 'text-[#444746] dark:text-[#bdc1c6] hover:bg-[#e8f0fe] dark:hover:bg-[#1a2640]',
         ].join(' ')}
       >
-        {/* Chevron sits to the extreme left, same row */}
+        {/* Chevron — only visible when expanded */}
         <ChevronDown
           size={14}
           strokeWidth={2.5}
-          className={`absolute left-1 shrink-0 transition-transform duration-200 ${open ? 'rotate-0' : '-rotate-90'}`}
+          className={[
+            'absolute left-1 shrink-0 transition-[opacity,transform] duration-200',
+            collapsed ? 'opacity-0' : 'opacity-100',
+            open ? 'rotate-0' : '-rotate-90',
+          ].join(' ')}
         />
         <Icon size={20} strokeWidth={isChildActive ? 2.4 : 1.8} className="shrink-0" />
+        {/* Label — same fade transition as NavItem */}
         <span
           className={[
-            'hhIRA text-[14px] text-left',
+            'text-[14px] transition-[opacity] duration-200 text-left',
             isChildActive ? 'font-bold text-[#1f1f1f]' : 'font-medium text-[#444746]',
+            collapsed ? 'opacity-0 w-0 overflow-hidden' : 'hhIRA opacity-100',
           ].join(' ')}
         >
           {group.label}
         </span>
+        {collapsed && <span className="sr-only">{group.label}</span>}
       </button>
 
-      {/* Sub-items — stacked below the group header */}
-      {open && (
-        <div className="w-[244.8px] flex flex-col pl-8 mt-0.5">
+      {/* Sub-items */}
+      {!collapsed && open && (
+        <div className="w-[244.8px] flex flex-col pl-8 mt-0.5 mx-auto">
           {group.children.map((child) => {
             const active =
               pathname === child.href || pathname.startsWith(child.href + '/')

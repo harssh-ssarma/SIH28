@@ -71,20 +71,20 @@ export default function Header({
         <button
           onClick={onMenuClick}
           aria-label="Toggle sidebar"
-          className="w-10 h-10 flex items-center justify-center rounded-full text-[#444746] dark:text-[#bdc1c6] hover:bg-[rgba(68,71,70,0.08)] dark:hover:bg-[rgba(255,255,255,0.08)] transition-colors"
+          className="w-11 h-11 flex items-center justify-center rounded-full text-[#444746] dark:text-[#bdc1c6] hover:bg-[rgba(68,71,70,0.08)] dark:hover:bg-[rgba(255,255,255,0.08)] transition-colors shrink-0"
         >
           <svg
-            width="20"
-            height="20"
-            viewBox="0 0 20 20"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.75"
             strokeLinecap="round"
           >
-            <line x1="3" y1="5"  x2="17" y2="5" />
-            <line x1="3" y1="10" x2="17" y2="10" />
-            <line x1="3" y1="15" x2="17" y2="15" />
+            <line x1="3" y1="6"  x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
 
@@ -131,7 +131,7 @@ export default function Header({
         </button>
 
         {/* Avatar + profile dropdown — separated to far right */}
-        <div className="relative ml-2 pl-2 border-l border-[rgba(0,0,0,0.08)] dark:border-[rgba(255,255,255,0.08)]" ref={profileRef}>
+        <div className="relative ml-2" ref={profileRef}>
           <button
             onClick={() => setProfileOpen((v) => !v)}
             aria-label="Account menu"
