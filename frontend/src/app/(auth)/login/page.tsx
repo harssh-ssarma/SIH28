@@ -47,9 +47,22 @@ export default function LoginPage() {
       const raw = localStorage.getItem('user')
       const role = raw ? (JSON.parse(raw).role?.toLowerCase() ?? '') : ''
       router.push(ROLE_DASHBOARD[role] ?? '/admin/dashboard')
-    } catch {
+    } catch (err) {
       cardProgressRef.current?.reset()
-      setLoginError('Wrong username or password. Try again.')
+      const status = (err as any)?.status ?? 0
+      const msg    = err instanceof Error ? err.message : ''
+
+      if (status === 0 || msg === 'Failed to fetch' || msg.toLowerCase().includes('networkerror')) {
+        // fetch() threw — server is not reachable at all
+        setLoginError('Cannot connect to the server. Please make sure the backend is running.')
+      } else if (status >= 500) {
+        setLoginError('Server error. Please try again in a moment.')
+      } else if (status === 403) {
+        setLoginError('Your account has been disabled. Contact your administrator.')
+      } else {
+        // 401 or any other auth failure — wrong credentials
+        setLoginError('Wrong username or password. Try again.')
+      }
     } finally {
       setIsLoading(false)
     }

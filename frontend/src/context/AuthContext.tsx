@@ -73,7 +73,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.error || !response.data) {
         setError(response.error || 'Login failed')
         setIsLoading(false)
-        throw new Error(response.error || 'Invalid credentials')
+        // Attach the HTTP status to the error so the login page can show
+        // the right message (network down vs. wrong password vs. server error)
+        const err = new Error(response.error || 'Invalid credentials') as Error & { status: number }
+        err.status = response.status
+        throw err
       }
 
       // 🔐 JWT tokens are set in HttpOnly cookies by backend
