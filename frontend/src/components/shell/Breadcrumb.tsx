@@ -27,14 +27,14 @@ export interface BreadcrumbItem {
 const ROUTES: Array<{ pattern: RegExp; crumbs: () => BreadcrumbItem[] }> = [
   // ── Admin: Timetables deep pages ────────────────────────────────────────
   {
-    pattern: /^\/admin\/timetables\/compare\//,
+    pattern: /^\/admin\/timetables\/[^/]+\/compare/,
     crumbs: () => [
       { label: 'Timetables', href: '/admin/timetables' },
       { label: 'Compare Variants' },
     ],
   },
   {
-    pattern: /^\/admin\/timetables\/status\//,
+    pattern: /^\/admin\/timetables\/[^/]+\/status/,
     crumbs: () => [
       { label: 'Timetables', href: '/admin/timetables' },
       { label: 'Generation Status' },
@@ -137,6 +137,7 @@ const SUPPRESS_ROUTES: RegExp[] = [
   /^\/admin\/admins/,
   /^\/admin\/faculty/,
   /^\/admin\/students/,
+  /^\/admin\/approvals/,
   // Timetable pages — all render their own PageHeader or are full-screen overlays
   /^\/admin\/timetables/,
 ]

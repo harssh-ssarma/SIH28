@@ -265,7 +265,7 @@ export default function AdminTimetablesPage() {
               <RunningJobRow
                 key={job.job_id}
                 job={job}
-                onNavigate={() => router.push(`/admin/timetables/status/${job.job_id}`)}
+                onNavigate={() => router.push(`/admin/timetables/${job.job_id}/status`)}
                 onJobFailed={(jobId) => {
                   setTerminatedJobIds(prev => new Set(prev).add(jobId))
                   loadTimetableData()
@@ -345,7 +345,7 @@ export default function AdminTimetablesPage() {
                           .sort((a, b) => (a.department ?? '').localeCompare(b.department ?? ''))
                           .map(t => {
                             const isRunning = runningJobs.some(j => j.job_id === t.id)
-                            const href = isRunning ? `/admin/timetables/status/${t.id}` : `/admin/timetables/${t.id}/review`
+                            const href = isRunning ? `/admin/timetables/${t.id}/status` : `/admin/timetables/${t.id}/review`
                             return (
                               <Link
                                 key={t.id}
@@ -398,7 +398,7 @@ export default function AdminTimetablesPage() {
                             .sort((a, b) => (a.department ?? '').localeCompare(b.department ?? ''))
                             .map(t => {
                               const isRunning = runningJobs.some(j => j.job_id === t.id)
-                              const href = isRunning ? `/admin/timetables/status/${t.id}` : `/admin/timetables/${t.id}/review`
+                              const href = isRunning ? `/admin/timetables/${t.id}/status` : `/admin/timetables/${t.id}/review`
                               return (
                                 <tr key={t.id} className="table-row cursor-pointer" onClick={() => router.push(href)}>
                                   <td className="table-cell font-medium">{t.department}</td>

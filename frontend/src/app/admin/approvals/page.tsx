@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckCircle, Clock, AlertTriangle, Zap, CheckCheck, X, Loader2 } from 'lucide-react'
 import apiClient from '@/lib/api'
 import { useToast } from '@/components/Toast'
+import PageHeader from '@/components/shared/PageHeader'
 import type { WorkflowListItem } from '@/types/timetable'
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -263,17 +264,20 @@ export default function AdminApprovals() {
   return (
     <div className="space-y-4 sm:space-y-6">
 
-      {/* Page Header */}
-      <div className="flex items-center justify-end">
-        <button
-          onClick={fetchWorkflows}
-          disabled={loading}
-          className="btn-secondary flex items-center gap-2 text-sm"
-        >
-          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="Approvals"
+        loading={loading}
+        secondaryActions={
+          <button
+            onClick={fetchWorkflows}
+            disabled={loading}
+            className="btn-secondary flex items-center gap-2 text-sm"
+          >
+            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            Refresh
+          </button>
+        }
+      />
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

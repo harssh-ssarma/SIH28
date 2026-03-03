@@ -61,7 +61,7 @@ export default function CompareVariantsPage() {
   const params       = useParams()
   const router       = useRouter()
   const searchParams = useSearchParams()
-  const jobId = params.jobId as string
+  const jobId = params.id as string
 
   // If the page was opened via ?a=&b= (from the review page), back should
   // always navigate back to the review page rather than dropping to the

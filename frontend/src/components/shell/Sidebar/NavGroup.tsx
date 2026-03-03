@@ -49,9 +49,9 @@ export default function NavGroupRow({
           collapsed
             ? 'justify-center gap-0 w-[44px] rounded-full mx-auto'
             : 'gap-3 px-[18px] w-[244.8px] rounded-[24px] mx-auto',
-          isChildActive
-            ? 'bg-[#c2e7ff] dark:bg-[#1C2B4A] text-[#001d35] dark:text-[#e3e3e3]'
-            : 'text-[#444746] dark:text-[#bdc1c6] hover:bg-[#e8f0fe] dark:hover:bg-[#1a2640]',
+          // Parent group never shows active state — only the leaf child does.
+          // Matches Google Drive: group header is always idle-styled, hover-only.
+          'text-[#444746] dark:text-[#bdc1c6] hover:bg-[#e8f0fe] dark:hover:bg-[#1a2640]',
         ].join(' ')}
       >
         {/* Chevron — only visible when expanded */}
@@ -64,12 +64,11 @@ export default function NavGroupRow({
             open ? 'rotate-0' : '-rotate-90',
           ].join(' ')}
         />
-        <Icon size={20} strokeWidth={isChildActive ? 2.4 : 1.8} className="shrink-0" />
+        <Icon size={20} strokeWidth={1.8} className="shrink-0" />
         {/* Label — same fade transition as NavItem */}
         <span
           className={[
-            'text-[14px] transition-[opacity] duration-200 text-left',
-            isChildActive ? 'font-bold text-[#1f1f1f]' : 'font-medium text-[#444746]',
+            'text-[14px] font-medium transition-[opacity] duration-200 text-left text-[#444746] dark:text-[#bdc1c6]',
             collapsed ? 'opacity-0 w-0 overflow-hidden' : 'hhIRA opacity-100',
           ].join(' ')}
         >

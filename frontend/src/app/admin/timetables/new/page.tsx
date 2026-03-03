@@ -130,7 +130,7 @@ export default function CreateTimetablePage() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Failed to start generation')
       if (data.success) {
-        router.push(`/admin/timetables/status/${data.job_id}`)
+        router.push(`/admin/timetables/${data.job_id}/status`)
       } else {
         throw new Error(data.error || 'Generation failed')
       }

@@ -145,7 +145,7 @@ function formatETADisplay(seconds: number | null): string {
 export default function TimetableStatusPage() {
   const params = useParams()
   const router = useRouter()
-  const jobId = params.jobId as string
+  const jobId = params.id as string
 
   const { progress, isConnected, error, reconnectAttempt } = useProgress(
     jobId,

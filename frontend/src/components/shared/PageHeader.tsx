@@ -33,6 +33,27 @@ export default function PageHeader({
 }: PageHeaderProps) {
   const ActionIcon = primaryAction?.icon ?? Plus
 
+  // ── Loading skeleton: mirrors the real layout so there's no layout shift ──
+  if (loading) {
+    return (
+      <div className="flex items-center justify-between gap-4 mb-1">
+        <div
+          className="h-8 rounded-full animate-pulse"
+          style={{ width: parentLabel ? 224 : 176, background: 'var(--color-bg-surface-2)' }}
+        />
+        <div className="flex items-center gap-2 shrink-0">
+          {secondaryActions}
+          {primaryAction && (
+            <div
+              className="h-10 w-40 rounded-full animate-pulse"
+              style={{ background: 'var(--color-bg-surface-2)' }}
+            />
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex items-center justify-between gap-4 mb-1">
       {/* Title / breadcrumb */}
@@ -73,7 +94,7 @@ export default function PageHeader({
           }}
         >
           {title}
-          {!loading && count !== undefined && (
+          {count !== undefined && (
             <span style={{ color: 'var(--color-text-secondary)' }}>
               {' '}({count.toLocaleString()})
             </span>

@@ -247,7 +247,7 @@ export default function TimetableReviewPage() {
   const router = useRouter()
   const { user } = useAuth()
   const { showSuccessToast, showErrorToast, showInfoToast } = useToast()
-  const workflowId = params.timetableId as string
+  const workflowId = params.id as string
 
   const API_BASE = process.env.NEXT_PUBLIC_DJANGO_API_URL || 'http://localhost:8000/api'
 
@@ -363,7 +363,7 @@ export default function TimetableReviewPage() {
 
       // Re-route if job is still running (status field is in the workflow response)
       if (workflowData.status === 'running' || workflowData.status === 'queued') {
-        router.push(`/admin/timetables/status/${workflowId}`)
+        router.push(`/admin/timetables/${workflowId}/status`)
         return
       }
 
@@ -969,7 +969,7 @@ export default function TimetableReviewPage() {
               if (v) loadVariantEntries(v)
             }}
             onCompare={(ids) =>
-              router.push(`/admin/timetables/compare/${workflowId}?a=${ids[0]}&b=${ids[1]}`)
+              router.push(`/admin/timetables/${workflowId}/compare?a=${ids[0]}&b=${ids[1]}`)
             }
             onPickVariant={(id) => handleVariantSelect(id)}
           />
