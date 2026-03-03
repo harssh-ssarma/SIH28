@@ -46,7 +46,10 @@ if SENTRY_DSN:
         dsn=SENTRY_DSN,
         integrations=[DjangoIntegration()],
         environment=SENTRY_ENVIRONMENT,
-        traces_sample_rate=1.0,  # Send all traces in development
+        # PERFORMANCE: 100% tracing in dev; 10% sampling in production.
+        # traces_sample_rate=1.0 means EVERY request gets a full trace — enormous
+        # CPU overhead at scale (Sentry themselves recommend ≤0.2 in production).
+        traces_sample_rate=1.0 if SENTRY_ENVIRONMENT != "production" else 0.1,
         send_default_pii=True,
         attach_stacktrace=True,
         before_send=strip_local_variables,  # Python 3.13 compatibility
@@ -97,6 +100,7 @@ MIDDLEWARE = [
     "django.middleware.gzip.GZipMiddleware",  # PERFORMANCE: Compress responses
     "django.middleware.http.ConditionalGetMiddleware",  # PERFORMANCE: ETag support
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # PERFORMANCE: Fast static files w/ immutable cache headers
     "csp.middleware.CSPMiddleware",  # SECURITY: Content-Security-Policy header
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -200,6 +204,21 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+
+# WhiteNoise: serve static files with long-lived immutable cache headers
+# CompressedManifestStaticFilesStorage appends a content hash to filenames
+# (e.g. app.abc123.js) so the browser can cache them for up to 1 year safely.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+# WhiteNoise: max-age for hashed static assets (1 year = immutable)
+WHITENOISE_MAX_AGE = 31536000
 
 # Media files
 MEDIA_URL = "/media/"

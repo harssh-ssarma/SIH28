@@ -12,6 +12,8 @@ import { useAuth } from '@/context/AuthContext'
 import { authenticatedFetch } from '@/lib/auth'
 import { useToast } from '@/components/Toast'
 import { TimetableGridSkeleton, VariantCardSkeleton, Skeleton } from '@/components/LoadingSkeletons'
+import PageHeader from '@/components/shared/PageHeader'
+import { CheckCircle, XCircle, Printer } from 'lucide-react'
 import { VariantGrid } from '@/components/timetables/VariantGrid'
 import { DepartmentTree } from '@/components/timetables/DepartmentTree'
 import { SlotDetailPanel } from '@/components/timetables/SlotDetailPanel'
@@ -605,17 +607,14 @@ export default function TimetableReviewPage() {
 
     if (entries.length === 0) {
       return (
-        <div className="flex flex-col items-center justify-center py-16" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="flex flex-col items-center justify-center py-16 text-[var(--color-text-muted)]">
           <svg className="w-12 h-12 mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
               d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           </svg>
           <p className="text-sm font-medium">No timetable entries loaded.</p>
           <p className="text-xs mt-1 opacity-70">The server may be slow. Click retry to try again.</p>
-          <button
-            onClick={() => loadVariantEntries(variant)}
-            className="mt-4 btn-primary text-xs"
-          >
+          <button onClick={() => loadVariantEntries(variant)} className="mt-4 btn-primary text-xs">
             Retry
           </button>
         </div>
@@ -671,11 +670,11 @@ export default function TimetableReviewPage() {
             <button
               key={i}
               onClick={() => setActiveDay(d)}
-              className="px-3 py-1 rounded-full text-xs font-medium transition-colors"
-              style={activeDay === d
-                ? { background: 'var(--color-primary)', color: '#fff' }
-                : { background: 'var(--color-bg-surface-2)', color: 'var(--color-text-secondary)' }
-              }
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                activeDay === d
+                  ? 'bg-[var(--color-primary)] text-white'
+                  : 'bg-[var(--color-bg-surface-2)] text-[var(--color-text-secondary)] hover:bg-[var(--color-primary-subtle)]'
+              }`}
             >
               {d === 'all' ? 'All Days' : DAY_SHORT[d as number]}
             </button>
@@ -683,18 +682,17 @@ export default function TimetableReviewPage() {
         </div>
 
         {/* Grid */}
-        <div className="overflow-x-auto rounded-xl shadow-sm print:shadow-none" style={{ border: '1px solid var(--color-border)' }}>
+        <div className="overflow-x-auto rounded-xl shadow-sm print:shadow-none border border-[var(--color-border)]">
           <table className="min-w-full text-xs border-collapse">
             <thead>
-              <tr style={{ background: 'var(--color-bg-surface-2)' }}>
-                <th className="sticky left-0 z-10 px-3 py-3 text-left font-semibold uppercase tracking-wider border-b border-r w-24 min-w-[6rem]" style={{ background: 'var(--color-bg-surface-2)', color: 'var(--color-text-muted)', borderColor: 'var(--color-border)' }}>
+              <tr className="bg-[var(--color-bg-surface-2)]">
+                <th className="sticky left-0 z-10 px-3 py-3 text-left font-semibold uppercase tracking-wider border-b border-r border-[var(--color-border)] w-24 min-w-[6rem] bg-[var(--color-bg-surface-2)] text-[var(--color-text-muted)]">
                   Time
                 </th>
                 {daysToShow.map(di => (
                   <th
                     key={di}
-                    className="px-3 py-3 text-center font-semibold uppercase tracking-wider border-b border-r min-w-[8rem]"
-                    style={{ color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)' }}
+                    className="px-3 py-3 text-center font-semibold uppercase tracking-wider border-b border-r border-[var(--color-border)] min-w-[8rem] text-[var(--color-text-secondary)]"
                   >
                     {DAYS[di]}
                   </th>
@@ -704,22 +702,21 @@ export default function TimetableReviewPage() {
             <tbody>
               {timeSlots.length === 0 ? (
                 <tr>
-                  <td colSpan={daysToShow.length + 1} className="py-10 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                  <td colSpan={daysToShow.length + 1} className="py-10 text-center text-sm text-[var(--color-text-muted)]">
                     No classes scheduled for this filter
                   </td>
                 </tr>
               ) : timeSlots.map(time => (
-                <tr key={time} className="group transition-colors" style={{ borderBottom: '1px solid var(--color-border)' }}>
+                <tr key={time} className="group transition-colors border-b border-[var(--color-border)]">
                   <td
-                    className="sticky left-0 z-10 px-3 py-3 font-medium border-r whitespace-nowrap align-top"
-                    style={{ background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)' }}
+                    className="sticky left-0 z-10 px-3 py-3 font-medium border-r border-[var(--color-border)] whitespace-nowrap align-top bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)]"
                   >
                     {time.includes('-') ? formatTimeRange(...time.split('-') as [string, string]) : time}
                   </td>
                   {daysToShow.map(di => {
                     const cellEntries = grid[`${di}-${time}`] ?? []
                     return (
-                      <td key={di} className="px-2 py-2 align-top border-r" style={{ borderColor: 'var(--color-border)' }}>
+                      <td key={di} className="px-2 py-2 align-top border-r border-[var(--color-border)]">
                         {cellEntries.length > 0 ? (
                           <div className="space-y-1.5">
                             {cellEntries.map((entry, idx) => {
@@ -731,11 +728,10 @@ export default function TimetableReviewPage() {
                               return (
                                 <div
                                   key={idx}
-                                  className="rounded-md overflow-hidden"
+                                  className="rounded-md overflow-hidden cursor-pointer"
                                   style={{
                                     borderLeft: `3px solid ${accent}`,
                                     background: bgTint,
-                                    cursor: 'pointer',
                                   }}
                                   onClick={() => setSelectedSlot(slotDetailed)}
                                   title="Click for details"
@@ -746,12 +742,12 @@ export default function TimetableReviewPage() {
                                       {entry.subject_code ?? '—'}
                                     </div>
                                     {/* Subject name */}
-                                    <div className="font-semibold text-[11px] leading-tight truncate" style={{ color: 'var(--color-text-primary)' }}>
+                                    <div className="font-semibold text-[11px] leading-tight truncate text-[var(--color-text-primary)]">
                                       {entry.subject_name ?? entry.subject_code ?? '—'}
                                     </div>
                                     {/* Faculty */}
                                     {entry.faculty_name && (
-                                      <div className="text-[10px] leading-tight truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                                      <div className="text-[10px] leading-tight truncate text-[var(--color-text-secondary)]">
                                         {entry.faculty_name}
                                       </div>
                                     )}
@@ -759,7 +755,7 @@ export default function TimetableReviewPage() {
                                     {(entry.room_number || entry.batch_name || entry.duration_minutes) && (
                                       <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                                         {entry.room_number && (
-                                          <span className="inline-flex items-center gap-0.5 text-[9px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                                          <span className="inline-flex items-center gap-0.5 text-[9px] font-medium text-[var(--color-text-muted)]">
                                             <svg className="w-2.5 h-2.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0H5" />
                                             </svg>
@@ -767,7 +763,7 @@ export default function TimetableReviewPage() {
                                           </span>
                                         )}
                                         {entry.batch_name && (
-                                          <span className="inline-flex items-center gap-0.5 text-[9px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                                          <span className="inline-flex items-center gap-0.5 text-[9px] font-medium text-[var(--color-text-muted)]">
                                             <svg className="w-2.5 h-2.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0" />
                                             </svg>
@@ -775,7 +771,7 @@ export default function TimetableReviewPage() {
                                           </span>
                                         )}
                                         {entry.duration_minutes && (
-                                          <span className="text-[9px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                                          <span className="text-[9px] font-medium text-[var(--color-text-muted)]">
                                             {entry.duration_minutes}m
                                           </span>
                                         )}
@@ -788,7 +784,7 @@ export default function TimetableReviewPage() {
                           </div>
                         ) : (
                           <div className="h-full min-h-[2rem] flex items-center justify-center">
-                            <span className="w-1 h-1 rounded-full" style={{ background: 'var(--color-border)' }} />
+                            <span className="w-1 h-1 rounded-full bg-[var(--color-border)]" />
                           </div>
                         )}
                       </td>
@@ -803,7 +799,7 @@ export default function TimetableReviewPage() {
         {/* Subject legend */}
         {legendItems.length > 0 && (
           <div className="pt-2 print:pt-4">
-            <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--color-text-muted)' }}>
+            <p className="text-xs font-semibold uppercase tracking-wider mb-2 text-[var(--color-text-muted)]">
               Subject Legend
             </p>
             <div className="flex flex-wrap gap-2">
@@ -816,7 +812,7 @@ export default function TimetableReviewPage() {
                   <span className="font-bold text-[10px] uppercase tracking-wide leading-none" style={{ color: accent }}>
                     {label}
                   </span>
-                  <span className="font-medium" style={{ color: 'var(--color-text-secondary)' }}>{name}</span>
+                  <span className="font-medium text-[var(--color-text-secondary)]">{name}</span>
                 </div>
               ))}
             </div>
@@ -864,8 +860,8 @@ export default function TimetableReviewPage() {
       <div className="space-y-6 py-2">
         {/* Page title skeleton */}
         <div className="space-y-2">
-          <Skeleton style={{ height: '20px', width: '220px' }} />
-          <Skeleton style={{ height: '14px', width: '320px' }} />
+          <Skeleton className="h-5 w-56" />
+          <Skeleton className="h-3.5 w-80" />
         </div>
         {/* Variant cards skeleton */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -881,18 +877,15 @@ export default function TimetableReviewPage() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center" style={{ minHeight: '60vh' }}>
+      <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center space-y-4 max-w-sm mx-auto px-4">
-          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto" style={{ background: 'var(--color-danger-subtle)' }}>
-            <svg className="w-8 h-8" style={{ color: 'var(--color-danger-text)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
+          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto bg-[var(--color-danger-subtle)]">
+            <XCircle size={32} className="text-[var(--color-danger-text)]" />
           </div>
           <div>
-            <p className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>Failed to Load</p>
-            <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>{error}</p>
+            <p className="text-xl font-semibold text-[var(--color-text-primary)]">Failed to Load</p>
+            <p className="text-sm mt-1 text-[var(--color-text-secondary)]">{error}</p>
           </div>
-
         </div>
       </div>
     )
@@ -919,20 +912,13 @@ export default function TimetableReviewPage() {
     <div className="space-y-6 print:bg-white">
 
       {/* ── Page Header ── */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-              {workflow?.department_id && <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>{workflow.department_id}</span>}
-              {workflow?.semester && <span> · Semester {workflow.semester}</span>}
-              {workflow?.academic_year && <span> · {workflow.academic_year}</span>}
-            </p>
-          </div>
-
+      <PageHeader
+        title="Review Timetable"
+        parentLabel="Timetables"
+        parentHref="/admin/timetables"
+        secondaryActions={
           <div className="flex flex-wrap items-center gap-2">
-            <span className={statusInfo.badge}>
-              {statusInfo.label}
-            </span>
-          
+            <span className={statusInfo.badge}>{statusInfo.label}</span>
             {workflow?.status === 'draft' && (
               <>
                 <button
@@ -940,9 +926,7 @@ export default function TimetableReviewPage() {
                   disabled={!selectedVariantId || actionLoading}
                   className="btn-success flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+                  <CheckCircle size={15} />
                   Approve
                 </button>
                 <button
@@ -950,20 +934,27 @@ export default function TimetableReviewPage() {
                   disabled={actionLoading}
                   className="btn-danger flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+                  <XCircle size={15} />
                   Reject
                 </button>
               </>
             )}
           </div>
-        </div>
+        }
+      />
+      {/* Subtitle: department · semester · year */}
+      {workflow && (
+        <p className="-mt-4 text-sm text-[var(--color-text-secondary)]">
+          {workflow.department_id && <span className="font-medium text-[var(--color-text-primary)]">{workflow.department_id}</span>}
+          {workflow.semester && <span> · Semester {workflow.semester}</span>}
+          {workflow.academic_year && <span> · {workflow.academic_year}</span>}
+        </p>
+      )}
 
         {/* ── Variant Cards — powered by VariantGrid ── */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
               Generated Variants
               <span className="ml-2 badge badge-neutral font-normal">{variants.length}</span>
             </h2>
@@ -989,19 +980,15 @@ export default function TimetableReviewPage() {
           <section
             id="timetable-view"
             ref={gridSectionRef}
-            className="rounded-xl overflow-hidden"
-            style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-card)' }}
+            className="card overflow-hidden"
           >
             {/* Section header */}
-            <div
-              className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"
-              style={{ borderBottom: '1px solid var(--color-border)' }}
-            >
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-[var(--color-border)]">
               <div>
                 <h2 className="card-title">
                   Variant {activeVariant.variant_number} — Timetable
                 </h2>
-                <p className="text-xs mt-0.5 capitalize" style={{ color: 'var(--color-text-muted)' }}>
+                <p className="text-xs mt-0.5 capitalize text-[var(--color-text-muted)]">
                   {activeVariant.optimization_priority?.replace(/_/g, ' ') ?? 'Standard'} &nbsp;·&nbsp;
                   Generated {new Date(activeVariant.generated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                 </p>
@@ -1010,15 +997,13 @@ export default function TimetableReviewPage() {
                 onClick={() => window.print()}
                 className="btn-secondary flex items-center gap-1.5 text-xs print:hidden"
               >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                </svg>
+                <Printer size={14} />
                 Print
               </button>
             </div>
 
             {/* Statistics strip */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 print:hidden" style={{ borderBottom: '1px solid var(--color-border)' }}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 print:hidden border-b border-[var(--color-border)]">
               {[
                 {
                   icon: (
@@ -1045,28 +1030,22 @@ export default function TimetableReviewPage() {
                   label: 'Faculty Members', val: activeStats?.unique_faculty ?? 0,
                 },
               ].map(({ icon, label, val }) => (
-                <div key={label} className="px-5 py-3 text-center" style={{ borderRight: '1px solid var(--color-border)' }}>
-                  <div className="flex items-center justify-center gap-1.5 mb-0.5" style={{ color: 'var(--color-text-muted)' }}>
+                <div key={label} className="px-5 py-3 text-center border-r border-[var(--color-border)] last:border-r-0">
+                  <div className="flex items-center justify-center gap-1.5 mb-0.5 text-[var(--color-text-muted)]">
                     {icon}
                     <p className="text-xs">{label}</p>
                   </div>
-                  <p className="text-xl font-bold" style={{ color: 'var(--color-text-primary)' }}>{val}</p>
+                  <p className="text-xl font-bold text-[var(--color-text-primary)]">{val}</p>
                 </div>
               ))}
             </div>
 
             {/* Body: DepartmentTree sidebar + grid */}
-            <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+            <div className="flex items-start">
 
               {/* ─ Left: department filter sidebar ─ */}
               {departmentOptions.length > 0 && (
-                <div style={{
-                  width: 220,
-                  flexShrink: 0,
-                  borderRight: '1px solid var(--color-border)',
-                  padding: '12px 8px',
-                  alignSelf: 'stretch',
-                }}>
+                <div className="w-[220px] shrink-0 border-r border-[var(--color-border)] p-3 self-stretch">
                   <DepartmentTree
                     departments={departmentOptions}
                     selectedDeptId={departmentFilter}
@@ -1094,7 +1073,7 @@ export default function TimetableReviewPage() {
               )}
 
               {/* ─ Right: grid + SlotDetailPanel ─ */}
-              <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+              <div className="flex-1 min-w-0 relative">
                 <div className="px-4 py-4 sm:px-5 sm:py-5">
                   {gridInView
                     ? <TimetableGridFiltered
@@ -1123,16 +1102,14 @@ export default function TimetableReviewPage() {
         {/* ── Approval Modal ── */}
         {showApprovalModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4">
-            <div className="rounded-2xl shadow-[var(--shadow-modal)] p-6 max-w-md w-full" style={{ background: 'var(--color-bg-surface)' }}>
+            <div className="card rounded-2xl p-6 max-w-md w-full">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'var(--color-success-subtle)' }}>
-                  <svg className="w-5 h-5" style={{ color: 'var(--color-success-text)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-[var(--color-success-subtle)]">
+                  <CheckCircle size={20} className="text-[var(--color-success-text)]" />
                 </div>
-                <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>Approve Timetable</h3>
+                <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Approve Timetable</h3>
               </div>
-              <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
+              <p className="text-sm mb-4 text-[var(--color-text-secondary)]">
                 This will approve the selected variant and make it available for publishing.
               </p>
               <textarea
@@ -1143,18 +1120,8 @@ export default function TimetableReviewPage() {
                 rows={3}
               />
               <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowApprovalModal(false)}
-                  disabled={actionLoading}
-                  className="btn-secondary text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleApprove}
-                  disabled={actionLoading}
-                  className="btn-success text-sm disabled:opacity-50"
-                >
+                <button onClick={() => setShowApprovalModal(false)} disabled={actionLoading} className="btn-secondary text-sm">Cancel</button>
+                <button onClick={handleApprove} disabled={actionLoading} className="btn-success text-sm disabled:opacity-50">
                   {actionLoading ? 'Approving…' : 'Approve'}
                 </button>
               </div>
@@ -1165,16 +1132,14 @@ export default function TimetableReviewPage() {
         {/* ── Rejection Modal ── */}
         {showRejectionModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4">
-            <div className="rounded-2xl shadow-[var(--shadow-modal)] p-6 max-w-md w-full" style={{ background: 'var(--color-bg-surface)' }}>
+            <div className="card rounded-2xl p-6 max-w-md w-full">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'var(--color-danger-subtle)' }}>
-                  <svg className="w-5 h-5" style={{ color: 'var(--color-danger-text)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-[var(--color-danger-subtle)]">
+                  <XCircle size={20} className="text-[var(--color-danger-text)]" />
                 </div>
-                <h3 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>Reject Timetable</h3>
+                <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Reject Timetable</h3>
               </div>
-              <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
+              <p className="text-sm mb-4 text-[var(--color-text-secondary)]">
                 Please provide a reason so the scheduling team can make improvements.
               </p>
               <textarea
@@ -1186,18 +1151,8 @@ export default function TimetableReviewPage() {
                 required
               />
               <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowRejectionModal(false)}
-                  disabled={actionLoading}
-                  className="btn-secondary text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleReject}
-                  disabled={actionLoading || !rejectionReason.trim()}
-                  className="btn-danger text-sm disabled:opacity-50"
-                >
+                <button onClick={() => setShowRejectionModal(false)} disabled={actionLoading} className="btn-secondary text-sm">Cancel</button>
+                <button onClick={handleReject} disabled={actionLoading || !rejectionReason.trim()} className="btn-danger text-sm disabled:opacity-50">
                   {actionLoading ? 'Rejecting…' : 'Reject'}
                 </button>
               </div>

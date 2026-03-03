@@ -250,7 +250,7 @@ export default function AdminTimetablesPage() {
 
       {/* Active-jobs banner */}
       {runningJobs.length > 0 && (
-        <div className="card" style={{ borderLeft: '3px solid var(--color-primary)' }}>
+        <div className="card border-l-[3px] border-l-[var(--color-primary)]">
           <div className="card-header pb-3 mb-4">
             <div className="flex items-center gap-2">
               <Zap size={16} className="text-[var(--color-primary)]" />

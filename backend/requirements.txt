@@ -15,6 +15,7 @@ psycopg2-binary>=2.9.0  # PostgreSQL adapter
 argon2-cffi==23.1.0
 cryptography>=41.0.0  # Required by PyJWT for RS256 JWT signing (HS256 fallback works without it)
 gunicorn==23.0.0
+whitenoise[brotli]>=6.6.0  # PERFORMANCE: Fast static files with brotli + gzip compression
 python-decouple==3.8
 dj-database-url==2.2.0
 Pillow==10.4.0

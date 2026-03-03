@@ -127,6 +127,7 @@ const ROUTES: Array<{ pattern: RegExp; crumbs: () => BreadcrumbItem[] }> = [
 // ─── Pages that render their own PageHeader (title + count) ──────────────────
 // Breadcrumb is suppressed on these routes to avoid a duplicate h1.
 const SUPPRESS_ROUTES: RegExp[] = [
+  // Academic sub-pages — all have DataTable + PageHeader
   /^\/admin\/academic\/schools/,
   /^\/admin\/academic\/departments/,
   /^\/admin\/academic\/programs/,
@@ -136,6 +137,8 @@ const SUPPRESS_ROUTES: RegExp[] = [
   /^\/admin\/admins/,
   /^\/admin\/faculty/,
   /^\/admin\/students/,
+  // Timetable pages — all render their own PageHeader or are full-screen overlays
+  /^\/admin\/timetables/,
 ]
 
 // ─── Component ────────────────────────────────────────────────────────────────

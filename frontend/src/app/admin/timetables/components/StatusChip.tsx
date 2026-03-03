@@ -1,25 +1,28 @@
-const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string; label: string }> = {
-  approved:      { bg: 'var(--color-success-subtle)', text: 'var(--color-success-text)', dot: 'var(--color-success)',      label: 'Approved'       },
-  completed:     { bg: 'var(--color-success-subtle)', text: 'var(--color-success-text)', dot: 'var(--color-success)',      label: 'Completed'      },
-  pending:       { bg: 'var(--color-warning-subtle)', text: 'var(--color-warning-text)', dot: 'var(--color-warning)',      label: 'Pending'        },
-  pending_review:{ bg: 'var(--color-warning-subtle)', text: 'var(--color-warning-text)', dot: 'var(--color-warning)',      label: 'Pending Review' },
-  running:       { bg: 'var(--color-info-subtle)',    text: 'var(--color-info)',          dot: 'var(--color-primary)',     label: 'Running'        },
-  draft:         { bg: 'var(--color-bg-surface-2)',   text: 'var(--color-text-secondary)',dot: 'var(--color-text-muted)', label: 'Draft'          },
-  rejected:      { bg: 'var(--color-danger-subtle)',  text: 'var(--color-danger-text)',   dot: 'var(--color-danger)',      label: 'Rejected'       },
-  failed:        { bg: 'var(--color-danger-subtle)',  text: 'var(--color-danger-text)',   dot: 'var(--color-danger)',      label: 'Failed'         },
+const STATUS_BADGE: Record<string, string> = {
+  approved:       'badge badge-success',
+  completed:      'badge badge-success',
+  pending:        'badge badge-warning',
+  pending_review: 'badge badge-warning',
+  running:        'badge badge-info',
+  draft:          'badge badge-neutral',
+  rejected:       'badge badge-danger',
+  failed:         'badge badge-danger',
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  approved:       'Approved',
+  completed:      'Completed',
+  pending:        'Pending',
+  pending_review: 'Pending Review',
+  running:        'Running',
+  draft:          'Draft',
+  rejected:       'Rejected',
+  failed:         'Failed',
 }
 
 export function StatusChip({ status, isRunning }: { status: string; isRunning?: boolean }) {
   const key = isRunning ? 'running' : status
-  const cfg = STATUS_CONFIG[key] ?? STATUS_CONFIG['draft']
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      padding: '2px 8px', borderRadius: 12, flexShrink: 0,
-      background: cfg.bg, color: cfg.text, fontSize: 12, fontWeight: 500,
-    }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: cfg.dot, flexShrink: 0 }} />
-      {cfg.label}
-    </span>
-  )
+  const cls = STATUS_BADGE[key] ?? STATUS_BADGE['draft']
+  const label = STATUS_LABELS[key] ?? (key.charAt(0).toUpperCase() + key.slice(1))
+  return <span className={cls}>{label}</span>
 }

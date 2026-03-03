@@ -49,78 +49,58 @@ export function RunningJobRow({ job, onNavigate, onJobFailed }: RunningJobRowPro
   const hasProgress = pct > 0
 
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: '12px 14px',
-      background: isFailed ? 'var(--color-danger-subtle, #fff5f5)' : 'var(--color-bg-page)',
-      border: `1px solid ${isFailed ? 'var(--color-danger)' : 'var(--color-border)'}`,
-      borderRadius: 'var(--radius-md)',
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
+    <div className={`flex items-center gap-3 px-3.5 py-3 rounded-[var(--radius-md)] border ${
+      isFailed
+        ? 'bg-[var(--color-danger-subtle)] border-[var(--color-danger)]'
+        : 'bg-[var(--color-bg-page)] border-[var(--color-border)]'
+    }`}>
+      <div className="flex-1 min-w-0">
         {/* Identity row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-[13px] font-semibold text-[var(--color-text-primary)] truncate">
             {job.department ?? 'All Departments'}
           </span>
           {job.academic_year && job.semester && (
-            <span style={{
-              fontSize: 11, color: 'var(--color-text-muted)',
-              background: 'var(--color-bg-surface-2)',
-              padding: '1px 7px', borderRadius: 4,
-              flexShrink: 0, fontWeight: 500,
-            }}>
+            <span className="text-[11px] text-[var(--color-text-muted)] bg-[var(--color-bg-surface-2)] px-1.5 py-px rounded shrink-0 font-medium">
               {job.academic_year} &middot; Sem {job.semester}
             </span>
           )}
           {isFailed && (
-            <span style={{
-              fontSize: 11, fontWeight: 600,
-              color: 'var(--color-danger-text, #c53030)',
-              background: 'var(--color-danger-subtle, #fff5f5)',
-              border: '1px solid var(--color-danger)',
-              padding: '1px 7px', borderRadius: 4, flexShrink: 0,
-            }}>
+            <span className="badge badge-danger shrink-0">
               {progress?.status === 'cancelled' ? 'Cancelled' : 'Failed'}
             </span>
           )}
         </div>
 
         {/* Stage + ETA row */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
-          <span style={{ fontSize: 12, color: isFailed ? 'var(--color-danger-text, #c53030)' : 'var(--color-text-secondary)' }}>
+        <div className="flex items-center justify-between mb-1.5">
+          <span className={`text-xs ${isFailed ? 'text-[var(--color-danger-text)]' : 'text-[var(--color-text-secondary)]'}`}>
             {stage}
           </span>
           {!isFailed && (
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-primary)', flexShrink: 0, marginLeft: 8 }}>
+            <span className="text-xs font-semibold text-[var(--color-text-primary)] shrink-0 ml-2">
               {hasProgress
-                ? <>{Math.round(pct)}% &nbsp;<span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}>{formatETA(eta)}</span></>
-                : <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}>{isConnected ? formatETA(eta) : 'Connecting\u2026'}</span>
+                ? <>{Math.round(pct)}%&nbsp;<span className="font-normal text-[var(--color-text-muted)]">{formatETA(eta)}</span></>
+                : <span className="font-normal text-[var(--color-text-muted)]">{isConnected ? formatETA(eta) : 'Connecting…'}</span>
               }
             </span>
           )}
         </div>
 
         {/* Progress bar */}
-        <div style={{ position: 'relative', height: 4, background: 'var(--color-bg-surface-3)', borderRadius: 2, overflow: 'hidden' }}>
-          <div style={{
-            position: 'absolute', top: 0, left: 0, height: '100%',
-            width: isFailed ? '100%' : `${Math.max(pct, 8)}%`,
-            background: isFailed ? 'var(--color-danger)' : 'var(--color-primary)',
-            borderRadius: 2,
-            transition: 'width 600ms ease',
-            animation: isFailed ? 'none' : 'progress-fill-breathe 2s ease-in-out infinite',
-          }} />
+        <div className="relative h-1 bg-[var(--color-bg-surface-3)] rounded overflow-hidden">
+          <div
+            className={`absolute top-0 left-0 h-full rounded transition-[width] duration-[600ms] ease-out ${
+              isFailed ? 'bg-[var(--color-danger)]' : 'bg-[var(--color-primary)]'
+            }`}
+            style={{ width: isFailed ? '100%' : `${Math.max(pct, 8)}%` }}
+          />
           {!isFailed && (
-            <div style={{
-              position: 'absolute', top: 0, left: 0, height: '100%',
-              width: `${Math.max(pct, 8)}%`,
-              overflow: 'hidden', borderRadius: 2,
-            }}>
-              <span style={{
-                position: 'absolute', inset: 0, width: '50%',
-                background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%)',
-                animation: 'progress-shine 1.8s linear infinite',
-              }} />
+            <div
+              className="absolute top-0 left-0 h-full overflow-hidden rounded"
+              style={{ width: `${Math.max(pct, 8)}%` }}
+            >
+              <span className="status-shimmer-overlay absolute inset-0 w-1/2" />
             </div>
           )}
         </div>
@@ -128,8 +108,7 @@ export function RunningJobRow({ job, onNavigate, onJobFailed }: RunningJobRowPro
 
       <button
         onClick={onNavigate}
-        className={isFailed ? 'btn-secondary' : 'btn-primary'}
-        style={{ fontSize: 12, height: 32, padding: '0 14px', flexShrink: 0 }}
+        className={`${isFailed ? 'btn-secondary' : 'btn-primary'} shrink-0 text-xs h-8 px-3.5`}
       >
         {isFailed ? 'View Details' : 'View Progress'}
       </button>

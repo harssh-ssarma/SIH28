@@ -69,7 +69,7 @@ export default function ExportButton({
           break
 
         case 'excel':
-          exportTimetableToExcel(slots, {
+          await exportTimetableToExcel(slots, {
             ...exportOptions,
             filename: exportOptions.filename + '.xlsx',
           })

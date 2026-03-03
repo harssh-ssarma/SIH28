@@ -1,10 +1,12 @@
 /**
  * Timetable Export Utilities
  * Handles PDF and Excel export functionality for timetables
+ *
+ * PERFORMANCE NOTE: jsPDF, html2canvas, and xlsx are NOT imported at the top
+ * level. They are dynamically imported inside each export function so they are
+ * only downloaded when the user actually clicks an export button.
+ * This saves ~500 KB+ from the initial JS bundle.
  */
-import jsPDF from 'jspdf'
-import html2canvas from 'html2canvas'
-import * as XLSX from 'xlsx'
 import { saveAs } from 'file-saver'
 
 interface TimetableSlot {
@@ -38,6 +40,12 @@ export const exportTimetableToPDF = async (
     if (!element) {
       throw new Error('Element not found for PDF export')
     }
+
+    // Dynamic imports: only downloaded when the user clicks "Export PDF"
+    const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+      import('jspdf'),
+      import('html2canvas'),
+    ])
 
     // Create canvas from HTML element
     const canvas = await html2canvas(element, {
@@ -109,11 +117,14 @@ export const exportTimetableToPDF = async (
 /**
  * Export timetable to Excel format
  */
-export const exportTimetableToExcel = (
+export const exportTimetableToExcel = async (
   slots: TimetableSlot[],
   options: ExportOptions = {}
-): void => {
+): Promise<void> => {
   try {
+    // Dynamic import: only downloaded when the user clicks "Export Excel"
+    const XLSX = await import('xlsx')
+
     // Create workbook
     const wb = XLSX.utils.book_new()
 

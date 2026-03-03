@@ -159,7 +159,17 @@ export default function CreateTimetablePage() {
           onClick: () => (document.getElementById('timetable-form') as HTMLFormElement | null)?.requestSubmit(),
         }}
         secondaryActions={
-          isGenerating ? <GoogleSpinner size={20} className="mr-1" /> : undefined
+          isGenerating
+            ? <GoogleSpinner size={20} className="mr-1" />
+            : (
+              <button
+                type="button"
+                onClick={() => router.push('/admin/timetables')}
+                className="btn-secondary"
+              >
+                Cancel
+              </button>
+            )
         }
       />
 
@@ -317,25 +327,6 @@ export default function CreateTimetablePage() {
               </div>
             )}
           </div>
-        </div>
-
-        {/* Actions row */}
-        <div className="flex items-center justify-end gap-3 py-2">
-          <button
-            type="button"
-            onClick={() => router.push('/admin/timetables')}
-            disabled={isGenerating}
-            className="btn-secondary"
-          >
-            Cancel
-          </button>
-          <button type="submit" disabled={isGenerating} className="btn-primary">
-            {isGenerating ? (
-              <><GoogleSpinner size={16} singleColor="white" /> Generating…</>
-            ) : (
-              <><Zap size={16} /> Generate Timetable</>
-            )}
-          </button>
         </div>
       </form>
     </div>

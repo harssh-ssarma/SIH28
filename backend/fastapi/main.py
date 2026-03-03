@@ -10,6 +10,7 @@ This is the main entry point. All business logic is in separate modules:
 - utils/ - Utilities
 """
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
 
 # Core setup
@@ -48,6 +49,11 @@ app = FastAPI(
     lifespan=lifespan  # Startup/shutdown management
 )
 
+# ── GZip compression ──────────────────────────────────────────────────────────
+# Compress all responses > 1 KB. Reduces JSON payload by ~60-80%.
+# minimum_size=1000 avoids compressing tiny responses where overhead > gain.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 # Configure middleware
 setup_cors(app)
 setup_error_handler(app)
@@ -74,7 +80,8 @@ async def root():
 
 
 if __name__ == "__main__":
-    # Run with uvicorn
+    # Development: single worker with auto-reload
+    # Production: use uvicorn.conf.py via `uvicorn main:app --config uvicorn.conf.py`
     uvicorn.run(
         "main:app",
         host="0.0.0.0",

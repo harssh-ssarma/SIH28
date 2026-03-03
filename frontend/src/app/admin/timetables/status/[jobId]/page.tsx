@@ -55,151 +55,9 @@ import type { GenerationJob } from '@/types/timetable'
 import { useEffect, useRef, useState, ReactNode } from 'react'
 import { JetBrains_Mono } from 'next/font/google'
 import { GoogleSpinner } from '@/components/ui/GoogleSpinner'
-import { ArrowLeft, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, XCircle, AlertTriangle } from 'lucide-react'
 
 const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], weight: ['400', '700'] })
-
-// ─── CSS Keyframes + Static Utility Classes ──────────────────────────────────
-const CSS_KEYFRAMES = `
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0);    }
-}
-@keyframes shimmer {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(200%); }
-}
-@keyframes nodePulse {
-  0%, 100% { transform: scale(1);    }
-  50%       { transform: scale(1.12); }
-}
-@keyframes scalePop {
-  0%   { transform: scale(1);    }
-  50%  { transform: scale(1.04); }
-  100% { transform: scale(1);    }
-}
-@keyframes drawCheck {
-  to { stroke-dashoffset: 0; }
-}
-.shimmer-overlay {
-  background: linear-gradient(
-    90deg,
-    transparent              0%,
-    rgba(255,255,255,0.45)  35%,
-    rgba(255,255,255,0.75)  50%,
-    rgba(255,255,255,0.45)  65%,
-    transparent             100%
-  );
-  animation: shimmer 1.8s linear infinite;
-}
-@keyframes orbDrift1 {
-  0%, 100% { transform: translate(0px,   0px)   scale(1);    }
-  33%       { transform: translate(40px, -30px)  scale(1.05); }
-  66%       { transform: translate(-20px, 25px)  scale(0.97); }
-}
-@keyframes orbDrift2 {
-  0%, 100% { transform: translate(0px,   0px)   scale(1);    }
-  40%       { transform: translate(-35px, 20px)  scale(1.04); }
-  70%       { transform: translate(25px, -30px)  scale(0.96); }
-}
-@keyframes orbDrift3 {
-  0%, 100% { transform: translate(0px,  0px)   scale(1);    }
-  50%       { transform: translate(15px, 35px)  scale(1.06); }
-}
-/* Dot-grid + animated orb background */
-.page-bg {
-  margin: -12px;
-  min-height: calc(100vh - 4.5rem);
-  background-color: var(--color-bg-page);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 28px 16px;
-  position: relative;
-  overflow: hidden;
-  border-radius: inherit;
-}
-@media (min-width: 768px) {
-  .page-bg { margin: -24px; }
-}
-/* Shared modal card */
-.modal-card { box-shadow: 0 4px 24px rgba(15,23,42,0.06); padding: 28px 36px; z-index: 1; }
-.modal-card--in  { animation: fadeUp 400ms ease-out both; }
-.modal-card--in1 { animation: fadeUp 400ms ease-out 100ms both; }
-/* Top gradient overlay */
-.top-gradient { background: linear-gradient(to bottom, rgba(248,250,255,0.95), transparent); z-index: 0; }
-.dark .top-gradient { background: linear-gradient(to bottom, rgba(28,30,33,0.95), transparent); }
-/* SVG icon sizes */
-.stage-icon { width: 14px; height: 14px; }
-.small-icon { width: 12px; height: 12px; }
-/* Connecting screen centre */
-.center-fade { text-align: center; animation: fadeUp 400ms ease-out 100ms both; }
-/* Checkmark SVG path draw-on animation */
-.check-path { stroke-dasharray: 44; stroke-dashoffset: 44; animation: drawCheck 600ms ease-in-out forwards; }
-/* Success bar */
-.complete-track { height: 14px; background-color: hsl(120,80%,94%); }
-.dark .complete-track { background-color: hsl(120,35%,14%); }
-.complete-fill  { height: 100%; border-radius: 9999px; background-color: hsl(120,88%,48%); }
-/* Dynamic progress bar — driven by CSS custom properties */
-.progress-track { height: 14px; background-color: var(--track-color, #E2E8F0); }
-.progress-fill {
-  height: 100%; position: absolute; top: 0; left: 0;
-  border-radius: 9999px;
-  background-color: var(--bar-color, #2563EB);
-  box-shadow: 0 2px 8px var(--shadow-color, transparent);
-  width: var(--progress-pct, 0%);
-  transition: none;
-}
-.progress-shimmer-fill {
-  height: 100%; position: absolute; top: 0; left: 0;
-  border-radius: 9999px;
-  width: var(--progress-pct, 0%);
-  transition: none;
-}
-/* Percentage counter */
-.pct-display {
-  font-size: 2.5rem; font-weight: 700;
-  color: var(--bar-color, #2563EB);
-  display: inline-block;
-  animation: scalePop 150ms ease-out;
-}
-/* Stage stepper node states */
-.stage-node-fill {
-  background-color: var(--bar-color, #2563EB);
-  border-color: var(--bar-color, #2563EB);
-  color: #ffffff;
-}
-.stage-node-pulse {
-  box-shadow: 0 0 0 4px var(--track-color, #DBEAFE);
-  animation: nodePulse 2s ease-in-out infinite;
-}
-.stage-node-idle { background-color: transparent; border-color: var(--color-border); color: var(--color-text-muted); }
-.stage-label-active { font-size: 11px; max-width: 68px; color: var(--color-text-primary); font-weight: 600; }
-.stage-label-idle   { font-size: 11px; max-width: 68px; color: var(--color-text-muted); font-weight: 400; }
-/* Connector lines */
-.connector-filled { height: 2px; background-color: var(--bar-color, #2563EB); }
-.connector-dashed {
-  height: 2px;
-  background-image: repeating-linear-gradient(
-    90deg, var(--color-border) 0, var(--color-border) 4px, transparent 4px, transparent 8px
-  );
-}
-/* Connection status dot */
-.status-dot-live  { background-color: #22C55E; box-shadow: 0 0 0 3px rgba(34,197,94,0.2); }
-.status-dot-warn  { background-color: #F59E0B; }
-.status-dot-err   { background-color: #EF4444; }
-/* Staggered entry animations */
-.fu-0   { animation: fadeUp 400ms ease-out both; }
-.fu-100 { animation: fadeUp 400ms ease-out 100ms both; }
-.fu-150 { animation: fadeUp 400ms ease-out 150ms both; }
-.fu-200 { animation: fadeUp 400ms ease-out 200ms both; }
-.fu-250 { animation: fadeUp 400ms ease-out 250ms both; }
-.fu-300 { animation: fadeUp 400ms ease-out 300ms both; }
-.fu-350 { animation: fadeUp 400ms ease-out 350ms both; }
-.fu-400 { animation: fadeUp 400ms ease-out 400ms both; }
-.fu-450 { animation: fadeUp 400ms ease-out 450ms both; }
-.fu-500 { animation: fadeUp 400ms ease-out 500ms both; }
-`
 
 // ─── Stage configuration ──────────────────────────────────────────────────────
 interface StageConfig {
@@ -215,7 +73,7 @@ const STAGES: StageConfig[] = [
     label: 'Reading Data',
     description: 'Loading student and faculty information...',
     icon: (
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="stage-icon">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="status-stage-icon">
         <rect x="1.5" y="1.5" width="13" height="13" rx="2" />
         <path d="M4 5.5h8M4 8h8M4 10.5h5" strokeLinecap="round" />
       </svg>
@@ -226,7 +84,7 @@ const STAGES: StageConfig[] = [
     label: 'Organising Courses',
     description: 'Grouping related subjects together...',
     icon: (
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="stage-icon">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="status-stage-icon">
         <path d="M2 4h12M4 8h8M6 12h4" strokeLinecap="round" />
       </svg>
     ),
@@ -236,7 +94,7 @@ const STAGES: StageConfig[] = [
     label: 'Building Schedule',
     description: 'Assigning all courses to rooms and available time slots...',
     icon: (
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="stage-icon">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="status-stage-icon">
         <rect x="1.5" y="3" width="13" height="11.5" rx="1.5" />
         <path d="M5.5 1v4M10.5 1v4M1.5 8h13" strokeLinecap="round" />
       </svg>
@@ -247,7 +105,7 @@ const STAGES: StageConfig[] = [
     label: 'Refining Timetable',
     description: 'Resolving conflicts and improving overall balance...',
     icon: (
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="stage-icon">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="status-stage-icon">
         <path d="M8 2l1.6 3.2 3.5.5-2.55 2.48.6 3.5L8 9.95 4.85 11.68l.6-3.5L2.9 5.7l3.5-.5z" strokeLinejoin="round" />
       </svg>
     ),
@@ -257,7 +115,7 @@ const STAGES: StageConfig[] = [
     label: 'Final Polish',
     description: 'Completing final checks and quality verification...',
     icon: (
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="stage-icon">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="status-stage-icon">
         <path d="M13 8A5 5 0 113 8" strokeLinecap="round" />
         <path d="M8 3V1M8 3l-1.5 1.5M8 3l1.5 1.5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
@@ -435,21 +293,19 @@ export default function TimetableStatusPage() {
   // ── Connection error ─────────────────────────────────────────────────────────
   if (error && reconnectAttempt > 5) {
     return (
-      <div className="page-bg">
-        <div className="max-w-[680px] w-full rounded-2xl text-center modal-card modal-card--in" style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}>
-          <button onClick={() => router.push('/admin/timetables')} className="flex items-center gap-1.5 text-[13px] font-medium mb-6 -ml-1 transition-colors" style={{ color: 'var(--color-text-secondary)' }}>
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      <div className="status-page-bg">
+        <div className="max-w-[680px] w-full text-center status-modal-card status-modal-card--in">
+          <button onClick={() => router.push('/admin/timetables')} className="btn-text flex items-center gap-1.5 mb-6">
+            <ArrowLeft size={15} />
             Back to Timetables
           </button>
-          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6" style={{ background: 'var(--color-danger-subtle)' }}>
-            <svg className="w-8 h-8" style={{ color: 'var(--color-danger)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 bg-[var(--color-danger-subtle)]">
+            <XCircle size={32} className="text-[var(--color-danger)]" />
           </div>
-          <h2 className="text-[22px] font-bold mb-3" style={{ color: 'var(--color-text-primary)' }}>
+          <h2 className="text-[22px] font-bold mb-3 text-[var(--color-text-primary)]">
             Connection Lost
           </h2>
-          <p className="text-[15px] mb-8 max-w-xs mx-auto" style={{ color: 'var(--color-text-secondary)' }}>{error}</p>
+          <p className="text-[15px] mb-8 max-w-xs mx-auto text-[var(--color-text-secondary)]">{error}</p>
           <div className="flex gap-3 justify-center">
             <button onClick={() => window.location.reload()} className="btn-primary">
               Try Again
@@ -459,7 +315,6 @@ export default function TimetableStatusPage() {
             </button>
           </div>
         </div>
-        <style>{CSS_KEYFRAMES}</style>
       </div>
     )
   }
@@ -467,17 +322,16 @@ export default function TimetableStatusPage() {
   // ── Connecting / loading ─────────────────────────────────────────────────────
   if (!progress) {
     return (
-      <div className="page-bg">
-        <div className="center-fade">
+      <div className="status-page-bg">
+        <div className="status-center-fade">
           <GoogleSpinner size={48} className="mx-auto mb-6" />
-          <p className="font-semibold text-[17px] mb-1" style={{ color: 'var(--color-text-primary)' }}>
+          <p className="font-semibold text-[17px] mb-1 text-[var(--color-text-primary)]">
             {reconnectAttempt > 0 ? 'Reconnecting...' : 'Connecting...'}
           </p>
-          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          <p className="text-sm text-[var(--color-text-secondary)]">
             {reconnectAttempt > 0 ? `Attempt ${reconnectAttempt} of 5` : 'Please wait a moment'}
           </p>
         </div>
-        <style>{CSS_KEYFRAMES}</style>
       </div>
     )
   }
@@ -485,10 +339,10 @@ export default function TimetableStatusPage() {
   // ── Success ──────────────────────────────────────────────────────────────────
   if (progress.status === 'completed') {
     return (
-      <div className="page-bg">
-        <div className="max-w-[680px] w-full rounded-2xl text-center modal-card modal-card--in" style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}>
-          <button onClick={() => router.push('/admin/timetables')} className="flex items-center gap-1.5 text-[13px] font-medium mb-4 -ml-1 transition-colors" style={{ color: 'var(--color-text-secondary)' }}>
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      <div className="status-page-bg">
+        <div className="max-w-[680px] w-full text-center status-modal-card status-modal-card--in">
+          <button onClick={() => router.push('/admin/timetables')} className="btn-text flex items-center gap-1.5 mb-4">
+            <ArrowLeft size={15} />
             Back to Timetables
           </button>
           <svg className="mx-auto mb-8" width="96" height="96" viewBox="0 0 52 52">
@@ -497,19 +351,19 @@ export default function TimetableStatusPage() {
               d="M14 27l8 8 16-16"
               fill="none" stroke={GREEN} strokeWidth="3"
               strokeLinecap="round" strokeLinejoin="round"
-              className="check-path"
+              className="status-check-path"
             />
           </svg>
-          <h2 className="text-[26px] font-bold mb-3" style={{ color: 'var(--color-text-primary)' }}>
+          <h2 className="text-[26px] font-bold mb-3 text-[var(--color-text-primary)]">
             Timetable Ready
           </h2>
-          <p className="text-[15px] mb-8" style={{ color: 'var(--color-text-secondary)' }}>
+          <p className="text-[15px] mb-8 text-[var(--color-text-secondary)]">
             {countdown > 0
               ? `Preparing timetable data\u2026 ${countdown}`
               : 'Opening review page\u2026'}
           </p>
-          <div className="w-full overflow-hidden mb-8 complete-track">
-            <div className="complete-fill" />
+          <div className="w-full mb-8 status-complete-track">
+            <div className="status-complete-fill" />
           </div>
           <button
             onClick={() => router.push(`/admin/timetables/${jobId}/review`)}
@@ -518,7 +372,6 @@ export default function TimetableStatusPage() {
             View Timetables
           </button>
         </div>
-        <style>{CSS_KEYFRAMES}</style>
       </div>
     )
   }
@@ -529,21 +382,19 @@ export default function TimetableStatusPage() {
       ? String(progress.metadata.error)
       : 'Something went wrong while building the timetable. Please try again.'
     return (
-      <div className="page-bg">
-        <div className="max-w-[680px] w-full rounded-2xl text-center modal-card modal-card--in" style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}>
-          <button onClick={() => router.push('/admin/timetables')} className="flex items-center gap-1.5 text-[13px] font-medium mb-6 -ml-1 transition-colors" style={{ color: 'var(--color-text-secondary)' }}>
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      <div className="status-page-bg">
+        <div className="max-w-[680px] w-full text-center status-modal-card status-modal-card--in">
+          <button onClick={() => router.push('/admin/timetables')} className="btn-text flex items-center gap-1.5 mb-6">
+            <ArrowLeft size={15} />
             Back to Timetables
           </button>
-          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6" style={{ background: 'var(--color-danger-subtle)' }}>
-            <svg className="w-8 h-8" style={{ color: 'var(--color-danger)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 bg-[var(--color-danger-subtle)]">
+            <XCircle size={32} className="text-[var(--color-danger)]" />
           </div>
-          <h2 className="text-[26px] font-bold mb-3" style={{ color: 'var(--color-text-primary)' }}>
+          <h2 className="text-[26px] font-bold mb-3 text-[var(--color-text-primary)]">
             Generation Failed
           </h2>
-          <p className="text-[15px] mb-8 max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>{errorMsg}</p>
+          <p className="text-[15px] mb-8 max-w-sm mx-auto text-[var(--color-text-secondary)]">{errorMsg}</p>
           <div className="flex gap-3 justify-center">
             <button onClick={() => router.push('/admin/timetables/new')} className="btn-primary">
               Try Again
@@ -553,7 +404,6 @@ export default function TimetableStatusPage() {
             </button>
           </div>
         </div>
-        <style>{CSS_KEYFRAMES}</style>
       </div>
     )
   }
@@ -561,26 +411,23 @@ export default function TimetableStatusPage() {
   // ── Cancelled ────────────────────────────────────────────────────────────────
   if (progress.status === 'cancelled') {
     return (
-      <div className="page-bg">
-        <div className="max-w-[680px] w-full rounded-2xl text-center modal-card modal-card--in" style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}>
-          <button onClick={() => router.push('/admin/timetables')} className="flex items-center gap-1.5 text-[13px] font-medium mb-6 -ml-1 transition-colors" style={{ color: 'var(--color-text-secondary)' }}>
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      <div className="status-page-bg">
+        <div className="max-w-[680px] w-full text-center status-modal-card status-modal-card--in">
+          <button onClick={() => router.push('/admin/timetables')} className="btn-text flex items-center gap-1.5 mb-6">
+            <ArrowLeft size={15} />
             Back to Timetables
           </button>
-          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6" style={{ background: 'var(--color-warning-subtle)' }}>
-            <svg className="w-8 h-8" style={{ color: 'var(--color-warning)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-            </svg>
+          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6 bg-[var(--color-warning-subtle)]">
+            <AlertTriangle size={32} className="text-[var(--color-warning)]" />
           </div>
-          <h2 className="text-[26px] font-bold mb-3" style={{ color: 'var(--color-text-primary)' }}>
+          <h2 className="text-[26px] font-bold mb-3 text-[var(--color-text-primary)]">
             Generation Cancelled
           </h2>
-          <p className="text-[15px] mb-8" style={{ color: 'var(--color-text-secondary)' }}>The timetable generation was stopped.</p>
+          <p className="text-[15px] mb-8 text-[var(--color-text-secondary)]">The timetable generation was stopped.</p>
           <button onClick={() => router.push('/admin/timetables')} className="btn-primary">
             Back to Timetables
           </button>
         </div>
-        <style>{CSS_KEYFRAMES}</style>
       </div>
     )
   }
@@ -596,32 +443,32 @@ export default function TimetableStatusPage() {
     : 'Timetable Generation in Progress'
 
   return (
-    <div ref={containerRef} className="page-bg">
+    <div ref={containerRef} className="status-page-bg">
 
       {/* Top gradient fade — absolute so it stays within the AppShell content pane */}
-      <div className="absolute top-0 left-0 right-0 h-32 pointer-events-none top-gradient" />
+      <div className="absolute top-0 left-0 right-0 h-32 pointer-events-none status-top-gradient" />
 
       {/* Main card */}
-      <div className="relative max-w-[680px] w-full rounded-2xl modal-card modal-card--in1" style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}>
+      <div className="relative max-w-[680px] w-full status-modal-card status-modal-card--in1">
 
         {/* Back navigation */}
-        <button onClick={() => router.push('/admin/timetables')} className="flex items-center gap-1.5 text-[13px] font-medium mb-5 -ml-1 transition-colors fu-100" style={{ color: 'var(--color-text-secondary)' }}>
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        <button onClick={() => router.push('/admin/timetables')} className="btn-text flex items-center gap-1.5 mb-5 fu-100">
+          <ArrowLeft size={15} />
           Back to Timetables
         </button>
 
         {/* Institution badge */}
-        <p className="text-[11px] font-medium uppercase tracking-widest mb-2 fu-150" style={{ color: 'var(--color-text-muted)' }}>
+        <p className="text-[11px] font-medium uppercase tracking-widest mb-2 fu-150 text-[var(--color-text-muted)]">
           Banaras Hindu University
         </p>
 
-        {/* Heading — DM Sans (parent font), bold */}
-          <h1 className="text-[24px] font-bold mb-1 fu-200" style={{ color: 'var(--color-text-primary)' }}>
+        {/* Heading */}
+        <h1 className="text-[24px] font-bold mb-1 fu-200 text-[var(--color-text-primary)]">
           Building Your Timetable
         </h1>
 
         {/* Subtitle */}
-        <p className="text-[15px] mb-5 fu-250" style={{ color: 'var(--color-text-secondary)' }}>
+        <p className="text-[15px] mb-5 fu-250 text-[var(--color-text-secondary)]">
           {subtitle}
         </p>
 
@@ -629,7 +476,7 @@ export default function TimetableStatusPage() {
         <div className="text-right mb-2 fu-300">
           <span
             key={Math.floor(smoothOverallProgress)}
-            className={`${jetbrainsMono.className} pct-display`}
+            className={`${jetbrainsMono.className} status-pct-display`}
           >
             {smoothOverallProgress.toFixed(1)}%
           </span>
@@ -637,11 +484,11 @@ export default function TimetableStatusPage() {
 
         {/* Progress bar */}
         <div className="fu-350">
-          <div className="relative w-full rounded-full overflow-hidden progress-track">
+          <div className="relative w-full status-progress-track">
             {/* Coloured fill — width driven by CSS var (--progress-pct) set via DOM ref */}
-            <div className="progress-fill" />
+            <div className="status-progress-fill" />
             {/* Shimmer overlay — clipped to fill width only */}
-            <div className="shimmer-overlay progress-shimmer-fill" />
+            <div className="status-shimmer-overlay status-progress-shimmer-fill" />
           </div>
         </div>
 
@@ -669,24 +516,24 @@ export default function TimetableStatusPage() {
                   {/* Node + label */}
                   <div className="flex flex-col items-center min-w-0">
                     <div
-                      className={`w-8 h-8 rounded-full flex items-center justify-center border-2 shrink-0 ${isDone ? 'stage-node-fill' : 'stage-node-idle'}${isActive ? ' stage-node-pulse' : ''}`}
+                      className={`w-8 h-8 rounded-full flex items-center justify-center border-2 shrink-0 ${isDone ? 'status-stage-node-fill' : 'status-stage-node-idle'}${isActive ? ' status-stage-node-pulse' : ''}`}
                     >
                       {isCompleted ? (
-                        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" className="small-icon">
+                        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" className="status-small-icon">
                           <path d="M2 6l3 3 5-5" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                       ) : (
                         stage.icon
                       )}
                     </div>
-                    <span className={`mt-2 text-center leading-tight ${isDone ? 'stage-label-active' : 'stage-label-idle'}`}>
+                    <span className={`mt-2 text-center leading-tight ${isDone ? 'status-stage-label-active' : 'status-stage-label-idle'}`}>
                       {stage.label}
                     </span>
                   </div>
 
                   {/* Connector line (not after last node) */}
                   {i < STAGES.length - 1 && (
-                    <div className={`flex-1 self-start mt-4 mx-1 ${isCompleted ? 'connector-filled' : 'connector-dashed'}`} />
+                    <div className={`flex-1 self-start mt-4 mx-1 ${isCompleted ? 'status-connector-filled' : 'status-connector-dashed'}`} />
                   )}
                 </div>
               )
@@ -728,7 +575,6 @@ export default function TimetableStatusPage() {
         </div>
       </div>
 
-      <style>{CSS_KEYFRAMES}</style>
     </div>
   )
 }
