@@ -15,24 +15,24 @@ export function AcademicSidePanel({ studentProfile }: Props) {
         <div className="space-y-4">
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-600 dark:text-gray-400">Current CGPA</span>
-              <span className="font-semibold text-sm sm:text-base text-[#34a853]">8.7</span>
+              <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Current CGPA</span>
+              <span className="font-semibold text-sm sm:text-base" style={{ color: 'var(--color-success-text)' }}>8.7</span>
             </div>
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div className="w-full rounded-full h-2" style={{ background: 'var(--color-bg-surface-3)' }}>
               <div
-                className="bg-[#34a853] h-2 rounded-full transition-all duration-300"
-                style={{ width: '87%' }}
+                className="h-2 rounded-full transition-all duration-300"
+                style={{ width: '87%', background: 'var(--color-success)' }}
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:gap-3 pt-2">
-            <div className="text-center p-2 sm:p-3 bg-gray-50 dark:bg-[#3c4043] rounded-lg">
-              <p className="text-lg sm:text-xl font-semibold text-gray-800 dark:text-gray-200">6</p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">Courses</p>
-            </div>
-            <div className="text-center p-2 sm:p-3 bg-gray-50 dark:bg-[#3c4043] rounded-lg">
-              <p className="text-lg sm:text-xl font-semibold text-gray-800 dark:text-gray-200">24</p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">Credits</p>
+              <div className="text-center p-2 sm:p-3 rounded-lg" style={{ background: 'var(--color-bg-surface-2)' }}>
+                <p className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>6</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Courses</p>
+              </div>
+              <div className="text-center p-2 sm:p-3 rounded-lg" style={{ background: 'var(--color-bg-surface-2)' }}>
+                <p className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-text-primary)' }}>24</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Credits</p>
             </div>
           </div>
         </div>
@@ -49,23 +49,23 @@ export function AcademicSidePanel({ studentProfile }: Props) {
               <div key={course.offering_id} className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
-                    <span className="text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 truncate block">
+                    <span className="text-xs sm:text-sm font-medium truncate block" style={{ color: 'var(--color-text-primary)' }}>
                       {course.course_name}
                     </span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">{course.course_code}</span>
+                    <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{course.course_code}</span>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <span className="text-xs sm:text-sm font-medium text-gray-500 dark:text-gray-400">0%</span>
-                    <p className="text-xs text-gray-400">No data</p>
+                    <span className="text-xs sm:text-sm font-medium" style={{ color: 'var(--color-text-muted)' }}>0%</span>
+                    <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>No data</p>
                   </div>
                 </div>
-                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
-                  <div className="h-1.5 rounded-full bg-gray-400 transition-all duration-300" style={{ width: '0%' }} />
+                <div className="w-full rounded-full h-1.5" style={{ background: 'var(--color-bg-surface-3)' }}>
+                  <div className="h-1.5 rounded-full transition-all duration-300" style={{ width: '0%', background: 'var(--color-border-strong)' }} />
                 </div>
               </div>
             ))
           ) : (
-            <p className="text-sm text-gray-500">No enrolled courses</p>
+            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No enrolled courses</p>
           )}
         </div>
       </div>
@@ -81,17 +81,17 @@ export function AcademicSidePanel({ studentProfile }: Props) {
             { subject: 'Data Structures', type: 'Quiz', date: 'Mar 28', time: '2:00 PM', room: 'Lab 1' },
             { subject: 'Software Engineering', type: 'Mid-term', date: 'Apr 2', time: '9:00 AM', room: 'Hall B' },
           ].map((exam, index) => (
-            <div key={index} className="p-3 bg-gray-50 dark:bg-[#3c4043] rounded-lg">
+            <div key={index} className="p-3 rounded-lg" style={{ background: 'var(--color-bg-surface-2)' }}>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="flex-1 min-w-0">
-                  <h4 className="text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                  <h4 className="text-xs sm:text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
                     {exam.subject}
                   </h4>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">{exam.type} &bull; {exam.room}</p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{exam.type} &bull; {exam.room}</p>
                 </div>
                 <div className="text-left sm:text-right flex-shrink-0">
-                  <p className="text-xs font-medium text-gray-800 dark:text-gray-200">{exam.date}</p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">{exam.time}</p>
+                  <p className="text-xs font-medium" style={{ color: 'var(--color-text-primary)' }}>{exam.date}</p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{exam.time}</p>
                 </div>
               </div>
             </div>

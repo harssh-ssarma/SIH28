@@ -87,8 +87,8 @@ export default function LoginPage() {
       {/* ── Page shell — Google #f0f4f9 background ── */}
       <div className="min-h-screen flex flex-col items-center justify-center px-4 py-10 bg-[#f0f4f9] dark:bg-[#111111]">
 
-        {/* ── Card — Google Material 3: white, 28px radius, hairline border ── */}
-        <div className="relative w-full max-w-[450px] bg-white dark:bg-[#1e1e1e] border border-[#dadce0] dark:border-[#3c4043] rounded-[28px] px-10 py-10 sm:px-12 overflow-hidden">
+        {/* ── Card — Material 3 large dialog style: surface bg, extra-large radius, hairline border ── */}
+        <div className="relative w-full max-w-[450px] [background:var(--color-bg-surface)] border [border-color:var(--color-border)] [border-radius:var(--radius-extra-large)] px-10 py-10 sm:px-12 overflow-hidden [box-shadow:var(--shadow-modal)]">
 
           {/* ── In-card progress bar (Google-style, top of card) ── */}
           <CardProgress ref={cardProgressRef} />

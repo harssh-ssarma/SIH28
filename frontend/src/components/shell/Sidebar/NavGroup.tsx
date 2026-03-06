@@ -93,14 +93,14 @@ export default function NavGroupRow({
                   'flex items-center gap-2.5 h-9 px-3 rounded-[20px] text-sm transition-colors duration-150 select-none',
                   active
                     ? 'bg-[#c2e7ff] dark:bg-[#1C2B4A] text-[#001d35] dark:text-[#e3e3e3]'
-                    : 'text-[#444746] dark:text-[#9aa0a6] hover:bg-[#e8f0fe] dark:hover:bg-[#1a2640]',
+                    : 'text-[#444746] dark:text-[#bdc1c6] hover:bg-[#e8f0fe] dark:hover:bg-[#1a2640]',
                 ].join(' ')}
               >
                 <ChildIcon size={15} strokeWidth={active ? 2.2 : 1.8} className="shrink-0" />
                 <span
                   className={[
                     'hhIRA text-[14px]',
-                    active ? 'font-bold text-[#1f1f1f]' : 'font-medium text-[#444746]',
+                    active ? 'font-bold text-[#1f1f1f] dark:text-[#e3e3e3]' : 'font-medium text-[#444746] dark:text-[#bdc1c6]',
                   ].join(' ')}
                 >
                   {child.label}

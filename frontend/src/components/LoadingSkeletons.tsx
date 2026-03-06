@@ -250,7 +250,7 @@ export function TimetableListSkeleton({ cards = 6 }: { cards?: number }) {
   return (
     <div className="space-y-6">
       {/* Section header skeleton */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 shadow-sm space-y-4">
+      <div className="card space-y-4">
         <div className="flex items-center justify-between">
           <Skeleton className="h-6 w-48 dark:bg-gray-600" />
           <Skeleton className="h-5 w-24 dark:bg-gray-600" />

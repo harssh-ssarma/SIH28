@@ -94,12 +94,12 @@ export function TodaysClassesCard({ todaysClasses, loading }: Props) {
                       {class_.type}
                     </span>
                   </div>
-                  <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
+                  <p className="text-xs sm:text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                     {class_.faculty} &bull; {class_.room}
                   </p>
                 </div>
                 <div className="flex items-center justify-between sm:flex-col sm:items-end gap-2">
-                  <p className="text-xs sm:text-sm font-semibold text-gray-800 dark:text-gray-200">
+                  <p className="text-xs sm:text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
                     {class_.time}
                   </p>
                   <span

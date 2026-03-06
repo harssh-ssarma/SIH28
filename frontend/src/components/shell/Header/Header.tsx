@@ -95,8 +95,7 @@ export default function Header({
             alt="Cadence"
             width={44}
             height={44}
-            className="rounded-full object-contain"
-            style={{ mixBlendMode: 'multiply', flexShrink: 0 }}
+            className="rounded-full object-contain shrink-0 mix-blend-multiply dark:mix-blend-screen"
           />
           <span className="inline-flex items-center w-[92.75px] h-[48px] text-[22px] font-normal [color:var(--color-text-primary,#202124)] tracking-[-0.01em] overflow-hidden">
             Cadence

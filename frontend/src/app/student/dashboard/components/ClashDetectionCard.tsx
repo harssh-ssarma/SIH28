@@ -15,7 +15,7 @@ export function ClashDetectionCard() {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
         <div>
-          <h4 className="text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">Current Conflicts</h4>
+          <h4 className="text-xs sm:text-sm font-medium mb-3" style={{ color: 'var(--color-text-primary)' }}>Current Conflicts</h4>
           <div className="space-y-2">
             <div className="p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 rounded-lg">
               <div className="flex items-start gap-2">
@@ -39,7 +39,7 @@ export function ClashDetectionCard() {
           </div>
         </div>
         <div>
-          <h4 className="text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">Alternative Options</h4>
+          <h4 className="text-xs sm:text-sm font-medium mb-3" style={{ color: 'var(--color-text-primary)' }}>Alternative Options</h4>
           <div className="space-y-2">
             {[
               { course: 'Web Development', code: 'CS402', section: 'B', time: 'Tuesday 10:00-11:30 AM', available: true },
@@ -50,15 +50,15 @@ export function ClashDetectionCard() {
                 key={index}
                 className={`p-2 sm:p-3 rounded-lg border ${
                   option.available
-                    ? 'bg-gray-50 dark:bg-[#3c4043] border-gray-200 dark:border-gray-700'
-                    : 'bg-gray-100 dark:bg-[#2a2a2a] border-gray-300 dark:border-gray-600 opacity-60'
+                    ? '[background:var(--color-bg-surface-2)] [border-color:var(--color-border)]'
+                    : '[background:var(--color-bg-surface-3)] [border-color:var(--color-border-strong)] opacity-60'
                 }`}
               >
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs sm:text-sm font-medium text-gray-800 dark:text-gray-200">{option.course}</p>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">{option.code} Section {option.section}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{option.time}</p>
+                    <p className="text-xs sm:text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{option.course}</p>
+                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{option.code} Section {option.section}</p>
+                    <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{option.time}</p>
                   </div>
                   <span className={`badge text-xs ${option.available ? 'badge-success' : 'badge-neutral'}`}>
                     {option.available ? 'Available' : 'Full'}

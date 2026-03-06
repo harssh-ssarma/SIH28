@@ -27,28 +27,28 @@ export function FacultyProfileCard({ profile }: Props) {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Name</p>
-          <p className="font-medium text-gray-900 dark:text-white">{profile.faculty_name}</p>
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Name</p>
+          <p className="font-medium" style={{ color: 'var(--color-text-primary)' }}>{profile.faculty_name}</p>
         </div>
         <div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Faculty Code</p>
-          <p className="font-medium text-gray-900 dark:text-white">{profile.faculty_code}</p>
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Faculty Code</p>
+          <p className="font-medium" style={{ color: 'var(--color-text-primary)' }}>{profile.faculty_code}</p>
         </div>
         <div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Email</p>
-          <p className="font-medium text-gray-900 dark:text-white">{profile.email}</p>
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Email</p>
+          <p className="font-medium" style={{ color: 'var(--color-text-primary)' }}>{profile.email}</p>
         </div>
         <div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Department</p>
-          <p className="font-medium text-gray-900 dark:text-white">{profile.department || 'N/A'}</p>
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Department</p>
+          <p className="font-medium" style={{ color: 'var(--color-text-primary)' }}>{profile.department || 'N/A'}</p>
         </div>
         <div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Designation</p>
-          <p className="font-medium text-gray-900 dark:text-white">{profile.designation || 'N/A'}</p>
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Designation</p>
+          <p className="font-medium" style={{ color: 'var(--color-text-primary)' }}>{profile.designation || 'N/A'}</p>
         </div>
         <div>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Specialization</p>
-          <p className="font-medium text-gray-900 dark:text-white">{profile.specialization || 'N/A'}</p>
+          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Specialization</p>
+          <p className="font-medium" style={{ color: 'var(--color-text-primary)' }}>{profile.specialization || 'N/A'}</p>
         </div>
       </div>
     </div>

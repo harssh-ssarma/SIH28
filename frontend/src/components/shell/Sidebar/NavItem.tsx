@@ -47,7 +47,7 @@ export default function NavItemRow({
       <span
         className={[
           'text-[14px] transition-[opacity] duration-200',
-          active ? 'font-bold text-[#1f1f1f]' : 'font-medium text-[#444746]',
+          active ? 'font-bold text-[#1f1f1f] dark:text-[#e3e3e3]' : 'font-medium text-[#444746] dark:text-[#bdc1c6]',
           collapsed ? 'opacity-0 w-0 overflow-hidden' : 'hhIRA opacity-100',
         ].join(' ')}
       >

@@ -10,10 +10,10 @@ export function StudentWelcomeCard({ studentProfile }: Props) {
       <div className="flex flex-col gap-4 sm:gap-6">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div className="flex-1">
-            <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold tracking-tight text-gray-800 dark:text-gray-200">
+            <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>
               {studentProfile ? `Welcome back, ${studentProfile.student_name}` : 'Student Dashboard'}
             </h2>
-            <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mt-2">
+            <p className="text-sm sm:text-base mt-2" style={{ color: 'var(--color-text-secondary)' }}>
               {studentProfile
                 ? `${studentProfile.program || 'Program'} • Semester ${studentProfile.current_semester} • ${studentProfile.roll_number || studentProfile.enrollment_number}`
                 : 'Loading...'}

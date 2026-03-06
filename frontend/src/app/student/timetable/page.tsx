@@ -174,18 +174,18 @@ export default function StudentTimetable() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
           <div className="card-compact">
             <div className="text-center">
-              <div className="text-lg sm:text-xl font-semibold text-blue-600 dark:text-blue-400">
+              <div className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-primary)' }}>
                 {schedule.length}
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Total Classes</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Total Classes</div>
             </div>
           </div>
           <div className="card-compact">
             <div className="text-center">
-              <div className="text-lg sm:text-xl font-semibold text-green-600 dark:text-green-400">
+              <div className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-success-text)' }}>
                 {new Set(schedule.map(s => s.subject_code)).size}
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Subjects</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Subjects</div>
             </div>
           </div>
           <div className="card-compact">
@@ -193,15 +193,15 @@ export default function StudentTimetable() {
               <div className="text-lg sm:text-xl font-semibold text-purple-600 dark:text-purple-400">
                 {new Set(schedule.map(s => s.faculty_name)).size}
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Faculty</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Faculty</div>
             </div>
           </div>
           <div className="card-compact">
             <div className="text-center">
-              <div className="text-lg sm:text-xl font-semibold text-orange-600 dark:text-orange-400">
+              <div className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-warning-text)' }}>
                 0
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Conflicts</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Conflicts</div>
             </div>
           </div>
         </div>
@@ -232,7 +232,7 @@ export default function StudentTimetable() {
               
               if (todayClasses.length === 0) {
                 return (
-                  <p className="text-sm text-gray-500 text-center py-4">No classes scheduled for today</p>
+                  <p className="text-sm text-center py-4" style={{ color: 'var(--color-text-muted)' }}>No classes scheduled for today</p>
                 )
               }
               
@@ -247,10 +247,10 @@ export default function StudentTimetable() {
                       <span className={`text-xs font-bold text-${color}-800 dark:text-${color}-300`}>{startTime}</span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                      <h4 className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
                         {slot.subject_code}
                       </h4>
-                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                      <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                         {slot.faculty_name} • {slot.room_number}
                       </p>
                     </div>

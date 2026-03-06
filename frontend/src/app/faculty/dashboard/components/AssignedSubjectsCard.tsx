@@ -37,16 +37,17 @@ export function AssignedSubjectsCard({ subjects, loading }: Props) {
           {subjects.map(subject => (
             <div
               key={subject.offering_id}
-              className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-lg gap-3"
+              className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg gap-3"
+              style={{ background: 'var(--color-bg-surface-2)' }}
             >
               <div className="flex-1">
-                <h4 className="font-medium text-gray-900 dark:text-white">
+                <h4 className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
                   {subject.course_name}
                 </h4>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
+                <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
                   {subject.course_code} • {subject.credits} credits
                 </p>
-                <p className="text-xs text-gray-500 dark:text-gray-500">
+                <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                   {subject.total_enrolled} students enrolled • {subject.number_of_sections} section(s) • {subject.semester_type} {subject.academic_year}
                 </p>
               </div>
@@ -56,10 +57,10 @@ export function AssignedSubjectsCard({ subjects, loading }: Props) {
       ) : (
         <div className="text-center py-8">
           <div className="text-4xl mb-4">📚</div>
-          <h4 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <h4 className="text-lg font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>
             No Subjects Assigned
           </h4>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p style={{ color: 'var(--color-text-secondary)' }}>
             You don&apos;t have any subjects assigned yet.
           </p>
         </div>

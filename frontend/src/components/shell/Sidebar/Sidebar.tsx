@@ -66,8 +66,7 @@ export default function Sidebar({
                 alt=""
                 width={40}
                 height={40}
-                className="rounded-full object-contain shrink-0"
-                style={{ mixBlendMode: 'multiply' }}
+                className="rounded-full object-contain shrink-0 mix-blend-multiply dark:mix-blend-screen"
                 aria-hidden="true"
               />
               <span className="text-[22px] font-normal text-[#202124] dark:text-[#e8eaed] tracking-[-0.01em] whitespace-nowrap leading-none">

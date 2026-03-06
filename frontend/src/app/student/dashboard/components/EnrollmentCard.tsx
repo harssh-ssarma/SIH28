@@ -30,10 +30,10 @@ export function EnrollmentCard({ studentProfile }: Props) {
       ) : studentProfile.enrolled_courses.length === 0 ? (
         <div className="text-center py-8">
           <div className="text-4xl mb-4">📚</div>
-          <h4 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <h4 className="text-lg font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>
             No Courses Enrolled
           </h4>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p style={{ color: 'var(--color-text-secondary)' }}>
             You are not enrolled in any courses for this semester.
           </p>
         </div>
