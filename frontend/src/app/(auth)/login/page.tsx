@@ -84,11 +84,22 @@ export default function LoginPage() {
 
   return (
     <>
-      {/* ── Page shell — Google #f0f4f9 background ── */}
-      <div className="min-h-screen flex flex-col items-center justify-center px-4 py-10 bg-[#f0f4f9] dark:bg-[#111111]">
+      {/* ── Page shell — uses --color-bg-page token so light/dark are consistent ── */}
+      <div
+        className="min-h-screen flex flex-col items-center justify-center px-4 py-10"
+        style={{ background: 'var(--color-bg-page)' }}
+      >
 
-        {/* ── Card — Material 3 large dialog style: surface bg, extra-large radius, hairline border ── */}
-        <div className="relative w-full max-w-[450px] [background:var(--color-bg-surface)] border [border-color:var(--color-border)] [border-radius:var(--radius-extra-large)] px-10 py-10 sm:px-12 overflow-hidden [box-shadow:var(--shadow-modal)]">
+        {/* ── Card — M3 extra-large shape, surface bg, hairline border, modal elevation ── */}
+        <div
+          className="relative w-full max-w-[450px] px-10 py-10 sm:px-12 overflow-hidden"
+          style={{
+            background:    'var(--color-bg-surface)',
+            border:        '1px solid var(--color-border)',
+            borderRadius:  'var(--radius-extra-large)',
+            boxShadow:     'var(--shadow-modal)',
+          }}
+        >
 
           {/* ── In-card progress bar (Google-style, top of card) ── */}
           <CardProgress ref={cardProgressRef} />
@@ -102,12 +113,18 @@ export default function LoginPage() {
               height={72}
               priority
               quality={100}
-              className="rounded-full object-contain"
+              className="rounded-full object-contain mix-blend-multiply dark:mix-blend-screen"
             />
-            <h1 className="text-[24px] font-normal text-[#202124] dark:text-[#e8eaed] mt-1">
+            <h1
+              className="text-[24px] font-normal mt-1"
+              style={{ color: 'var(--color-text-primary)' }}
+            >
               Sign in
             </h1>
-            <p className="text-[14px] text-[#5f6368] dark:text-[#9aa0a6]">
+            <p
+              className="text-[14px]"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
               to continue to Cadence
             </p>
           </div>
@@ -115,7 +132,7 @@ export default function LoginPage() {
           {/* ── Form ── */}
           <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
 
-            {/* Google-style: dim + block interaction on the whole form while loading */}
+            {/* Dim + block interaction while loading */}
             <div
               className="flex flex-col gap-5"
               style={{
@@ -150,7 +167,10 @@ export default function LoginPage() {
                   onClick={() => setShowPassword(v => !v)}
                   disabled={isLoading}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="p-1 rounded-full hover:bg-[#f1f3f4] dark:hover:bg-[#303134] transition-colors disabled:pointer-events-none"
+                  className="p-1 rounded-full transition-colors disabled:pointer-events-none"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                  onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = 'var(--color-bg-surface-2)')}
+                  onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
                 >
                   {showPassword ? <EyeOff /> : <EyeOpen />}
                 </button>
@@ -160,19 +180,23 @@ export default function LoginPage() {
 
             </div>
 
-            {/* Forgot link — Google right-aligns it */}
+            {/* Forgot password — M3: right-aligned text button */}
             <div className="flex justify-end -mt-2">
               <a
                 href="#"
-                className="text-[14px] text-[#1a73e8] dark:text-[#8ab4f8] hover:underline"
+                className="text-[14px] hover:underline transition-colors"
+                style={{ color: 'var(--color-text-link)' }}
               >
                 Forgot password?
               </a>
             </div>
 
-            {/* ── Inline error (Google-style: red text under fields) ── */}
+            {/* ── Inline error — M3 error color tokens ── */}
             {loginError && (
-              <p className="text-[13px] text-[#b3261e] dark:text-[#f2b8b5] flex items-center gap-1.5 -mt-1">
+              <p
+                className="text-[13px] flex items-center gap-1.5 -mt-1"
+                style={{ color: 'var(--color-danger)' }}
+              >
                 <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                 </svg>
@@ -184,14 +208,15 @@ export default function LoginPage() {
             <div className="flex items-center justify-between mt-1">
               <a
                 href="#"
-                className="text-[14px] text-[#1a73e8] dark:text-[#8ab4f8] hover:underline"
+                className="text-[14px] hover:underline transition-colors"
+                style={{ color: 'var(--color-text-link)' }}
               >
                 Create account
               </a>
               <button
                 type="submit"
                 disabled={isLoading}
-                className="h-[40px] px-7 rounded-full bg-[#1a73e8] hover:bg-[#1765cc] active:bg-[#185abc] disabled:opacity-60 disabled:cursor-not-allowed text-white text-[15px] font-medium transition-colors duration-150"
+                className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 Sign in
               </button>
@@ -201,7 +226,10 @@ export default function LoginPage() {
         </div>
 
         {/* ── Footer ── */}
-        <p className="text-[12px] text-[#5f6368] dark:text-[#9aa0a6] mt-8">
+        <p
+          className="text-[12px] mt-8"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
           &copy; {new Date().getFullYear()} Cadence Platform
         </p>
       </div>

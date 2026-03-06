@@ -51,7 +51,7 @@ export default function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#f6f8fc] dark:bg-[#111111] font-sans">
+    <div className="min-h-screen font-sans" style={{ background: 'var(--color-bg-page)' }}>
 
       <Header
         role={role}
@@ -85,30 +85,56 @@ export default function AppShell({ children }: AppShellProps) {
             onClick={() => setShowSignOut(false)}
             aria-hidden="true"
           />
-          <div className="relative w-full max-w-sm bg-white dark:bg-[#292a2d] rounded-2xl shadow-2xl border border-[#e0e0e0] dark:border-[#3c4043] p-6 flex flex-col gap-4">
-            <div className="flex items-start gap-3">
-              <span className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0 mt-0.5">
-                <LogOut size={18} className="text-red-600 dark:text-red-400" />
+          {/* M3 Alert Dialog — extra-large shape, surface bg, modal elevation */}
+          <div
+            className="relative w-full max-w-[312px] flex flex-col overflow-hidden"
+            style={{
+              background:   'var(--color-bg-surface)',
+              border:       '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-extra-large)',
+              boxShadow:    'var(--shadow-modal)',
+            }}
+          >
+            {/* Icon + headline + supporting text — centered, M3 alert dialog spec */}
+            <div className="flex flex-col items-center text-center gap-3 pt-7 px-6 pb-5">
+              <span
+                className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
+                style={{ background: 'var(--color-danger-subtle)' }}
+              >
+                <LogOut size={20} style={{ color: 'var(--color-danger)' }} />
               </span>
-              <div>
-                <h2 className="text-base font-semibold text-[#202124] dark:text-[#e8eaed]">
-                  Sign out?
-                </h2>
-                <p className="text-sm text-[#5f6368] dark:text-[#9aa0a6] mt-1">
-                  Are you sure you want to sign out of Cadence?
-                </p>
-              </div>
+              <h2
+                className="text-[24px] font-normal leading-tight"
+                style={{ color: 'var(--color-text-primary)' }}
+              >
+                Sign out?
+              </h2>
+              <p
+                className="text-[14px] leading-snug"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                You will be signed out of Cadence on this device.
+              </p>
             </div>
-            <div className="flex gap-2 justify-end">
+            {/* Actions — M3: right-aligned, text button + filled tonal destructive */}
+            <div
+              className="flex justify-end gap-1 px-4 pb-5"
+            >
               <button
                 onClick={() => setShowSignOut(false)}
-                className="px-5 py-2 rounded-full text-sm font-medium text-[#444746] dark:text-[#e3e3e3] hover:bg-[#f1f3f4] dark:hover:bg-[#303134] transition-colors"
+                className="px-6 h-10 rounded-full text-[14px] font-medium transition-colors duration-150"
+                style={{ color: 'var(--color-primary)' }}
+                onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = 'var(--color-primary-subtle)')}
+                onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
               >
                 Cancel
               </button>
               <button
                 onClick={handleSignOut}
-                className="px-5 py-2 rounded-full text-sm font-medium bg-red-600 hover:bg-red-700 active:bg-red-800 text-white transition-colors"
+                className="px-6 h-10 rounded-full text-[14px] font-medium text-white transition-colors duration-150"
+                style={{ background: 'var(--color-danger)' }}
+                onMouseEnter={e => ((e.currentTarget as HTMLElement).style.filter = 'brightness(1.1)')}
+                onMouseLeave={e => ((e.currentTarget as HTMLElement).style.filter = 'none')}
               >
                 Sign out
               </button>
