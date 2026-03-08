@@ -74,8 +74,3 @@ class StateManager:
         unique_slots = set(t_slot for (t_slot, room) in schedule.values())
         # Assume 50 total time slots
         return len(unique_slots) / 50.0
-        max_workload = max(self.faculty_workload.values()) if self.faculty_workload else 0
-        if max_workload > 18:
-            reward -= (max_workload - 18) * 5
-        
-        return reward

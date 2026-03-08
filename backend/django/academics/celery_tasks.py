@@ -5,11 +5,18 @@ Enterprise Architecture: Async Task Queue with Progress Tracking
 
 from celery import shared_task
 from django.conf import settings
+from django.core.cache import cache
 import requests
 import logging
+
+# Day-name → int mapping shared by the cache-warmer and TimetableVariantViewSet.
+_DAY_STR_MAP: dict[str, int] = {
+    'Monday': 0, 'Tuesday': 1, 'Wednesday': 2,
+    'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6,
+}
+
 from .models import GenerationJob
 from django.utils import timezone
-from core.tenant_limits import TenantLimits
 
 logger = logging.getLogger(__name__)
 
@@ -38,23 +45,10 @@ def generate_timetable_task(self, job_id, org_id, academic_year, semester):
             logger.warning(f"Insufficient resources, retrying job {job_id}")
             raise self.retry(countdown=60, max_retries=3)
         
-        # Update job status
-        job.status = 'queued'
-        job.save()
-        
-        # Initialize Redis progress immediately
-        from django.core.cache import cache
-        cache.set(
-            f"progress:job:{job_id}",
-            {
-                'job_id': str(job_id),
-                'status': 'queued',
-                'progress': 0,
-                'stage': 'queued',
-                'message': 'Job queued, waiting for FastAPI...',
-            },
-            timeout=7200  # 2 hours
-        )
+        # NOTE: job.status is already 'running' (set by generate view before queuing
+        # the Celery task). Do NOT overwrite it with 'queued' here — that creates a
+        # race condition where the SSE DB fallback streams status='queued' for up to
+        # 34 seconds while FastAPI is already receiving and processing the job.
         
         # Call FastAPI (fire-and-forget - FastAPI returns immediately)
         fastapi_url = getattr(settings, 'FASTAPI_URL', 'http://localhost:8001')
@@ -94,24 +88,79 @@ def generate_timetable_task(self, job_id, org_id, academic_year, semester):
             response = requests.post(
                 f"{fastapi_url}/api/generate_variants",
                 json=payload,
-                timeout=5  # FastAPI MUST respond in <5s (just queues the job)
+                # Increased from 5s: FastAPI queues the job in a background task,
+                # but on first call (cold start) or under load it may take up to 30s
+                # to return 200.  A Timeout here does NOT mean FastAPI missed the
+                # request — it may already be processing it.  See the Timeout handler
+                # below which intentionally avoids marking the job as failed.
+                timeout=30,
             )
             
             if response.status_code == 200:
                 logger.info(f"[CELERY] Job {job_id} queued in FastAPI successfully")
-                # FastAPI is now running generation in background
-                # FastAPI will update Redis with progress
-                # FastAPI will call fastapi_callback_task when done
+                # FastAPI is now running generation in background.
+                # It will update Redis with progress and call fastapi_callback_task
+                # when done.
+                if job:
+                    job.status = 'running'
+                    job.save(update_fields=['status'])
                 return {'status': 'queued', 'job_id': job_id}
+
+            elif response.status_code in (429, 503):
+                # Transient server-side overload — eligible for Celery auto-retry.
+                # Without this branch, non-200 always fell through to the outer
+                # ``except Exception`` which: (a) marked the job as 'failed' and
+                # (b) did NOT trigger self.retry() — so no retry ever happened.
+                logger.warning(
+                    f"[CELERY] FastAPI returned {response.status_code} for job {job_id} "
+                    f"(transient overload).  Retrying in 30 s."
+                )
+                raise self.retry(
+                    exc=Exception(f"FastAPI {response.status_code}: {response.text[:200]}"),
+                    countdown=30,
+                )
+
             else:
-                raise Exception(f"FastAPI returned {response.status_code}: {response.text}")
+                # A persistent error (e.g., 422 Validation Error, 500).
+                # Surface the full response body so operators can diagnose quickly.
+                raise Exception(
+                    f"FastAPI returned {response.status_code}: {response.text[:500]}"
+                )
                 
         except requests.exceptions.Timeout:
-            logger.error(f"[CELERY] FastAPI timeout for job {job_id}")
-            raise Exception("FastAPI took too long to respond (>5s). Service may be overloaded.")
+            # FastAPI did not respond within 30 s, but it may have already received
+            # the POST and started the generation pipeline (the response just got
+            # delayed).  Do NOT mark the job as failed — leave it in 'running' state
+            # so the FastAPI → Celery callback can finalise it when it completes.
+            logger.warning(
+                f"[CELERY] FastAPI POST timed out for job {job_id} (30 s). "
+                f"Generation may still be running inside FastAPI — leaving job "
+                f"status as 'running' so the completion callback can update it."
+            )
+            if job:
+                job.status = 'running'
+                job.error_message = None
+                job.save(update_fields=['status', 'error_message'])
+            return {'status': 'timeout_but_may_be_running', 'job_id': job_id}
+
         except requests.exceptions.ConnectionError:
-            logger.error(f"[CELERY] Cannot connect to FastAPI for job {job_id}")
-            raise Exception("FastAPI service unavailable. Check if FastAPI is running.")
+            # ConnectionError can fire if FastAPI accepted the POST but the HTTP
+            # transport was reset before it sent the response back (e.g. server
+            # briefly crashed and restarted, or the OS forcibly closed the socket).
+            # In that case FastAPI may already be running the generation saga and
+            # writing progress to Redis.  Mirror the Timeout handling: leave the
+            # job as 'running' so the FastAPI → Celery completion callback can
+            # correctly update it, rather than prematurely marking it failed.
+            logger.warning(
+                f"[CELERY] FastAPI connection reset for job {job_id}. "
+                f"Generation may already be running inside FastAPI — leaving job "
+                f"status as 'running' so the completion callback can update it."
+            )
+            if job:
+                job.status = 'running'
+                job.error_message = None
+                job.save(update_fields=['status', 'error_message'])
+            return {'status': 'connection_reset_but_may_be_running', 'job_id': job_id}
             
     except Exception as e:
         logger.error(f"[CELERY] Job {job_id} failed: {str(e)}")
@@ -120,26 +169,122 @@ def generate_timetable_task(self, job_id, org_id, academic_year, semester):
             job.error_message = str(e)
             job.completed_at = timezone.now()
             job.save()
-            
-            # Update Redis so frontend knows it failed
-            from django.core.cache import cache
-            cache.set(
-                f"progress:job:{job_id}",
-                {
-                    'job_id': str(job_id),
-                    'status': 'failed',
-                    'progress': 0,
-                    'stage': 'failed',
-                    'message': str(e),
-                    'error': str(e)
-                },
-                timeout=7200
-            )
-        
-        # Decrement concurrent counter
-        TenantLimits.decrement_concurrent(org_id)
         
         return {'status': 'failed', 'error': str(e)}
+
+
+def _convert_entries_for_cache(entries: list) -> list:
+    """Convert FastAPI entry format → frontend TimetableEntry format (≤ 500 entries).
+
+    Mirrors TimetableVariantViewSet._convert_timetable_entries so both the
+    viewset and the Celery cache-warmer produce identical payloads.
+    """
+    result = []
+    for e in entries[:500]:
+        day_raw = e.get('day', 0)
+        day = day_raw if isinstance(day_raw, int) else _DAY_STR_MAP.get(day_raw, 0)
+        start_t = e.get('start_time', '')
+        end_t = e.get('end_time', '')
+        result.append({
+            'day': day,
+            'time_slot': f"{start_t}-{end_t}" if start_t else e.get('time_slot', ''),
+            'subject_code': e.get('course_code', e.get('subject_code', '')),
+            'subject_name': e.get('subject_name', e.get('course_name', '')),
+            'faculty_id': e.get('faculty_id', ''),
+            'faculty_name': e.get('faculty_name', ''),
+            'room_number': e.get('room_code', e.get('room_number', '')),
+            'batch_name': e.get('batch_name', ''),
+            'department_id': e.get('department_id', ''),
+        })
+    return result
+
+
+def _warm_workflow_cache(job_id: str, job: "GenerationJob", ttl: int) -> None:
+    """Store workflow metadata in Redis.  Independently testable."""
+    data = {
+        'id': str(job.id),
+        'job_id': str(job.id),
+        'organization_id': str(job.organization_id),
+        'status': job.status,
+        'academic_year': getattr(job, 'academic_year', None),
+        'semester': getattr(job, 'semester', None),
+        'created_at': job.created_at.isoformat(),
+        'timetable_entries': [],
+    }
+    cache.set(f'workflow_{job_id}', data, ttl)
+
+
+def _warm_variants_cache(job_id: str, job: "GenerationJob", variants: list, ttl: int) -> None:
+    """Store variants-list metadata AND per-variant entries in Redis.
+
+    Keys written:
+      variants_list_{job_id}              → TimetableVariantViewSet.list()
+      variant_entries_{job_id}-variant-N  → TimetableVariantViewSet.entries()
+    """
+    variants_list = []
+    for idx, v in enumerate(variants):
+        qm = v.get('quality_metrics', {}) or {}
+        sta = v.get('statistics', {}) or {}
+        variant_id = f"{job_id}-variant-{idx + 1}"
+
+        overall_score = qm.get('overall_score', v.get('score', 0))
+        total_conflicts = qm.get('total_conflicts', v.get('conflicts', 0))
+        room_util = qm.get('room_utilization_score', v.get('room_utilization', 0))
+        total_classes = sta.get('total_classes', len(v.get('timetable_entries', [])))
+
+        variants_list.append({
+            'id': variant_id,
+            'job_id': str(job_id),
+            'variant_number': idx + 1,
+            'organization_id': str(job.organization_id),
+            'timetable_entries': [],
+            'statistics': {
+                'total_classes': total_classes,
+                'total_conflicts': total_conflicts,
+            },
+            'quality_metrics': {
+                'overall_score': overall_score,
+                'total_conflicts': total_conflicts,
+                'room_utilization_score': room_util,
+            },
+            'generated_at': job.created_at.isoformat(),
+        })
+
+        # Pre-warm per-variant entries — clicking any variant card becomes instant
+        converted = _convert_entries_for_cache(v.get('timetable_entries', []))
+        cache.set(f'variant_entries_{variant_id}', converted, ttl)
+
+    cache.set(f'variants_list_{job_id}', variants_list, ttl)
+
+
+def _warm_review_caches(job_id: str, job: "GenerationJob", variants: list) -> None:
+    """
+    Pre-populate Redis caches immediately after a job completes.
+
+    TTL = REVIEW_CACHE_TTL (default 3 600 s / 1 hour).  Variant data is
+    immutable after generation so 1 hour is safe.  The previous 5-minute TTL
+    caused every visit more than 5 min after generation to hit the Neon JSONB
+    column cold (10-20 s page-read latency on the free tier).
+
+    Keys populated:
+      workflow_{job_id}                   ← TimetableWorkflowViewSet.retrieve()
+      variants_list_{job_id}              ← TimetableVariantViewSet.list()
+      variant_entries_{job_id}-variant-N  ← TimetableVariantViewSet.entries()
+    """
+    try:
+        ttl = getattr(settings, 'REVIEW_CACHE_TTL', 3600)
+        _warm_workflow_cache(job_id, job, ttl)
+        _warm_variants_cache(job_id, job, variants, ttl)
+        logger.info(
+            "[CACHE WARM] Pre-populated review caches for job",
+            extra={"job_id": str(job_id), "variant_count": len(variants), "ttl": ttl},
+        )
+    except Exception as exc:
+        # Non-fatal — a cache warm-up failure must never fail the Celery callback.
+        logger.warning(
+            "[CACHE WARM] Could not pre-warm caches for job",
+            extra={"job_id": str(job_id), "error": str(exc)},
+        )
 
 
 @shared_task
@@ -158,20 +303,6 @@ def fastapi_callback_task(job_id, status, variants=None, error=None):
             job.error_message = 'Cancelled by user'
             job.completed_at = timezone.now()
             logger.info(f"[CALLBACK] Job {job_id} cancelled")
-            
-            # Update Redis
-            from django.core.cache import cache
-            cache.set(
-                f"progress:job:{job_id}",
-                {
-                    'job_id': str(job_id),
-                    'status': 'cancelled',
-                    'progress': 0,
-                    'stage': 'cancelled',
-                    'message': 'Generation cancelled by user',
-                },
-                timeout=7200
-            )
         
         elif status == 'completed':
             job.status = 'completed'
@@ -183,53 +314,53 @@ def fastapi_callback_task(job_id, status, variants=None, error=None):
             
             logger.info(f"[CALLBACK] Job {job_id} completed successfully with {len(variants) if variants else 0} variants")
             
-            # Update Redis with final status
-            from django.core.cache import cache
-            cache.set(
-                f"progress:job:{job_id}",
-                {
-                    'job_id': str(job_id),
-                    'status': 'completed',
-                    'progress': 100,
-                    'stage': 'completed',
-                    'message': 'Generation completed successfully',
-                },
-                timeout=7200
-            )
-            
         elif status == 'failed':
             job.status = 'failed'
             job.error_message = error or 'Generation failed - check logs'
             job.completed_at = timezone.now()
             logger.error(f"[CALLBACK] Job {job_id} failed: {error or 'No error message'}")
-            
-            # Update Redis with failed status
-            from django.core.cache import cache
-            cache.set(
-                f"progress:job:{job_id}",
-                {
-                    'job_id': str(job_id),
-                    'status': 'failed',
-                    'progress': 0,
-                    'stage': 'failed',
-                    'message': error or 'Generation failed',
-                    'error': error or 'Generation failed'
-                },
-                timeout=7200
-            )
         
         job.save()
-        
+
+        # ── Warm Redis caches proactively on success ──────────────────────────
+        # Two call paths reach here:
+        #
+        # Path A — Django internal (variants supplied):  original flow where
+        #           variants payload is passed in directly.
+        #
+        # Path B — FastAPI fire-and-forget (variants=None):  _enqueue_cache_warm_task
+        #           in saga.py queues this task with no payload to keep the
+        #           Celery message small.  We read variants from the DB row
+        #           that FastAPI already committed before enqueueing the task.
+        #
+        if status == 'completed':
+            _variants_to_warm = variants or []
+            if not _variants_to_warm:
+                try:
+                    _fresh = GenerationJob.objects.only('timetable_data').get(
+                        id=job_id
+                    )
+                    _variants_to_warm = (
+                        _fresh.timetable_data or {}
+                    ).get('variants', [])
+                    logger.info(
+                        "[CALLBACK] Read %d variants from DB for cache warm",
+                        len(_variants_to_warm),
+                        extra={"job_id": str(job_id)},
+                    )
+                except Exception as _db_err:
+                    logger.warning(
+                        "[CALLBACK] Could not read variants from DB for cache warm",
+                        extra={"job_id": str(job_id), "error": str(_db_err)},
+                    )
+            if _variants_to_warm:
+                _warm_review_caches(job_id, job, _variants_to_warm)
+
         # Cleanup temporary Redis keys
-        from django.core.cache import cache
         cache.delete(f"generation_queue:{job_id}")
         cache.delete(f"cancel:job:{job_id}")  # Cleanup cancel flag
         
-        # Decrement concurrent counter
-        org_id = job.organization.org_code if job.organization else 'unknown'
-        TenantLimits.decrement_concurrent(org_id)
-        
-        logger.info(f"[CALLBACK] Job {job_id} finalized, concurrent counter decremented")
+        logger.info(f"[CALLBACK] Job {job_id} finalized")
         
     except GenerationJob.DoesNotExist:
         logger.error(f"[CALLBACK] Job {job_id} not found in database")
@@ -252,3 +383,25 @@ def cleanup_old_jobs():
     
     logger.info(f"Cleaned up {deleted[0]} old jobs")
     return deleted[0]
+
+@shared_task
+def cleanup_tokens_task(grace_days: int = 1) -> dict:
+    """
+    Celery wrapper around the cleanup_tokens management command logic.
+
+    Deletes OutstandingToken rows (and their cascade-deleted BlacklistedToken
+    entries) that expired more than *grace_days* days ago.
+
+    Called automatically by Celery beat (CELERY_BEAT_SCHEDULE in settings.py).
+    Can also be enqueued manually: cleanup_tokens_task.delay(grace_days=2)
+    """
+    from datetime import timedelta
+    from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+
+    cutoff = timezone.now() - timedelta(days=grace_days)
+    deleted, _ = OutstandingToken.objects.filter(expires_at__lt=cutoff).delete()
+    logger.info(
+        "cleanup_tokens_task completed",
+        extra={"deleted": deleted, "cutoff": cutoff.isoformat(), "grace_days": grace_days},
+    )
+    return {"deleted": deleted, "cutoff": cutoff.isoformat()}

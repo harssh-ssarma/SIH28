@@ -1,12 +1,28 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import DashboardLayout from '@/components/dashboard-layout'
+import { useState, useEffect, useRef } from 'react'
+import { TimetableGridSkeleton } from '@/components/LoadingSkeletons'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const TIME_SLOTS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00']
 
 function TimetableGrid({ schedule }: { schedule: any[] }) {
+  // Lazy-render via IntersectionObserver — defers table DOM until in-viewport
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [inView, setInView] = useState(false)
+
+  useEffect(() => {
+    if (inView) return
+    const el = wrapRef.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setInView(true) },
+      { rootMargin: '300px' },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [inView])
+
   if (!schedule || schedule.length === 0) {
     return (
       <div className="p-8 text-center text-gray-500 dark:text-gray-400">
@@ -16,7 +32,10 @@ function TimetableGrid({ schedule }: { schedule: any[] }) {
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div ref={wrapRef} className="overflow-x-auto">
+      {!inView ? (
+        <div style={{ minHeight: '200px' }} />
+      ) : (
       <table className="w-full border-collapse">
         <thead>
           <tr>
@@ -48,12 +67,26 @@ function TimetableGrid({ schedule }: { schedule: any[] }) {
           ))}
         </tbody>
       </table>
+      )}
     </div>
   )
 }
 
 export default function StudentTimetable() {
-  const [schedule, setSchedule] = useState<any[]>([])
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
+  const SCHEDULE_CACHE_KEY = 'student_schedule_cache'
+  const SCHEDULE_CACHE_TTL = 10 * 60 * 1000 // 10 minutes
+
+  const [schedule, setSchedule] = useState<any[]>(() => {
+    try {
+      const raw = sessionStorage.getItem(SCHEDULE_CACHE_KEY)
+      if (raw) {
+        const { data, ts } = JSON.parse(raw)
+        if (Date.now() - ts < SCHEDULE_CACHE_TTL) return data
+      }
+    } catch { /* storage unavailable */ }
+    return []
+  })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [student, setStudent] = useState<any>(null)
@@ -66,19 +99,21 @@ export default function StudentTimetable() {
     try {
       setLoading(true)
       setError(null)
-      // 🔐 Use HttpOnly cookies (no manual token handling)
-      const res = await fetch('http://localhost:8000/api/timetable/student/me/', {
-        credentials: 'include', // Send HttpOnly cookies automatically
+      const res = await fetch(`${API_BASE}/timetable/student/me/`, {
+        credentials: 'include',
       })
-      
+
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`)
       }
-      
+
       const data = await res.json()
       if (data.success) {
         setSchedule(data.slots || [])
         setStudent(data.student)
+        try {
+          sessionStorage.setItem(SCHEDULE_CACHE_KEY, JSON.stringify({ data: data.slots || [], ts: Date.now() }))
+        } catch { /* quota exceeded */ }
       } else {
         setError(data.message || 'Failed to load timetable')
       }
@@ -92,21 +127,15 @@ export default function StudentTimetable() {
 
   if (loading) {
     return (
-      <DashboardLayout role="student">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-400">Loading schedule...</p>
-          </div>
-        </div>
-      </DashboardLayout>
+      <div className="space-responsive">
+        <TimetableGridSkeleton />
+      </div>
     )
   }
 
   if (error) {
     return (
-      <DashboardLayout role="student">
-        <div className="flex items-center justify-center min-h-[400px]">
+      <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <div className="text-red-600 dark:text-red-400 mb-4">⚠️</div>
             <p className="text-gray-800 dark:text-gray-200 font-medium mb-2">Failed to load timetable</p>
@@ -114,20 +143,18 @@ export default function StudentTimetable() {
             <button onClick={fetchSchedule} className="btn-primary">Retry</button>
           </div>
         </div>
-      </DashboardLayout>
     )
   }
 
   return (
-    <DashboardLayout role="student">
-      <div className="space-responsive">
+    <div className="space-responsive">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold text-gray-800 dark:text-gray-200 truncate">
+            <h2 className="text-lg sm:text-xl lg:text-2xl font-semibold truncate" style={{ color: 'var(--color-text-primary)' }}>
               My Timetable
             </h2>
-            <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-1">
+            <p className="text-xs sm:text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
               View your weekly schedule
             </p>
           </div>
@@ -147,18 +174,18 @@ export default function StudentTimetable() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
           <div className="card-compact">
             <div className="text-center">
-              <div className="text-lg sm:text-xl font-semibold text-blue-600 dark:text-blue-400">
+              <div className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-primary)' }}>
                 {schedule.length}
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Total Classes</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Total Classes</div>
             </div>
           </div>
           <div className="card-compact">
             <div className="text-center">
-              <div className="text-lg sm:text-xl font-semibold text-green-600 dark:text-green-400">
+              <div className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-success-text)' }}>
                 {new Set(schedule.map(s => s.subject_code)).size}
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Subjects</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Subjects</div>
             </div>
           </div>
           <div className="card-compact">
@@ -166,15 +193,15 @@ export default function StudentTimetable() {
               <div className="text-lg sm:text-xl font-semibold text-purple-600 dark:text-purple-400">
                 {new Set(schedule.map(s => s.faculty_name)).size}
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Faculty</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Faculty</div>
             </div>
           </div>
           <div className="card-compact">
             <div className="text-center">
-              <div className="text-lg sm:text-xl font-semibold text-orange-600 dark:text-orange-400">
+              <div className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-warning-text)' }}>
                 0
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Conflicts</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Conflicts</div>
             </div>
           </div>
         </div>
@@ -205,7 +232,7 @@ export default function StudentTimetable() {
               
               if (todayClasses.length === 0) {
                 return (
-                  <p className="text-sm text-gray-500 text-center py-4">No classes scheduled for today</p>
+                  <p className="text-sm text-center py-4" style={{ color: 'var(--color-text-muted)' }}>No classes scheduled for today</p>
                 )
               }
               
@@ -220,10 +247,10 @@ export default function StudentTimetable() {
                       <span className={`text-xs font-bold text-${color}-800 dark:text-${color}-300`}>{startTime}</span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                      <h4 className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
                         {slot.subject_code}
                       </h4>
-                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                      <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                         {slot.faculty_name} • {slot.room_number}
                       </p>
                     </div>
@@ -237,6 +264,5 @@ export default function StudentTimetable() {
           </div>
         </div>
       </div>
-    </DashboardLayout>
   )
 }

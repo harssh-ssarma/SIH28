@@ -28,7 +28,7 @@ class GenerationService:
         """
         self.redis = redis_client
         self.hardware_profile = hardware_profile
-        logger.info("Generation service initialized")
+        logger.debug("Generation service initialized")
     
     async def generate_timetable(
         self,
@@ -73,10 +73,10 @@ class GenerationService:
                 'time_config': time_config
             }
             
-            # Execute Saga with 15-minute timeout
+            # Execute Saga with 60-minute timeout (BHU full university = ~27 min observed)
             results = await asyncio.wait_for(
                 saga.execute(job_id, request_data),
-                timeout=900  # 15 minutes
+                timeout=3600  # 60 minutes
             )
             
             logger.info(f"[JOB {job_id}] ✅ Generation completed successfully")
@@ -108,73 +108,210 @@ class GenerationService:
             
         finally:
             # Cleanup
-            logger.info(f"[JOB {job_id}] Cleaning up resources")
+            logger.debug(f"[JOB {job_id}] Cleaning up resources")
             await self._cleanup(job_id)
     
     async def _handle_timeout(self, job_id: str):
-        """Handle job timeout"""
+        """Handle job timeout — write failed status to Redis and DB so Django SSE terminates."""
+        import time, json
         if self.redis:
-            import json
-            timeout_data = {
-                'job_id': job_id,
-                'progress': 0,
-                'status': 'failed',
-                'stage': 'Timeout',
-                'message': 'Generation timed out after 15 minutes',
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-            self.redis.setex(f"progress:job:{job_id}", 3600, json.dumps(timeout_data))
-            self.redis.publish(f"progress:{job_id}", json.dumps(timeout_data))
             self.redis.delete(f"cancel:job:{job_id}")
             self.redis.delete(f"start_time:job:{job_id}")
+            # Write failed status to progress key so Django SSE emits 'done' and stops
+            try:
+                key = f"progress:job:{job_id}"
+                existing_raw = self.redis.get(key)
+                existing = json.loads(existing_raw) if existing_raw else {}
+                now = int(time.time())
+                failed_data = {
+                    'job_id': job_id,
+                    'stage': 'failed',
+                    'stage_progress': existing.get('stage_progress', 0.0),
+                    'overall_progress': existing.get('overall_progress', 0.0),
+                    'status': 'failed',
+                    'eta_seconds': None,
+                    'started_at': existing.get('started_at', now),
+                    'last_updated': now,
+                    'failed_at': now,
+                    'metadata': {'error': 'Generation timed out (60-minute limit exceeded)'},
+                }
+                self.redis.setex(key, 7200, json.dumps(failed_data))
+                logger.info(f"[JOB {job_id}] Wrote failed status to Redis")
+            except Exception as e:
+                logger.warning(f"[JOB {job_id}] Could not write failed status to Redis: {e}")
+        # Also update the Django DB directly — use the shared pool to avoid
+        # paying the TCP+TLS connect cost and leaking connections.
+        try:
+            from datetime import datetime, timezone
+            from utils.django_client import _get_db_pool, _get_healthy_conn
+
+            _pool = _get_db_pool()
+            _conn = _get_healthy_conn(_pool)
+            _conn.autocommit = False
+            try:
+                with _conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE generation_jobs
+                        SET status = 'failed',
+                            error_message = 'Generation timed out (60-minute limit exceeded)',
+                            updated_at = %s
+                        WHERE id = %s AND status NOT IN ('completed', 'approved', 'cancelled')
+                        """,
+                        (datetime.now(timezone.utc), job_id)
+                    )
+                _conn.commit()
+                logger.info(f"[JOB {job_id}] Marked as failed in DB (timeout)")
+            except Exception:
+                try:
+                    _conn.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                try:
+                    _conn.autocommit = True
+                except Exception:
+                    pass
+                try:
+                    _get_db_pool().putconn(_conn)
+                except Exception:
+                    try:
+                        _conn.close()
+                    except Exception:
+                        pass
+        except Exception as db_err:
+            logger.warning(f"[JOB {job_id}] Could not update DB on timeout: {db_err}")
     
     async def _handle_cancellation(self, job_id: str):
-        """Handle job cancellation"""
+        """Handle asyncio.CancelledError path (external/forced task cancellation).
+
+        This is distinct from the cooperative ``CancellationError`` path that
+        saga.execute() handles internally (which calls ``tracker.mark_cancelled()``
+        itself).  This method fires when the asyncio Task is cancelled externally
+        — e.g. a server restart while a job is in-flight.  Without writing a
+        terminal state here the progress key would stay ``'running'`` for 2 hours
+        (its TTL), causing the frontend SSE loop to keep reconnecting.
+        """
         if self.redis:
-            import json
-            cancel_data = {
-                'job_id': job_id,
-                'progress': 0,
-                'status': 'cancelled',
-                'stage': 'Cancelled',
-                'message': 'Generation cancelled by user',
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-            self.redis.setex(f"progress:job:{job_id}", 3600, json.dumps(cancel_data))
-            self.redis.publish(f"progress:{job_id}", json.dumps(cancel_data))
-            self.redis.delete(f"cancel:job:{job_id}")
-            self.redis.delete(f"start_time:job:{job_id}")
+            try:
+                import json as _json, time as _time
+                now = int(_time.time())
+                existing_raw = self.redis.get(f"progress:job:{job_id}")
+                existing = _json.loads(existing_raw) if existing_raw else {}
+                cancelled_data = {
+                    'job_id':           job_id,
+                    'stage':            'cancelled',
+                    'stage_progress':   0.0,
+                    'overall_progress': 0.0,
+                    'status':           'cancelled',
+                    'eta_seconds':      None,
+                    'started_at':       existing.get('started_at', now),
+                    'last_updated':     now,
+                    'cancelled_at':     now,
+                    'metadata':         {'error': 'Job cancelled externally (server shutdown?)'},
+                }
+                self.redis.setex(
+                    f"progress:job:{job_id}", 7200, _json.dumps(cancelled_data)
+                )
+            except Exception:
+                pass
+            # Clean all ephemeral keys in one pipeline
+            try:
+                pipe = self.redis.pipeline(transaction=False)
+                pipe.delete(f"cancel:job:{job_id}")
+                pipe.delete(f"start_time:job:{job_id}")
+                pipe.delete(f"state:job:{job_id}")
+                pipe.execute()
+            except Exception:
+                pass
     
     async def _handle_error(self, job_id: str, error: Exception):
-        """Handle job error"""
+        """Handle job error — fallback DB write in case _compensate in saga.py failed."""
         if self.redis:
-            import json
-            error_data = {
-                'job_id': job_id,
-                'progress': 0,
-                'status': 'failed',
-                'stage': 'Failed',
-                'message': f'Generation failed: {str(error)}',
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-            self.redis.setex(f"progress:job:{job_id}", 3600, json.dumps(error_data))
-            self.redis.publish(f"progress:{job_id}", json.dumps(error_data))
             self.redis.delete(f"cancel:job:{job_id}")
             self.redis.delete(f"start_time:job:{job_id}")
+        # Fallback: ensure the Django DB row is marked failed so the API never
+        # returns 'running' for this job on subsequent polls (which would cause
+        # an infinite SSE-reconnect loop in the frontend).
+        try:
+            import os
+            from datetime import datetime, timezone
+            from utils.django_client import _get_db_pool, _get_healthy_conn
+
+            _pool = _get_db_pool()
+            _conn = _get_healthy_conn(_pool)
+            _conn.autocommit = False
+            try:
+                with _conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE generation_jobs
+                        SET status = 'failed',
+                            error_message = %s,
+                            updated_at = %s
+                        WHERE id = %s AND status NOT IN ('completed', 'cancelled', 'approved')
+                        """,
+                        (str(error)[:500], datetime.now(timezone.utc), job_id)
+                    )
+                _conn.commit()
+                logger.info(f"[JOB {job_id}] Fallback: marked as failed in DB (_handle_error)")
+            except Exception:
+                try:
+                    _conn.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                try:
+                    _conn.autocommit = True
+                except Exception:
+                    pass
+                try:
+                    _get_db_pool().putconn(_conn)
+                except Exception:
+                    try:
+                        _conn.close()
+                    except Exception:
+                        pass
+        except Exception as db_err:
+            logger.warning(f"[JOB {job_id}] Fallback DB write failed: {db_err}")
     
     async def _cleanup(self, job_id: str):
-        """Cleanup resources after generation"""
+        """Clean up ephemeral Redis keys and process memory after any terminal state.
+
+        Always called from the ``finally`` block in ``generate_timetable`` —
+        runs whether the job succeeded, failed, or was cancelled.
+
+        Keys intentionally KEPT (read by other consumers):
+            ``progress:job:{job_id}``  — frontend SSE reads terminal status; TTL=7200s
+            ``result:job:{job_id}``   — variants API reads scores/metrics; TTL=86400s
+
+        Keys explicitly DELETED (ephemeral control-plane signals):
+            ``cancel:job:{job_id}``   — cancellation flag
+            ``start_time:job:{job_id}``— job wall-clock start (used for admin elapsed-time)
+            ``state:job:{job_id}``    — CancellationToken state-machine key
+
+        Previously only ``cancel:job:`` was deleted here, causing ``start_time``
+        and ``state`` to linger for up to 1 hour and pollute admin dashboards.
+        """
         try:
-            # Cleanup Redis flags
             if self.redis:
-                self.redis.delete(f"cancel:job:{job_id}")
-            
-            # Force garbage collection
+                # Single pipeline round-trip for all ephemeral key deletes
+                pipe = self.redis.pipeline(transaction=False)
+                pipe.delete(f"cancel:job:{job_id}")
+                pipe.delete(f"start_time:job:{job_id}")
+                pipe.delete(f"state:job:{job_id}")
+                pipe.execute()
+        except Exception as e:
+            logger.warning(f"[JOB {job_id}] Redis cleanup error (non-fatal): {e}")
+
+        # Force GC to reclaim large in-memory structures (courses, students,
+        # solution dicts) that the saga held during execution.
+        try:
             import gc
             gc.collect()
-            gc.collect()  # Double collect for thorough cleanup
-            
-            logger.debug(f"[JOB {job_id}] Cleanup complete")
-            
-        except Exception as e:
-            logger.error(f"[JOB {job_id}] Cleanup error: {e}")
+        except Exception:
+            pass
+
+        logger.debug(f"[JOB {job_id}] Cleanup complete")

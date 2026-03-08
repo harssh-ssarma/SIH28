@@ -103,6 +103,7 @@ const config: Config = {
         'fade-in': 'fadeIn 0.5s ease-in-out',
         'slide-up': 'slideUp 0.3s ease-out',
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'slideInRight': 'slideInRight 0.22s cubic-bezier(0.2,0,0,1)',
       },
       keyframes: {
         fadeIn: {
@@ -113,9 +114,20 @@ const config: Config = {
           '0%': { transform: 'translateY(10px)', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
         },
+        slideInRight: {
+          '0%': { transform: 'translateX(calc(100% + 16px))', opacity: '0' },
+          '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
       },
     },
   },
+  safelist: [
+    // Nav label active/inactive states — used dynamically in AppShell
+    'text-[#1f1f1f]',
+    'text-[#444746]',
+    'font-bold',
+    'font-normal',
+  ],
   plugins: [],
 }
 export default config

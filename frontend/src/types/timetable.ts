@@ -85,6 +85,28 @@ export interface TimetableEntry {
   is_elective: boolean
 }
 
+/**
+ * Backend entry shape as returned by /timetable/variants/{id}/entries/
+ * Uses day as a number (0 = Monday…5 = Saturday) unlike the legacy TimetableEntry.
+ */
+export interface BackendTimetableEntry {
+  day: number          // 0 = Monday … 5 = Saturday
+  time_slot: string
+  start_time?: string
+  end_time?: string
+  subject_id?: string
+  subject_name?: string
+  subject_code?: string
+  faculty_id?: string
+  faculty_name?: string
+  batch_id?: string
+  batch_name?: string
+  classroom_id?: string
+  room_number?: string
+  duration_minutes?: number
+  department_id?: string
+}
+
 export interface TimetableReview {
   id: string
   workflow: string // UUID reference
@@ -162,13 +184,13 @@ export interface TimetableSlot {
 export interface TimetableListItem {
   id: string
   year: number
-  batch: string
+  batch: string | null
   department: string
   semester: number
-  status: 'approved' | 'pending' | 'draft' | 'rejected'
+  status: 'approved' | 'pending' | 'pending_review' | 'draft' | 'rejected' | 'running' | 'completed' | 'failed'
   lastUpdated: string
   conflicts: number
-  score?: number
+  score?: number | null
   academic_year: string
   variant_id?: string
   job_id?: string
@@ -180,21 +202,6 @@ export interface FacultyAvailability {
   available: boolean
   email?: string
   department?: string
-}
-
-// ============================================
-// WEBSOCKET PROGRESS MESSAGES
-// ============================================
-
-export interface ProgressMessage {
-  job_id: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
-  progress: number // 0-100
-  phase: string // 'initializing' | 'clustering' | 'optimization' | 'conflict_resolution' | 'completed'
-  message: string
-  eta_seconds?: number
-  current_step?: string
-  timestamp: string
 }
 
 // ============================================
@@ -250,9 +257,125 @@ export interface ApprovalRequest {
   review_type: 'approve' | 'request_changes' | 'reject'
 }
 
+// ============================================
+// WORKFLOW LIST (Approvals page)
+// ============================================
+
+export type WorkflowStatus = 'completed' | 'approved' | 'rejected'
+
+export interface WorkflowListItem {
+  id: string
+  status: WorkflowStatus
+  academic_year: string
+  semester: number | null
+  created_at: string
+  organization_id: string
+}
+
+// ============================================
+// CONFLICT DETECTION RESPONSE
+// ============================================
+
+export interface ConflictItem {
+  type: string
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  day: string
+  time_slot: string
+  message: string
+  suggestion: string
+  faculty?: string
+  room?: string
+  courses?: string[]
+}
+
+export interface ConflictDetectionResult {
+  job_id: string
+  variant_id: number
+  conflicts: ConflictItem[]
+  summary: {
+    total: number
+    critical: number
+    high: number
+    medium: number
+    low: number
+  }
+  total_entries: number
+  acknowledged_indices: number[]
+}
+
 export interface ApprovalResponse {
   success: boolean
   workflow_id: string
   status: string
   message: string
+}
+
+// ============================================
+// VARIANT SCORE CARD  (new — Google-style)
+// ============================================
+
+export interface VariantScoreCard {
+  overall_score: number              // 0-100
+  score_faculty_load: number         // 0-100  (higher = less overloaded)
+  score_room_utilization: number     // 0-100
+  score_student_gaps: number         // 0-100  (higher = fewer gaps)
+  total_conflicts: number            // hard conflicts
+  soft_violation_count: number       // soft constraint violations
+  optimization_label: string         // "Faculty Optimized" | "Room Optimized" | "Student Experience"
+  is_recommended: boolean            // true on variant with highest overall_score
+}
+
+/** A single schedulable entry with full metadata for the comparison grid */
+export interface TimetableSlotDetailed {
+  day: number                        // 0=Mon … 5=Sat
+  time_slot: string                  // "09:00-10:00"
+  subject_code: string
+  subject_name: string
+  faculty_id: string
+  faculty_name: string
+  room_number: string
+  batch_name: string
+  department_id: string
+  year: number | null                // 1-4 or null for cross-dept
+  section: string
+  has_conflict: boolean
+  conflict_description: string
+  enrolled_count: number
+  room_capacity: number
+}
+
+/** Result of the server-side diff between two variants */
+export interface ComparisonResult {
+  shared_slots: TimetableSlotDetailed[]
+  only_in_a: TimetableSlotDetailed[]
+  only_in_b: TimetableSlotDetailed[]
+  conflicts_a: TimetableSlotDetailed[]
+  conflicts_b: TimetableSlotDetailed[]
+  summary: {
+    identical: number
+    diff_a: number
+    diff_b: number
+    conflicts_a: number
+    conflicts_b: number
+  }
+}
+
+/** Enriched variant as returned by /api/timetable/variants/?job_id=X */
+export interface VariantSummary {
+  id: string                         // "{job_id}-variant-{n}"
+  job_id: string
+  variant_number: number
+  organization_id: string
+  timetable_entries: TimetableSlotDetailed[]   // empty; populated via /entries/
+  statistics: { total_classes: number; total_conflicts: number }
+  quality_metrics: VariantScoreCard
+  generated_at: string
+}
+
+/** Department option for the dropdown / tree */
+export interface DepartmentOption {
+  id: string
+  name: string
+  code: string
+  total_entries?: number
 }

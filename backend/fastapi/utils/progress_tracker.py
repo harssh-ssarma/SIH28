@@ -1,473 +1,412 @@
 """
-Enterprise Progress Tracker - Google/Microsoft Style
-Smooth, consistent progress based on overall time, not stage completion
+Enterprise Progress Tracker - Google/Meta Style
+Single Responsibility: Track and persist generation progress in Redis
+
+Rule: The worker owns the progress
 """
 import time
-import asyncio
-import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional
 import json
+import logging
+from typing import Optional, Dict, Any
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 
-class EnterpriseProgressTracker:
+class ProgressTracker:
     """
-    Time-based Virtual Progress Smoothing (Chrome/TensorFlow/Steam style)
-    - Smooth progress updates every 100ms regardless of algorithm state
-    - Based on expected stage durations, not internal algorithm steps
-    - Never stuck, never jumps backward
-    - Works perfectly with blocking algorithms (CP-SAT, GA, RL)
+    Cooperative progress tracker for timetable generation.
+    
+    Principles:
+    - Worker emits progress (FastAPI engine)
+    - Control plane stores progress (Redis)
+    - UI subscribes to progress (SSE via Django)
+    
+    Progress is weighted across stages:
+    - Load Data: 5%
+    - Clustering: 10%
+    - CP-SAT: 60%
+    - GA: 15%
+    - RL: 10%
     """
     
-    def __init__(self, job_id: str, estimated_total_seconds: int, redis_client):
-        self.job_id = job_id
-        self.redis_client = redis_client
-        
-        # Time-based tracking
-        self.start_time = time.time()
-        self.last_progress = 0.0
-        self._progress_lock = asyncio.Lock()  # Thread-safe progress updates
-        
-        # User-friendly stage names (hide technical details)
-        self.stage_display_names = {
-            'load_data': 'Loading Data',
-            'clustering': 'Assigning Courses',
-            'cpsat': 'Scheduling Classes',
-            'ga': 'Optimizing Schedule',
-            'rl': 'Resolving Conflicts',
-            'finalize': 'Finalizing Timetable'
-        }
-        
-        # Stage configuration with ABSOLUTE cumulative progress boundaries
-        # Total time: ~10-12 minutes = 600-720s
-        # Observed: load=5s, cluster=10s, cpsat=180s, ga=300s, rl=180s, final=5s
-        # Each stage has start_progress, end_progress, and expected_time
-        self.stage_config = {
-            'load_data': {'start': 0, 'end': 5, 'expected_time': 5},       # 0% -> 5%
-            'clustering': {'start': 5, 'end': 10, 'expected_time': 10},    # 5% -> 10%
-            'cpsat': {'start': 10, 'end': 60, 'expected_time': 180},       # 10% -> 60%
-            'ga': {'start': 60, 'end': 85, 'expected_time': 300},          # 60% -> 85%
-            'rl': {'start': 85, 'end': 95, 'expected_time': 180},          # 85% -> 95%
-            'finalize': {'start': 95, 'end': 100, 'expected_time': 5}      # 95% -> 100%
-        }
-        
-        # Current stage tracking
-        self.current_stage = 'load_data'
-        self.stage_start_time = self.start_time
-        self.stage_start_progress = 0.0
-        
-        # Work-based tracking (for measurable stages)
-        self.stage_items_total = 0
-        self.stage_items_done = 0
-        
-        # Initialize ETA tracking variables - MUST be set before first update
-        self._smoothed_eta = estimated_total_seconds
-        self._last_eta_update = self.start_time
-        self._last_eta_value = estimated_total_seconds
-        self._last_update_time = self.start_time
-        
-        # Send initial progress to Redis immediately with ETA
-        self._send_initial_progress()
-        
-        logger.info(f"[PROGRESS] Time-based virtual progress tracker initialized for {job_id} (ETA: {estimated_total_seconds}s)")
+    # Stage weight distribution (total = 100%)
+    STAGE_WEIGHTS = {
+        'loading': {'start': 0, 'end': 5},
+        'clustering': {'start': 5, 'end': 15},
+        'cpsat_solving': {'start': 15, 'end': 75},
+        'ga_optimization': {'start': 75, 'end': 90},
+        'rl_refinement': {'start': 90, 'end': 100}
+    }
     
-    def _send_initial_progress(self):
-        """Send initial progress with ETA to Redis immediately (synchronous)"""
-        if not self.redis_client:
-            return
-        
-        try:
-            # Calculate initial ETA
-            remaining_seconds = self._smoothed_eta
-            eta = (datetime.now(timezone.utc) + timedelta(seconds=remaining_seconds)).isoformat()
-            
-            # Get initial stage display name
-            stage_display = self.stage_display_names.get(self.current_stage, 'Initializing')
-            
-            # Send initial progress data
-            progress_data = {
-                'job_id': self.job_id,
-                'progress': 0,
-                'progress_percent': 0,
-                'status': 'running',
-                'stage': stage_display,
-                'message': f'Starting: {stage_display}',
-                'time_remaining_seconds': remaining_seconds,
-                'eta_seconds': remaining_seconds,
-                'eta': eta,
-                'timestamp': datetime.now(timezone.utc).timestamp()
-            }
-            
-            # Store in Redis with 1 hour TTL
-            self.redis_client.setex(
-                f"progress:job:{self.job_id}",
-                3600,
-                json.dumps(progress_data)
-            )
-            
-            # Publish for real-time updates
-            self.redis_client.publish(
-                f"progress:{self.job_id}",
-                json.dumps(progress_data)
-            )
-            
-            logger.info(f"[PROGRESS] Initial progress sent: 0% with ETA {remaining_seconds}s")
-            
-        except Exception as e:
-            logger.error(f"[PROGRESS] Failed to send initial progress: {e}")
-    
-    def set_stage(self, stage_name: str, total_items: int = 0):
-        """Set current stage with ZERO JUMPS - TensorFlow/Chrome style continuous progress"""
-        if stage_name in self.stage_config:
-            stage_info = self.stage_config[stage_name]
-            
-            # CRITICAL: Use current progress as start - NEVER jump to stage boundaries
-            # This is how TensorFlow/Chrome do it - always continue from where you are
-            self.stage_start_progress = self.last_progress
-            self.stage_end_progress = stage_info['end']
-            self.current_stage = stage_name
-            self.stage_start_time = time.time()
-            
-            # Work-based tracking
-            self.stage_items_total = total_items
-            self.stage_items_done = 0
-            
-            # Clear any catch-up targets from previous stage
-            if hasattr(self, '_catch_up_target'):
-                delattr(self, '_catch_up_target')
-            
-            # Get user-friendly name for logging
-            display_name = self.stage_display_names.get(stage_name, stage_name)
-            logger.info(f"[PROGRESS] Stage: {display_name} ({self.stage_start_progress:.1f}% -> {stage_info['end']}%, items: {total_items})")
-    
-    def update_work_progress(self, items_done: int):
-        """Update work-based progress (for CP-SAT clusters, GA generations, RL episodes)"""
-        self.stage_items_done = items_done
-    
-    def mark_stage_complete(self):
-        """Mark current stage as completed - NO JUMP, just log"""
-        # Don't force jump - let work-based or time-based progress naturally reach end
-        logger.info(f"[PROGRESS] Stage {self.current_stage} completed at {self.last_progress:.1f}%")
-        
-        # Reset work tracking for next stage
-        self.stage_items_total = 0
-        self.stage_items_done = 0
-    
-    def calculate_smooth_progress(self) -> float:
+    def __init__(self, job_id: str, redis_client):
         """
-        GOOGLE/TENSORFLOW STYLE: Smooth continuous progress with adaptive speed
-        - NEVER jumps backward or forward
-        - Accelerates when behind schedule (catching up)
-        - Decelerates when ahead (preventing overshoot)
-        - Uses work anchors when available for accuracy
-        """
-        now = time.time()
-        time_since_last = now - getattr(self, '_last_update_time', now)
-        self._last_update_time = now
-        
-        # Get stage boundaries and timing
-        stage_info = self.stage_config.get(self.current_stage, {'start': 0, 'end': 100, 'expected_time': 5})
-        stage_start = self.stage_start_progress  # Where we actually started this stage
-        stage_end = stage_info['end']
-        stage_range = stage_end - stage_start
-        expected_time = stage_info.get('expected_time', 5)
-        elapsed_in_stage = now - self.stage_start_time
-        
-        # Calculate target progress based on work/time
-        if self.stage_items_total > 0 and self.stage_items_done > 0:
-            # Work-based anchor: Use actual completed work for accuracy
-            work_ratio = min(1.0, self.stage_items_done / self.stage_items_total)
-            target_progress = stage_start + (work_ratio * stage_range)
-        else:
-            # Time-based: Smooth asymptotic approach (never quite reaches end)
-            # This handles both: (1) no work tracking, (2) work tracking but no items done yet
-            if elapsed_in_stage < expected_time:
-                # Linear progress during expected time
-                ratio = elapsed_in_stage / expected_time
-            else:
-                # Asymptotic slowdown after expected time (Google/Chrome style)
-                overtime = elapsed_in_stage - expected_time
-                # Approaches 95% of stage range asymptotically
-                ratio = 0.95 * (1.0 - (0.5 ** (elapsed_in_stage / expected_time)))
-            
-            target_progress = stage_start + (ratio * stage_range)
-            
-            # CRITICAL FIX: If work tracking enabled but no work done yet,
-            # ensure minimum progress to show activity (Google/TensorFlow style)
-            if self.stage_items_total > 0 and self.stage_items_done == 0 and elapsed_in_stage > 2:
-                # After 2 seconds, guarantee at least 1% progress in the stage
-                min_progress = stage_start + min(1.0, elapsed_in_stage * 0.2)  # 0.2% per second
-                target_progress = max(target_progress, min_progress)
-        
-        # Cap target at stage end (never exceed stage boundary)
-        target_progress = min(stage_end - 0.5, target_progress)  # Leave 0.5% margin
-        
-        # ADAPTIVE SPEED: Accelerate/decelerate based on distance to target
-        distance_to_target = target_progress - self.last_progress
-        
-        # Calculate adaptive step size (Google/TensorFlow approach)
-        if distance_to_target > 0:
-            # Accelerate when behind (proportional to distance)
-            # Base: 0.2%/update (0.4%/sec), Max: 2%/update (4%/sec)
-            acceleration_factor = min(3.0, 1.0 + (distance_to_target / 5.0))
-            step = min(distance_to_target, 0.2 * acceleration_factor * (time_since_last / 0.5))
-            new_progress = self.last_progress + step
-        elif distance_to_target < -0.5:
-            # Rarely happens, but if ahead, slow down dramatically
-            deceleration_factor = 0.3
-            step = 0.05 * deceleration_factor * (time_since_last / 0.5)
-            new_progress = self.last_progress + step
-        else:
-            # At target or slightly ahead - maintain minimum forward progress
-            # Always creep forward (NEVER stuck)
-            min_step = 0.05 * (time_since_last / 0.5)
-            new_progress = self.last_progress + min_step
-        
-        # Ensure never exceeds stage end
-        new_progress = min(stage_end, new_progress)
-        
-        # Global cap at 98% (save 98-100% for finalization)
-        new_progress = min(98.0, new_progress)
-        
-        # CRITICAL: Never go backward
-        new_progress = max(self.last_progress, new_progress)
-        
-        self.last_progress = new_progress
-        
-        return self.last_progress
-    
-    def calculate_eta(self) -> tuple[int, str]:
-        """
-        ADAPTIVE ETA: TensorFlow/Google style - learns from actual speed
-        Recalculates based on current progress rate, not fixed estimates
-        """
-        elapsed = time.time() - self.start_time
-        
-        # Method 1: Progress-based ETA (learns from actual speed)
-        if self.last_progress > 1.0 and elapsed > 2:
-            # Calculate actual progress rate
-            progress_rate = self.last_progress / elapsed  # percent per second
-            remaining_progress = 100.0 - self.last_progress
-            progress_based_eta = int(remaining_progress / progress_rate) if progress_rate > 0 else 600
-        else:
-            # Not enough data yet, use total expected time
-            progress_based_eta = sum(stage['expected_time'] for stage in self.stage_config.values())
-        
-        # Method 2: Stage-based ETA (sum of remaining stage times)
-        stage_based_eta = 0
-        current_stage_found = False
-        
-        for stage_name, config in self.stage_config.items():
-            if not current_stage_found:
-                if stage_name == self.current_stage:
-                    current_stage_found = True
-                    # Current stage: use remaining time
-                    stage_elapsed = time.time() - self.stage_start_time
-                    stage_expected = config['expected_time']
-                    stage_remaining = max(1, stage_expected - stage_elapsed)
-                    stage_based_eta += stage_remaining
-            else:
-                # Future stages: add full expected time
-                stage_based_eta += config['expected_time']
-        
-        # Blend both methods (Google/TensorFlow approach)
-        if self.last_progress < 10:
-            # Early stage: trust stage estimates more (70% stage, 30% progress)
-            blended_eta = int(0.7 * stage_based_eta + 0.3 * progress_based_eta)
-        elif self.last_progress < 50:
-            # Mid stage: balanced blend (50% each)
-            blended_eta = int(0.5 * stage_based_eta + 0.5 * progress_based_eta)
-        else:
-            # Late stage: trust progress rate more (30% stage, 70% progress)
-            blended_eta = int(0.3 * stage_based_eta + 0.7 * progress_based_eta)
-        
-        # Exponential moving average for smoothness
-        if not hasattr(self, '_smoothed_eta'):
-            self._smoothed_eta = blended_eta
-            self._last_eta_update = time.time()
-        else:
-            time_since_update = time.time() - self._last_eta_update
-            if time_since_update >= 1.0:  # Update every second
-                # Adaptive alpha: more responsive early, more stable later
-                if self.last_progress < 5:
-                    alpha = 0.4  # Very responsive at start
-                elif self.last_progress < 30:
-                    alpha = 0.3  # Moderately responsive
-                else:
-                    alpha = 0.2  # Stable in late stages
-                
-                self._smoothed_eta = int((1 - alpha) * self._smoothed_eta + alpha * blended_eta)
-                self._last_eta_update = time.time()
-        
-        # Clamp to reasonable range (1 second to 15 minutes)
-        remaining = max(1, min(900, self._smoothed_eta))
-        
-        # Ensure ETA decreases over time (never increases)
-        if hasattr(self, '_last_eta_value'):
-            if remaining > self._last_eta_value + 5:  # Allow 5s tolerance for smoothing
-                remaining = self._last_eta_value  # Don't let it jump up
-        self._last_eta_value = remaining
-        
-        eta = (datetime.now(timezone.utc) + timedelta(seconds=remaining)).isoformat()
-        return remaining, eta
-    
-    async def update(self, message: str, force_progress: Optional[int] = None):
-        """
-        Update progress with smooth interpolation
+        Initialize progress tracker.
         
         Args:
-            message: Status message to display
-            force_progress: Force specific progress (for 100% completion)
+            job_id: Unique generation job identifier
+            redis_client: Redis connection for progress storage
         """
-        if not self.redis_client:
+        self.job_id = job_id
+        self.redis = redis_client
+        self.key = f"progress:job:{job_id}"
+        self.start_time = time.time()
+        self.current_stage = None
+        self.stage_start_time = None
+        
+        # Moving average for ETA stability (enterprise improvement)
+        self.progress_history = []  # List of (timestamp, progress) tuples
+        self.max_history_size = 10  # Keep last 10 data points
+        
+        # Initialize progress in Redis
+        self._initialize_progress()
+    
+    def _write_to_redis(self, data: dict) -> None:
+        """Single Redis write point — non-fatal on connection errors."""
+        try:
+            self.redis.setex(self.key, 7200, json.dumps(data))
+        except Exception as e:
+            logger.warning(
+                "[PROGRESS] Redis write failed — job continues, progress invisible",
+                extra={"job_id": self.job_id, "error": str(e)}
+            )
+
+    def _initialize_progress(self):
+        """Set initial progress state in Redis"""
+        initial_data = {
+            'job_id': self.job_id,
+            'stage': 'initializing',
+            'stage_progress': 0.0,
+            'overall_progress': 0.0,
+            'status': 'running',
+            'eta_seconds': None,
+            'started_at': int(self.start_time),
+            'last_updated': int(time.time()),
+            'metadata': {}
+        }
+        self._write_to_redis(initial_data)
+        logger.debug(f"[PROGRESS] Initialized tracking for job {self.job_id}")
+    
+    def start_stage(self, stage: str, total_items: int = 0):
+        """
+        Mark the start of a new stage.
+        
+        Args:
+            stage: Stage identifier (must match STAGE_WEIGHTS keys)
+            total_items: Total items to process in this stage (for granular progress)
+        """
+        if stage not in self.STAGE_WEIGHTS:
+            logger.warning(f"[PROGRESS] Unknown stage: {stage}")
             return
         
-        try:
-            # Calculate smooth progress (float for smooth updates)
-            if force_progress is not None:
-                progress = force_progress
-                self.last_progress = float(progress)
-            else:
-                progress_float = self.calculate_smooth_progress()
-                progress = round(progress_float)  # Round to nearest integer
-            
-            # Calculate ETA
-            remaining_seconds, eta = self.calculate_eta()
-            
-            # Get user-friendly stage name
-            stage_display = self.stage_display_names.get(self.current_stage, message)
-            
-            # Build progress data with user-friendly names
-            progress_data = {
-                'job_id': self.job_id,
-                'progress': progress,
-                'progress_percent': progress,
-                'status': 'completed' if progress >= 100 else 'running',
-                'stage': stage_display,  # User-friendly name
-                'message': stage_display,  # User-friendly message
-                'time_remaining_seconds': remaining_seconds if progress < 100 else 0,
-                'eta_seconds': remaining_seconds if progress < 100 else 0,
-                'eta': eta if progress < 100 else datetime.now(timezone.utc).isoformat(),
-                'timestamp': datetime.now(timezone.utc).timestamp()
-            }
-            
-            # Store in Redis
-            self.redis_client.setex(
-                f"progress:job:{self.job_id}",
-                3600,
-                json.dumps(progress_data)
-            )
-            
-            # Publish for real-time updates
-            self.redis_client.publish(
-                f"progress:{self.job_id}",
-                json.dumps(progress_data)
-            )
-            
-            logger.debug(f"[PROGRESS] {self.job_id}: {progress}% - {message} (ETA: {remaining_seconds}s)")
-            
-        except Exception as e:
-            logger.error(f"[PROGRESS] Update failed: {e}")
+        self.current_stage = stage
+        self.stage_start_time = time.time()
+        
+        stage_bounds = self.STAGE_WEIGHTS[stage]
+        overall = float(stage_bounds['start'])  # Ensure float
+        
+        metadata = {}
+        if total_items > 0:
+            metadata['total_items'] = total_items
+            metadata['completed_items'] = 0
+        
+        self.update(
+            stage=stage,
+            stage_progress=0.0,
+            overall_progress=overall,
+            meta=metadata
+        )
+        
+        logger.debug(f"[PROGRESS] Started stage: {stage} (progress: {overall}%)")
     
-    async def complete(self, message: str = "Timetable generation completed"):
-        """Mark job as 100% complete"""
-        await self.update(message, force_progress=100)
-        logger.info(f"[PROGRESS] {self.job_id}: Completed in {time.time() - self.start_time:.1f}s")
-    
-    async def fail(self, error_message: str):
-        """Mark job as failed"""
-        if not self.redis_client:
+    def update_stage_progress(self, completed_items: int, total_items: int):
+        """
+        Update progress within current stage based on completed items.
+        
+        ENTERPRISE IMPROVEMENT:
+        - Uses float precision (no int() rounding)
+        - Prevents artificial jumps (14.3% → 14.9% → 15.0%)
+        - Frontend receives smooth continuous values
+        
+        Args:
+            completed_items: Number of items completed
+            total_items: Total items in stage
+        """
+        if not self.current_stage:
+            logger.warning("[PROGRESS] No active stage to update")
             return
         
+        stage_bounds = self.STAGE_WEIGHTS[self.current_stage]
+        stage_range = stage_bounds['end'] - stage_bounds['start']
+        
+        # Calculate stage progress percentage (FLOAT precision, no int())
+        stage_progress = (completed_items / total_items) * 100 if total_items > 0 else 0.0
+        
+        # Map to overall progress (FLOAT precision)
+        overall_progress = stage_bounds['start'] + ((stage_progress / 100) * stage_range)
+        
+        self.update(
+            stage=self.current_stage,
+            stage_progress=stage_progress,
+            overall_progress=overall_progress,
+            meta={
+                'completed_items': completed_items,
+                'total_items': total_items
+            }
+        )
+    
+    def complete_stage(self):
+        """Mark current stage as complete"""
+        if not self.current_stage:
+            return
+        
+        stage_bounds = self.STAGE_WEIGHTS[self.current_stage]
+        overall = float(stage_bounds['end'])  # Ensure float
+        
+        self.update(
+            stage=self.current_stage,
+            stage_progress=100.0,
+            overall_progress=overall
+        )
+        
+        logger.debug(f"[PROGRESS] Completed stage: {self.current_stage} (progress: {overall}%)")
+    
+    def update(
+        self,
+        stage: str,
+        overall_progress: float,
+        stage_progress: float,
+        meta: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Core progress update method - writes to Redis.
+        
+        ENTERPRISE IMPROVEMENTS:
+        - Accepts float progress (not int) for smooth gradations
+        - Tracks progress history for velocity-based ETA
+        - Provides continuous values for frontend physics animation
+        
+        Args:
+            stage: Current stage name
+            overall_progress: Overall completion (0-100, float)
+            stage_progress: Stage-specific progress (0-100, float)
+            meta: Additional metadata (clusters, items, etc.)
+        """
         try:
-            progress_data = {
+            # Clamp to valid range but preserve float precision
+            clamped_stage = min(100.0, max(0.0, stage_progress))
+            clamped_overall = min(100.0, max(0.0, overall_progress))
+            
+            # Track progress for moving average ETA calculation
+            current_time = time.time()
+            self._track_progress_point(current_time, clamped_overall)
+            
+            data = {
                 'job_id': self.job_id,
-                'progress': 0,
-                'status': 'failed',
-                'stage': 'Failed',
-                'message': error_message,
-                'timestamp': datetime.now(timezone.utc).isoformat()
+                'stage': stage,
+                'stage_progress': round(clamped_stage, 2),  # Round to 2 decimals for JSON
+                'overall_progress': round(clamped_overall, 2),
+                'status': 'running',
+                'eta_seconds': self._estimate_eta_moving_average(),
+                'started_at': int(self.start_time),
+                'last_updated': int(current_time),
+                'metadata': meta or {}
             }
             
-            self.redis_client.setex(
-                f"progress:job:{self.job_id}",
-                3600,
-                json.dumps(progress_data)
+            # Store in Redis with 2-hour TTL
+            self._write_to_redis(data)
+            
+            logger.debug(
+                f"[PROGRESS] {self.job_id}: {clamped_overall:.2f}% "
+                f"(stage: {stage} - {clamped_stage:.2f}%)"
             )
             
-            logger.error(f"[PROGRESS] {self.job_id}: Failed - {error_message}")
+        except Exception as e:
+            logger.error(f"[PROGRESS] Failed to update: {e}")
+    
+    def _track_progress_point(self, timestamp: float, progress: float):
+        """
+        Track progress history for moving average velocity calculation.
+        
+        Maintains a sliding window of recent progress measurements
+        to smooth out ETA calculations during irregular backend updates.
+        
+        Args:
+            timestamp: Current time
+            progress: Current progress percentage
+        """
+        self.progress_history.append((timestamp, progress))
+        
+        # Keep only last N points (sliding window)
+        if len(self.progress_history) > self.max_history_size:
+            self.progress_history.pop(0)
+    
+    def _estimate_eta_moving_average(self) -> Optional[int]:
+        """
+        Calculate ETA using moving average velocity (ENTERPRISE IMPROVEMENT).
+        
+        WHY MOVING AVERAGE:
+        - Simple linear extrapolation is unstable during CP-SAT cluster spikes
+        - Moving average smooths out velocity fluctuations
+        - More stable ETA even when progress is irregular
+        
+        METHOD:
+        1. Track last N progress points with timestamps
+        2. Calculate average velocity across window
+        3. Extrapolate remaining time using average velocity
+        
+        FALLBACK:
+        - If insufficient data, use simple linear extrapolation
+        
+        Returns:
+            Estimated seconds remaining, or None if insufficient data
+        """
+        # Need at least 2 points to calculate velocity
+        if len(self.progress_history) < 2:
+            return self._estimate_eta_simple()
+        
+        # Get first and last point in history
+        first_time, first_progress = self.progress_history[0]
+        last_time, last_progress = self.progress_history[-1]
+        
+        # Calculate time span and progress span
+        time_span = last_time - first_time
+        progress_span = last_progress - first_progress
+        
+        # Avoid division by zero
+        if time_span <= 0 or progress_span <= 0:
+            return self._estimate_eta_simple()
+        
+        # Calculate average velocity (percent per second)
+        avg_velocity = progress_span / time_span
+        
+        # Calculate remaining progress
+        remaining_progress = 100.0 - last_progress
+        
+        # Extrapolate ETA using average velocity
+        if avg_velocity > 0:
+            eta_seconds = int(remaining_progress / avg_velocity)
+            return max(0, eta_seconds)
+        
+        return self._estimate_eta_simple()
+    
+    def _estimate_eta_simple(self) -> Optional[int]:
+        """
+        Simple linear extrapolation fallback.
+        
+        Formula: ETA = (Elapsed / Progress%) - Elapsed
+        
+        Returns:
+            Estimated seconds remaining, or None if insufficient data
+        """
+        if not self.progress_history:
+            return None
+        
+        # Get latest progress
+        _, current_progress = self.progress_history[-1]
+        
+        if current_progress <= 0:
+            return None
+        
+        elapsed = time.time() - self.start_time
+        
+        # Avoid ETA calculation in first 5 seconds (unstable)
+        if elapsed < 5:
+            return None
+        
+        # Linear extrapolation
+        total_estimated = elapsed / (current_progress / 100)
+        remaining = int(total_estimated - elapsed)
+        
+        return max(0, remaining)
+    
+    def _estimate_eta(self, overall_progress: float) -> Optional[int]:
+        """
+        DEPRECATED: Legacy method for backward compatibility.
+        Use _estimate_eta_moving_average() instead.
+        
+        Calculate estimated time remaining using linear extrapolation.
+        
+        Formula: ETA = (Elapsed / Progress%) - Elapsed
+        
+        Args:
+            overall_progress: Current progress percentage
             
-        except Exception as e:
-            logger.error(f"[PROGRESS] Fail update failed: {e}")
+        Returns:
+            Estimated seconds remaining, or None if insufficient data
+        """
+        if overall_progress <= 0:
+            return None
+        
+        elapsed = time.time() - self.start_time
+        
+        # Avoid ETA calculation in first 5 seconds (unstable)
+        if elapsed < 5:
+            return None
+        
+        # Linear extrapolation
+        total_estimated = elapsed / (overall_progress / 100)
+        remaining = int(total_estimated - elapsed)
+        
+        return max(0, remaining)
+    
+    def mark_completed(self):
+        """Mark job as successfully completed"""
+        now = int(time.time())
+        data = {
+            'job_id': self.job_id,
+            'stage': 'completed',
+            'stage_progress': 100.0,
+            'overall_progress': 100.0,
+            'status': 'completed',
+            'eta_seconds': 0,
+            'started_at': int(self.start_time),
+            'last_updated': now,
+            'completed_at': now,
+            'metadata': {}
+        }
+        self._write_to_redis(data)
+        logger.info(f"[PROGRESS] Job {self.job_id} marked as completed")
 
+    def mark_failed(self, error_message: str):
+        """
+        Mark job as failed.
 
-class ProgressUpdateTask:
-    """Background task to update progress every 2 seconds"""
-    
-    def __init__(self, tracker: EnterpriseProgressTracker):
-        self.tracker = tracker
-        self.running = False
-        self.task = None
-    
-    async def start(self):
-        """Start background progress updates"""
-        self.running = True
-        self.task = asyncio.create_task(self._update_loop())
-        logger.info(f"[PROGRESS] Started background updates for {self.tracker.job_id}")
-    
-    async def stop(self):
-        """Stop background progress updates"""
-        self.running = False
-        if self.task:
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-        logger.info(f"[PROGRESS] Stopped background updates for {self.tracker.job_id}")
-    
-    async def _update_loop(self):
-        """Update progress every 500ms for smooth real-time tracking"""
-        try:
-            update_count = 0
-            while self.running:
-                # CHECK CANCELLATION: Stop progress updates if job cancelled
-                if await self._check_cancellation():
-                    logger.info(f"[PROGRESS] Job {self.tracker.job_id} cancelled - stopping progress updates")
-                    self.running = False
-                    break
-                
-                # Build message with work progress if available
-                stage_name = self.tracker.current_stage.replace('_', ' ').title()
-                
-                if self.tracker.stage_items_total > 0:
-                    # Show work progress
-                    message = f"{stage_name}: {self.tracker.stage_items_done}/{self.tracker.stage_items_total}"
-                else:
-                    # Generic message
-                    message = f"Processing: {stage_name}"
-                
-                await self.tracker.update(message)
-                update_count += 1
-                
-                # Log every 4 updates (every 2 seconds) for debugging
-                if update_count % 4 == 0:
-                    logger.info(f"[PROGRESS] {self.tracker.last_progress:.1f}% - {message}")
-                
-                await asyncio.sleep(0.5)  # Update every 500ms (2 updates/sec = smooth + efficient)
-        except asyncio.CancelledError:
-            logger.info(f"[PROGRESS] Progress task cancelled for {self.tracker.job_id}")
-        except Exception as e:
-            logger.error(f"[PROGRESS] Update loop error: {e}")
-    
-    async def _check_cancellation(self) -> bool:
-        """Check if job has been cancelled via Redis"""
-        try:
-            if self.tracker.redis_client and self.tracker.job_id:
-                cancel_flag = self.tracker.redis_client.get(f"cancel:job:{self.tracker.job_id}")
-                return cancel_flag is not None and cancel_flag
-        except Exception as e:
-            logger.debug(f"[PROGRESS] Cancellation check failed: {e}")
-        return False
+        IMPORTANT: error is stored in metadata.error so the frontend
+        (progress.metadata?.error) can display it correctly.
+        """
+        now = int(time.time())
+        data = {
+            'job_id': self.job_id,
+            'stage': 'failed',
+            'stage_progress': 0.0,
+            'overall_progress': 0.0,
+            'status': 'failed',
+            'eta_seconds': None,          # Required by frontend ProgressData interface
+            'started_at': int(self.start_time),
+            'last_updated': now,
+            'failed_at': now,
+            'metadata': {
+                'error': error_message,   # Frontend reads progress.metadata?.error
+            },
+        }
+        self._write_to_redis(data)
+        logger.error(f"[PROGRESS] Job {self.job_id} marked as failed: {error_message}")
+
+    def mark_cancelled(self):
+        """Mark job as cancelled by user"""
+        now = int(time.time())
+        data = {
+            'job_id': self.job_id,
+            'stage': 'cancelled',
+            'stage_progress': 0.0,
+            'overall_progress': 0.0,
+            'status': 'cancelled',
+            'eta_seconds': None,          # Required by frontend ProgressData interface
+            'started_at': int(self.start_time),
+            'last_updated': now,
+            'cancelled_at': now,
+            'metadata': {}
+        }
+        self._write_to_redis(data)
+        logger.info(f"[PROGRESS] Job {self.job_id} marked as cancelled")

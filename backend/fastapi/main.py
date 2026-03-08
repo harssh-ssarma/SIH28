@@ -10,9 +10,11 @@ This is the main entry point. All business logic is in separate modules:
 - utils/ - Utilities
 """
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 import uvicorn
 
 # Core setup
+import multiprocessing
 from core.logging_config import setup_logging
 from core.lifespan import lifespan
 
@@ -30,8 +32,14 @@ from api.routers import (
     websocket_router
 )
 
-# Initialize logging first
-setup_logging()
+# Initialize logging — ONLY in the main process.
+# On Windows, ProcessPoolExecutor uses the 'spawn' start method, which
+# re-imports __main__ (this file) in every worker subprocess.  Without
+# this guard, setup_logging() would fire 6 extra times (once per
+# PARALLEL_CLUSTERS worker), truncating the log file ('w' mode) and
+# wasting ~80 MB RAM per worker importing the full FastAPI app.
+if multiprocessing.current_process().name == 'MainProcess':
+    setup_logging()
 
 # Create FastAPI application
 app = FastAPI(
@@ -40,6 +48,11 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan  # Startup/shutdown management
 )
+
+# ── GZip compression ──────────────────────────────────────────────────────────
+# Compress all responses > 1 KB. Reduces JSON payload by ~60-80%.
+# minimum_size=1000 avoids compressing tiny responses where overhead > gain.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Configure middleware
 setup_cors(app)
@@ -67,7 +80,8 @@ async def root():
 
 
 if __name__ == "__main__":
-    # Run with uvicorn
+    # Development: single worker with auto-reload
+    # Production: use uvicorn.conf.py via `uvicorn main:app --config uvicorn.conf.py`
     uvicorn.run(
         "main:app",
         host="0.0.0.0",

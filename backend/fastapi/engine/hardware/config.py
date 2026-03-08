@@ -2,11 +2,48 @@
 Hardware Configuration - Optimal Settings per Hardware Profile
 Determines execution parameters based on detected hardware
 """
+import os as _os
 from typing import Dict, Any
 from .profile import HardwareProfile, ExecutionStrategy
 import logging
 
+import psutil as _psutil
+
 logger = logging.getLogger(__name__)
+
+# OPT1: RAM-aware + CPU-aware parallel cluster scaling.
+#
+# Strategy: maximise cluster-level parallelism, not per-solver parallelism.
+# Each CP-SAT instance gets 1 worker thread; run as many clusters in parallel
+# as resources allow. This beats 2 clusters × 3 workers because:
+#   - CP-SAT scales sub-linearly with workers (2 workers ≠ 2× speedup)
+#   - N independent clusters give near-linear wall-clock speedup
+#
+# RF-4 FIX: Memory pressure at ~83% RAM observed at PARALLEL_CLUSTERS=6 on 8 GB
+# machine. Each active cluster holds ~300 MB of CP model + student index in
+# memory. With 6 parallel clusters: 6 × 300 MB = 1.8 GB overhead on top of
+# baseline Python/Django/Redis footprint (~5 GB) → 6.8 GB / 8 GB = 85%.
+#
+# RAM cap formula:
+#   total_ram_gb ≤ 8  → max 3 parallel (leaves 40% headroom)
+#   total_ram_gb ≤ 12 → max 5 parallel  (leaves 35% headroom)
+#   total_ram_gb  > 12 → max 6 parallel (leaves 30% headroom)
+#
+# saga.py computes: workers_per_cluster = max(1, physical_cores // PARALLEL_CLUSTERS)
+_total_ram_gb = _psutil.virtual_memory().total / (1024 ** 3)
+_cpu_count = _os.cpu_count() or 4
+if _total_ram_gb <= 8:
+    _ram_cap = 3
+elif _total_ram_gb <= 12:
+    _ram_cap = 5
+else:
+    _ram_cap = 6
+
+PARALLEL_CLUSTERS = min(_ram_cap, max(2, _cpu_count))
+logger.debug(
+    "[HW-Config] PARALLEL_CLUSTERS=%d  (RAM=%.1f GB, CPUs=%d, cap=%d)",
+    PARALLEL_CLUSTERS, _total_ram_gb, _cpu_count, _ram_cap,
+)
 
 
 def get_optimal_config(hardware_profile: HardwareProfile) -> Dict[str, Any]:
@@ -50,6 +87,9 @@ def get_optimal_config(hardware_profile: HardwareProfile) -> Dict[str, Any]:
         'cpsat_timeout': _calculate_cpsat_timeout(hardware_profile),
         'ga_population_size': _calculate_ga_population(hardware_profile),
         'ga_generations': _calculate_ga_generations(hardware_profile),
+
+        # OPT1: Parallel cluster execution
+        'parallel_clusters': PARALLEL_CLUSTERS,
         
         # Cloud/environment info
         'is_cloud': hardware_profile.is_cloud_instance,

@@ -1,23 +1,102 @@
-interface PageHeaderProps {
-  title: string
-  description?: string
-  children?: React.ReactNode
+// src/components/shared/PageHeader.tsx
+// Google Drive–style breadcrumb title row: "Academic > Schools (15)" left + action right.
+'use client'
+
+import Link from 'next/link'
+import { type LucideIcon, Plus, ChevronRight } from 'lucide-react'
+
+interface PrimaryAction {
+  label: string
+  onClick: () => void
+  icon?: LucideIcon
 }
 
-export default function PageHeader({ title, description, children }: PageHeaderProps) {
+interface PageHeaderProps {
+  title: string
+  count?: number
+  loading?: boolean
+  primaryAction?: PrimaryAction
+  secondaryActions?: React.ReactNode
+  /** If set, renders a breadcrumb: "<parentLabel> > <title>" */
+  parentLabel?: string
+  parentHref?: string
+}
+
+export default function PageHeader({
+  title,
+  count,
+  loading = false,
+  primaryAction,
+  secondaryActions,
+  parentLabel,
+  parentHref,
+}: PageHeaderProps) {
+  const ActionIcon = primaryAction?.icon ?? Plus
+
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-      <div className="flex-1 min-w-0">
-        <h1 className="text-2xl sm:text-3xl font-bold text-neutral-900 dark:text-neutral-100 truncate">
+    <div className="flex items-center justify-between gap-4 mb-1">
+      {/* Title / breadcrumb — always rendered instantly, no skeleton */}
+      <div className="flex items-center gap-0.5 shrink-0 min-w-0">
+        {parentLabel && (
+          <>
+            {parentHref ? (
+              <Link
+                href={parentHref}
+                className="font-normal leading-tight whitespace-nowrap px-2 py-1 rounded-full transition-colors"
+                style={{
+                  fontSize: 'var(--text-page-title)',
+                  color: 'var(--color-text-secondary)',
+                  fontWeight: 400,
+                }}
+                onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = 'rgba(0,0,0,0.06)')}
+                onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
+              >
+                {parentLabel}
+              </Link>
+            ) : (
+              <span
+                className="font-normal leading-tight whitespace-nowrap px-2 py-1 rounded-full"
+                style={{ fontSize: 'var(--text-page-title)', color: 'var(--color-text-secondary)', fontWeight: 400 }}
+              >
+                {parentLabel}
+              </span>
+            )}
+            <ChevronRight size={16} strokeWidth={1.8} style={{ color: 'var(--color-text-secondary)', flexShrink: 0, margin: '0 2px' }} />
+          </>
+        )}
+        <h1
+          className="font-normal leading-tight whitespace-nowrap px-2 py-1"
+          style={{
+            fontSize: 'var(--text-page-title)',
+            color: 'var(--color-text-primary)',
+            fontWeight: parentLabel ? 500 : 400,
+          }}
+        >
           {title}
+          {/* Count: tiny inline skeleton while loading, real value once ready */}
+          {loading ? (
+            <span
+              className="inline-block align-middle ml-1 animate-pulse rounded-full"
+              style={{ width: 32, height: 16, background: 'var(--color-bg-surface-2)', verticalAlign: 'middle' }}
+            />
+          ) : count !== undefined ? (
+            <span style={{ color: 'var(--color-text-secondary)' }}>
+              {' '}({count.toLocaleString()})
+            </span>
+          ) : null}
         </h1>
-        {description && (
-          <p className="text-sm sm:text-base text-neutral-600 dark:text-neutral-400 mt-1">
-            {description}
-          </p>
+      </div>
+
+      {/* Actions — always rendered instantly, no skeleton */}
+      <div className="flex items-center gap-2 shrink-0">
+        {secondaryActions}
+        {primaryAction && (
+          <button className="btn-primary" onClick={primaryAction.onClick}>
+            <ActionIcon size={16} />
+            {primaryAction.label}
+          </button>
         )}
       </div>
-      {children && <div className="flex-shrink-0">{children}</div>}
     </div>
   )
 }

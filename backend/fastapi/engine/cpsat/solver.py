@@ -1,21 +1,27 @@
 """
 CP-SAT Solver - Main Orchestrator
-Adaptive solver with progressive relaxation
-Following Google/Meta standards: Main solver logic only
+Adaptive solver with progressive relaxation.
+Wires in: faculty, room, student (BUG 1 FIX), workload (BUG 2 FIX),
+          max-sessions-per-day (MISS 6 FIX), fixed-slots (MISS 2 FIX).
 """
+import gc
 import logging
 import time
 from typing import List, Dict, Optional, Tuple
 from collections import defaultdict
+import psutil
 from ortools.sat.python import cp_model
 
 from models.timetable_models import Course, Room, TimeSlot, Faculty
-from .strategies import STRATEGIES
-from .progress import update_progress, log_cluster_start, log_cluster_success
+from .strategies import STRATEGIES, select_strategy_for_cluster_size
+from .progress import log_cluster_start, log_cluster_success
 from .constraints import (
     add_faculty_constraints,
     add_room_constraints,
-    add_student_constraints
+    add_workload_constraints,
+    add_max_sessions_per_day_constraints,
+    add_fixed_slot_constraints,
+    build_student_course_index,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,10 +29,18 @@ logger = logging.getLogger(__name__)
 
 class AdaptiveCPSATSolver:
     """
-    Adaptive CP-SAT solver with progressive relaxation
-    Tries multiple strategies until one succeeds
+    Adaptive CP-SAT solver with progressive relaxation.
+    Tries multiple strategies until one succeeds.
+
+    Hard constraints applied (in order):
+    HC1 — Faculty conflict (no double-booking)
+    HC2 — Room conflict (one course per room per slot)
+    HC3 — Faculty workload (max hours/week) [BUG 2 FIX]
+    HC4 — Student conflict (no student in two classes at once) [BUG 1 FIX]
+    HC5 — Max sessions per course per day [MISS 6 FIX]
+    HC6 — Fixed/special slot assignments [MISS 2 FIX]
     """
-    
+
     def __init__(
         self,
         courses: List[Course],
@@ -35,11 +49,14 @@ class AdaptiveCPSATSolver:
         faculty: Dict[str, Faculty],
         max_cluster_size: int = 50,
         job_id: str = None,
-        redis_client = None,
+        redis_client=None,
         cluster_id: int = None,
         total_clusters: int = None,
         completed_clusters: int = 0,
-        global_student_schedule: Dict[str, List[Tuple[int, int]]] = None
+        global_student_schedule: Dict[str, List[Tuple[int, int]]] = None,
+        max_sessions_per_day: int = 2,
+        student_course_index: Dict[str, set] = None,
+        num_workers: int = None,
     ):
         self.courses = courses
         self.rooms = rooms
@@ -52,186 +69,609 @@ class AdaptiveCPSATSolver:
         self.total_clusters = total_clusters
         self.completed_clusters = completed_clusters
         self.global_student_schedule = global_student_schedule or {}
-        
-        # Auto-detect CPU cores
+        self.max_sessions_per_day = max_sessions_per_day
+        # OPT2: precomputed global index passed in from saga — avoids per-cluster rebuild.
+        # If None, falls back to per-cluster construction below (safe degradation).
+        self.student_course_index = student_course_index
+
+        # Pre-build slot lookup (str → TimeSlot) used by MISS 6 constraint
+        self.slot_by_id: Dict[str, TimeSlot] = {
+            str(ts.slot_id): ts for ts in time_slots
+        }
+
+        # OPT1: accept explicit worker count for parallel execution (saga controls
+        # total thread budget: parallel_clusters × workers_per_cluster ≤ physical_cores).
+        # If None (sequential / direct call), auto-detect and cap at 8.
         import multiprocessing
-        self.num_workers = min(8, multiprocessing.cpu_count())
+        if num_workers is not None:
+            self.num_workers = max(1, num_workers)
+        else:
+            self.num_workers = min(8, multiprocessing.cpu_count())
         logger.info(f"[CP-SAT] Using {self.num_workers} CPU cores")
-    
+
     def solve_cluster(self, cluster: List[Course], timeout: float = None) -> Optional[Dict]:
         """
-        Solve cluster with progressive strategy relaxation
-        Returns assignments or None if no solution found
+        Solve cluster with progressive strategy relaxation.
+        Returns assignments or None if no solution found.
         """
-        # Start timing (industry standard: perf_counter for durations)
         cluster_start_time = time.perf_counter()
-        
+
         log_cluster_start(
             self.cluster_id if self.cluster_id is not None else 0,
             len(cluster),
             len(self.time_slots)
         )
-        
-        # STEP 1: Build global indexes (O(N) once instead of O(N²) repeatedly)
+
+        # STEP 1: Build global indexes (O(N) once)
         self.course_by_id = {c.course_id: c for c in cluster}
         self.faculty_of_course = {c.course_id: c.faculty_id for c in cluster}
-        self.students_of_course = {c.course_id: set(c.student_ids) if hasattr(c, 'student_ids') else set() for c in cluster}
+        # OPT2: use precomputed global index if available; otherwise build per-cluster.
+        if self.student_course_index is not None:
+            self.students_of_course = {
+                c.course_id: self.student_course_index.get(c.course_id, set())
+                for c in cluster
+            }
+        else:
+            self.students_of_course = {
+                c.course_id: set(c.student_ids) if hasattr(c, 'student_ids') else set()
+                for c in cluster
+            }
         logger.info(f"[CP-SAT] Built indexes for {len(cluster)} courses")
-        
-        # STEP 2: Precompute valid domains (room/time filtering)
+
+        # STEP 2: Precompute valid domains
         self.valid_domains = self._precompute_valid_domains(cluster)
         total_entries = sum(len(v) for v in self.valid_domains.values())
         avg_per_session = total_entries / len(self.valid_domains) if self.valid_domains else 0
-        logger.info(f"[CP-SAT] Domain size: {total_entries:,} entries (avg {avg_per_session:.0f} per session)")
+        logger.info(f"[CP-SAT] Domain size: {total_entries:,} entries (avg {avg_per_session:.0f}/session)")
         logger.info(f"[CP-SAT] Memory estimate: ~{total_entries * 16 / 1024 / 1024:.1f} MB")
-        
-        # Try each strategy
-        # NOTE: Cancellation checked OUTSIDE (between clusters in saga)
-        # Per Google/Meta pattern: Do NOT interrupt atomic CP-SAT model construction
+
+        # STEP 3: Precompute student conflict pairs ONCE before the strategy loop (RF-6).
+        # Previously, add_student_constraints() rebuilt the full (student, slot) →
+        # [vars] mapping on every strategy retry — O(V×E) per attempt where V is
+        # the variable count (~20K) and E is enrolled students per course (~200-900).
+        # For clusters that fail strategy 1+2 before landing on Faculty+Room Only,
+        # this scan ran 3× for 1.5-4s each = up to 12s wasted per cluster.
+        # Precomputing here cuts per-strategy cost to O(actual_conflicts) lookups.
+        self._student_conflict_groups = self._precompute_student_conflict_groups()
+        self._critical_students = self._compute_critical_students()
+        logger.debug(
+            "[CP-SAT] Precomputed %d student conflict groups (%d critical students)",
+            len(self._student_conflict_groups), len(self._critical_students),
+        )
+
+        # OPT4: Skip strategies that are statistically infeasible for this
+        # cluster's shape. Large clusters (>20 courses) almost always fail
+        # Full Constraints (30s timeout) and Relaxed Student (45s timeout)
+        # before reaching Faculty+Room Only — wasting 75s per cluster.
+        # select_strategy_for_cluster_size returns the optimal starting strategy;
+        # we still cascade forward from that point so no feasible solution is lost.
+        _start_strategy = select_strategy_for_cluster_size(len(cluster))
+        _start_idx = next(
+            (i for i, s in enumerate(STRATEGIES) if s is _start_strategy), 0
+        )
+        if _start_idx > 0:
+            logger.info(
+                "[CP-SAT] Cluster size %d → starting at strategy %d (%s) "
+                "— skipping %d guaranteed-fail attempts",
+                len(cluster), _start_idx + 1,
+                _start_strategy['name'], _start_idx
+            )
+
+        # ------------------------------------------------------------------
+        # PRE-FLIGHT: faculty-overload detection
+        #
+        # If a faculty member has more sessions assigned (sum of course.duration)
+        # than the total number of distinct time slots, CP-SAT will immediately
+        # prove INFEASIBLE even under Strategy 4 (faculty-only constraints).
+        # Observed in logs: cluster 182 spent ~0.13 s on Strategy 4 before failing,
+        # while ~3 previous strategies wasted ~60-90 s total on the same infeasible
+        # problem.  Catching this here skips all CP-SAT work and goes straight to
+        # the greedy fallback, saving up to ~3 min per run across all such clusters.
+        # ------------------------------------------------------------------
+        _faculty_sessions: Dict[str, int] = defaultdict(int)
+        for _c in cluster:
+            _fid = getattr(_c, 'faculty_id', None)
+            if _fid:
+                _faculty_sessions[_fid] += getattr(_c, 'duration', 1) or 1
+
+        _total_slots = len(self.time_slots)
+        _overloaded_faculty = {
+            fid: cnt for fid, cnt in _faculty_sessions.items()
+            if cnt > _total_slots
+        }
+        if _overloaded_faculty:
+            logger.warning(
+                "[CP-SAT] PRE-FLIGHT FAIL: %d faculty member(s) have more sessions "
+                "than available time slots (%d slots). Faculty→sessions: %s. "
+                "Skipping all strategies → greedy fallback immediately.",
+                len(_overloaded_faculty), _total_slots,
+                ', '.join(f'{fid}:{cnt}' for fid, cnt in _overloaded_faculty.items())
+            )
+            return None
+
+        # ------------------------------------------------------------------
+        # PRE-FLIGHT: student conflict density check
+        #
+        # If >50% of all domain variable slots are contested by student
+        # conflicts, Full/Relaxed strategies will always time-out at BHU scale
+        # (2320 courses, 19072 students).  Skip directly to the starting
+        # strategy chosen by select_strategy_for_cluster_size — which is
+        # already STRATEGIES[0] = Faculty+Room Only after the BHU-scale fix.
+        # This check is a no-op for that config but remains a safety net if
+        # the strategy ladder is ever extended again.
+        # ------------------------------------------------------------------
+        _total_conflict_groups = len(self._student_conflict_groups)
+        _total_vars = sum(len(v) for v in self.valid_domains.values())
+        if _total_vars > 0 and _total_conflict_groups > _total_vars * 0.5:
+            logger.warning(
+                "[CP-SAT] HIGH STUDENT CONFLICT DENSITY: %d conflict groups / %d vars "
+                "(%.1f%%) — forcing start at strategy %d (%s)",
+                _total_conflict_groups, _total_vars,
+                100.0 * _total_conflict_groups / _total_vars,
+                _start_idx + 1,
+                STRATEGIES[_start_idx]['name'],
+            )
+
         for strategy_idx, strategy in enumerate(STRATEGIES):
-            logger.info(f"[CP-SAT] Attempting strategy {strategy_idx + 1}/{len(STRATEGIES)}: {strategy['name']}")
-            
+            if strategy_idx < _start_idx:
+                continue
+            logger.info(
+                "[CP-SAT] Strategy %d/%d: %s | cluster=%s | courses=%d | timeout=%ss",
+                strategy_idx + 1, len(STRATEGIES), strategy['name'],
+                self.cluster_id, len(cluster), strategy['timeout'],
+            )
             solution = self._solve_with_strategy(cluster, strategy)
-            
+
             if solution:
-                # Calculate elapsed duration (not absolute timestamp!)
                 elapsed = time.perf_counter() - cluster_start_time
                 log_cluster_success(
                     self.cluster_id if self.cluster_id is not None else 0,
                     elapsed
                 )
                 return solution
-        
-        # All strategies failed
-        logger.warning("[CP-SAT] All strategies failed - will use greedy fallback")
-        return None
-    
+
+        logger.warning("[CP-SAT] All strategies failed - using smart greedy fallback")
+        return self._greedy_fallback(cluster)
+
+    def _greedy_fallback(self, cluster: List[Course]) -> Dict:
+        """
+        Smart greedy assignment: iterate courses and assign each session to the
+        first (slot, room) pair that does not double-book the faculty or room.
+        Much better than returning None — guarantees every course gets SOME
+        assignment so downstream stages (GA, RL, merger) always have a base
+        solution to refine, even for mathematically infeasible clusters.
+        """
+        solution: Dict = {}
+        used_faculty_slots: Dict[str, set] = {}  # faculty_id → set of slot_ids
+        used_room_slots: Dict[str, set] = {}      # room_id    → set of slot_ids
+
+        for course in cluster:
+            faculty_id = getattr(course, 'faculty_id', None)
+
+            for session in range(course.duration):
+                domain_key = (course.course_id, session)
+                pairs = self.valid_domains.get(domain_key, [])
+
+                best_pair = None
+                for (slot_id, room_id) in pairs:
+                    s = str(slot_id)
+                    # Skip faculty double-booking
+                    if faculty_id and s in used_faculty_slots.get(faculty_id, set()):
+                        continue
+                    # Skip room double-booking
+                    if s in used_room_slots.get(str(room_id), set()):
+                        continue
+                    best_pair = (slot_id, room_id)
+                    break
+
+                if best_pair is None:
+                    # Conflict unavoidable — take first pair (faculty/room clash
+                    # is better than no assignment; merger will flag it)
+                    if pairs:
+                        best_pair = pairs[0]
+                    else:
+                        # Domain is empty — sentinel so merger skips this entry
+                        best_pair = (
+                            self.time_slots[0].slot_id if self.time_slots else '__UNSCHEDULED__',
+                            self.rooms[0].room_id if self.rooms else None,
+                        )
+                        logger.warning(
+                            "[Greedy] %s session %d: empty domain, using sentinel",
+                            course.course_id, session,
+                        )
+
+                solution[(course.course_id, session)] = best_pair
+
+                # Mark resources as used
+                slot_id, room_id = best_pair
+                s = str(slot_id)
+                if faculty_id:
+                    used_faculty_slots.setdefault(faculty_id, set()).add(s)
+                if room_id:
+                    used_room_slots.setdefault(str(room_id), set()).add(s)
+
+        return solution
+
     def _solve_with_strategy(self, cluster: List[Course], strategy: Dict) -> Optional[Dict]:
-        """Solve cluster using specific strategy"""
+        """Solve cluster using a specific strategy config."""
         try:
             model = cp_model.CpModel()
             solver = cp_model.CpSolver()
             solver.parameters.max_time_in_seconds = strategy['timeout']
             solver.parameters.num_search_workers = self.num_workers
-            
-            # Create variables ONLY for valid domains (no full grid iteration)
-            variables = {}
+
+            # -------------------------------------------------------------
+            # Create Boolean variables only for valid (slot, room) pairs
+            # -------------------------------------------------------------
+            variables: Dict[tuple, cp_model.IntVar] = {}
             for course in cluster:
                 for session in range(course.duration):
-                    # Use precomputed valid domains instead of full grid
                     domain_key = (course.course_id, session)
                     if domain_key in self.valid_domains:
                         for (t_slot_id, room_id) in self.valid_domains[domain_key]:
                             var_name = f"x_{course.course_id}_s{session}_t{t_slot_id}_r{room_id}"
                             var = model.NewBoolVar(var_name)
                             variables[(course.course_id, session, t_slot_id, room_id)] = var
-            
-            # Assignment constraints: each session assigned exactly once
+
+            # OPT3: Build (course_id, session) → [vars] index in one O(N) pass.
+            # Previous code did a full variables.items() scan per (course, session)
+            # pair — O(N²) with ~500 variables × 36 sessions = 18,000 comparisons
+            # per strategy, per cluster. Now O(1) lookup after one build pass.
+            session_vars_index: Dict[tuple, list] = defaultdict(list)
+            for (c_id, s_idx, _t, _r), var in variables.items():
+                session_vars_index[(c_id, s_idx)].append(var)
+
+            # Assignment: each session assigned exactly once
             for course in cluster:
                 for session in range(course.duration):
-                    session_vars = [
-                        var for (c_id, s_idx, _, _), var in variables.items()
-                        if c_id == course.course_id and s_idx == session
-                    ]
-                    if session_vars:
-                        model.Add(sum(session_vars) == 1)
-            
-            # Add constraints based on strategy (pass indexes)
-            if strategy['faculty_conflicts']:
+                    sv = session_vars_index.get((course.course_id, session), [])
+                    if sv:
+                        model.Add(sum(sv) == 1)
+
+            # ------------------------------------------------------------------
+            # HC1: Faculty conflicts
+            # ------------------------------------------------------------------
+            if strategy.get('faculty_conflicts', True):
                 add_faculty_constraints(model, variables, cluster, self.faculty_of_course)
-            
-            if strategy['room_capacity']:
+
+            # ------------------------------------------------------------------
+            # HC2: Room conflicts
+            # ------------------------------------------------------------------
+            if strategy.get('room_capacity', True):
                 add_room_constraints(model, variables, cluster)
-            
-            # REMOVED: Faculty workload constraints (moved to pre-clustering)
-            # add_workload_constraints() was causing O(N²) explosion
-            
-            if strategy.get('student_priority'):
-                add_student_constraints(model, variables, cluster, strategy['student_priority'], self.students_of_course)
-            
+
+            # ------------------------------------------------------------------
+            # HC3: Faculty workload (BUG 2 FIX — re-added)
+            # Only apply when strategy requests it (relaxed strategies may skip)
+            # ------------------------------------------------------------------
+            if strategy.get('workload_constraints', True):
+                add_workload_constraints(
+                    model, variables, cluster,
+                    self.faculty_of_course,
+                    self.faculty
+                )
+
+            # ------------------------------------------------------------------
+            # HC4: Student conflict constraints — RF-6 fast path.
+            # Conflict pairs precomputed once in solve_cluster(); each strategy
+            # attempt here only iterates stored conflict entries via O(1) lookups
+            # instead of rescanning all ~20K variables × enrolled students.
+            # ------------------------------------------------------------------
+            student_priority = strategy.get('student_priority', 'ALL')
+            self._apply_student_constraints_fast(model, variables, student_priority)
+
+            # ------------------------------------------------------------------
+            # HC5: Max sessions per course per day (MISS 6 FIX)
+            # ------------------------------------------------------------------
+            if strategy.get('max_sessions_per_day', True):
+                add_max_sessions_per_day_constraints(
+                    model, variables, cluster,
+                    self.slot_by_id,
+                    self.max_sessions_per_day
+                )
+
+            # ------------------------------------------------------------------
+            # HC6: Fixed/special slot constraints (MISS 2 FIX)
+            # Always applied — fixed slots are hard requirements
+            # ------------------------------------------------------------------
+            add_fixed_slot_constraints(model, variables, cluster)
+
+            # Reduce workers under memory pressure before solving
+            mem_percent = psutil.virtual_memory().percent
+            if mem_percent > 85:
+                reduced_workers = max(2, self.num_workers // 2)
+                solver.parameters.num_search_workers = reduced_workers
+                if reduced_workers < self.num_workers:
+                    # Actually reducing — worth a WARNING so ops can see it
+                    logger.warning(
+                        f"[MEMORY] RAM {mem_percent:.1f}% — reducing CP-SAT workers "
+                        f"{self.num_workers} → {reduced_workers}"
+                    )
+                else:
+                    # Already at minimum (2→2): log at DEBUG to avoid log spam.
+                    # This fires every cluster when system RAM sits above 85% —
+                    # a WARNING here drowns out real signals in the log stream.
+                    logger.debug(
+                        f"[MEMORY] RAM {mem_percent:.1f}% — already at minimum "
+                        f"{reduced_workers} workers (no reduction possible)"
+                    )
+
             # Solve
-            logger.info(f"[CP-SAT] Starting solver with timeout {strategy['timeout']}s...")
+            n_vars = len(variables)
+            logger.info(
+                "[CP-SAT] Solving | cluster=%s | strategy=%s | vars=%d | timeout=%ss",
+                self.cluster_id, strategy['name'], n_vars, strategy['timeout'],
+            )
             status = solver.Solve(model)
-            
-            # Extract solution (use variables dict directly, no grid iteration)
+            _wall_time = solver.WallTime()
+            _status_name = solver.StatusName(status)
+
             if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
                 solution = {}
-                # Iterate only through actual variables (no full grid scan)
                 for (course_id, session, t_slot_id, room_id), var in variables.items():
                     if solver.Value(var):
                         solution[(course_id, session)] = (t_slot_id, room_id)
-                
-                logger.info(f"[CP-SAT] Solution found: {len(solution)} assignments")
+
+                n_assignments = len(solution)
+
+                # Explicit C++ memory release — OR-Tools allocates native heap.
+                # Python GC cannot see these objects; must delete explicitly.
+                # Do this BEFORE logging to free memory as early as possible.
+                del solver
+                del model
+                del variables
+                gc.collect()
+
+                logger.info(
+                    "[CP-SAT] Solution found | cluster=%s | strategy=%s | "
+                    "assignments=%d | status=%s | wall_time=%.2fs",
+                    self.cluster_id, strategy['name'],
+                    n_assignments, _status_name, _wall_time,
+                )
                 return solution
-            
-            logger.warning(f"[CP-SAT] No solution with strategy: {strategy['name']}")
+
+            # ------------------------------------------------------------------
+            # FAILURE — log WHY so the operator can distinguish:
+            #   INFEASIBLE  = mathematically no solution exists for this domain
+            #                 (constraints are contradictory, e.g. more courses
+            #                  than available slots for a faculty member)
+            #   UNKNOWN     = solver ran out of time (hit the timeout limit);
+            #                 a solution might exist but was not found in time
+            #   MODEL_INVALID = bug in constraint building
+            # ------------------------------------------------------------------
+            logger.warning(
+                "[CP-SAT] No solution | cluster=%s | strategy=%s | "
+                "status=%s | vars=%d | wall_time=%.2fs | timeout=%ss",
+                self.cluster_id, strategy['name'],
+                _status_name, n_vars, _wall_time, strategy['timeout'],
+            )
+
+            # Release on failure too — accumulation across failed strategies wastes RAM
+            del solver
+            del model
+            del variables
+            gc.collect()
+
             return None
-        
+
         except Exception as e:
-            logger.error(f"[CP-SAT] Strategy failed: {e}")
+            import traceback as _tb
+            logger.error(
+                "[CP-SAT] Strategy raised exception | cluster=%s | strategy=%s | error=%s\n%s",
+                self.cluster_id, strategy.get('name', '?'), e, _tb.format_exc(),
+            )
+            # Best-effort cleanup on exception path
+            try:
+                del solver
+            except NameError:
+                pass
+            try:
+                del model
+            except NameError:
+                pass
+            gc.collect()
             return None
-    
+
     def _precompute_valid_domains(self, cluster: List[Course]) -> Dict:
         """
-        GOOGLE/META PRODUCTION FIX: Aggressive domain filtering
-        Reduces 3.3M entries → ~50K entries (98% reduction)
+        Aggressive domain filtering: reduces variable count dramatically.
+        Reduces ~3.3M entries → ~50K entries (98% reduction).
+
+        BUG 4 is fixed in django_client.py (room features now fetched properly).
+        This method now correctly uses room.features for feature matching.
         """
         valid_domains = {}
-        MAX_ROOMS_PER_COURSE = 10  # Google/Meta standard: cap at 5-10 rooms
-        
+        MAX_ROOMS_PER_COURSE = 20  # was 10 — more candidates = larger domain = fewer INFEASIBLE
+
+        # Track how many courses fell to each fallback stage (for summary log)
+        _stage_tally = {1: 0, 2: 0, 3: 0, 4: 0}
+        _zero_pair_sessions = []
+
         for course in cluster:
-            # Get course requirements
-            enrolled = getattr(course, 'enrolled_students', 0)
-            required_type = getattr(course, 'room_type_required', 'CLASSROOM')
-            required_features = getattr(course, 'required_features', [])
+            enrolled = getattr(course, 'enrolled_students', 0) or len(
+                getattr(course, 'student_ids', [])
+            )
+            if not enrolled:
+                enrolled = 30  # safe default — prevents 0-capacity filter matching nothing
+
+            required_type = getattr(course, 'room_type_required', 'CLASSROOM') or 'CLASSROOM'
+            required_features = getattr(course, 'required_features', []) or []
+            # Strip fixed_slot markers from required_features for room matching
+            non_fixed_features = [
+                f for f in required_features
+                if not (isinstance(f, str) and f.startswith('fixed_slot:'))
+            ]
             dept_id = getattr(course, 'department_id', None)
-            
-            # Pre-filter rooms ONCE per course (not per session)
+
+            # Stage 1: ideal match — type + features + lenient capacity band
             candidate_rooms = [
                 room for room in self.rooms
                 if (
-                    # Capacity: 90%-150% range (don't waste large rooms)
-                    room.capacity >= enrolled * 0.9 and
-                    room.capacity <= enrolled * 1.5 and
-                    
-                    # Type match (case-insensitive)
-                    room.room_type.upper() == required_type.upper() and
-                    
-                    # Department priority
-                    (getattr(room, 'department_id', None) == dept_id or 
-                     getattr(room, 'allow_cross_department_usage', True)) and
-                    
-                    # Features match
-                    all(f in (getattr(room, 'features', []) or []) for f in required_features)
+                    room.capacity >= enrolled * 0.6   # was 0.7
+                    and room.capacity <= enrolled * 5.0  # was 4.0
+                    and room.room_type.upper() == required_type.upper()
+                    and all(
+                        f in (getattr(room, 'features', []) or [])
+                        for f in non_fixed_features
+                    )
                 )
             ]
-            
-            # Sort by best fit (closest capacity match)
             candidate_rooms.sort(key=lambda r: abs(r.capacity - enrolled))
-            
-            # CRITICAL: Cap at 10 rooms (Google/Meta standard)
             candidate_rooms = candidate_rooms[:MAX_ROOMS_PER_COURSE]
-            
-            if not candidate_rooms:
-                # Fallback: any room with sufficient capacity
+            _room_stage = 1
+
+            # Stage 2: relax features, keep type + capacity
+            if len(candidate_rooms) < 3:
                 candidate_rooms = [
                     room for room in self.rooms
-                    if room.capacity >= enrolled * 0.9
+                    if (
+                        room.capacity >= enrolled * 0.5
+                        and room.room_type.upper() == required_type.upper()
+                    )
                 ][:MAX_ROOMS_PER_COURSE]
-            
-            # Filter time slots (skip lunch breaks)
-            valid_slots = [
-                t_slot for t_slot in self.time_slots
-                if not getattr(t_slot, 'is_lunch', False)
-            ]
-            
-            # Build domain for each session
+                _room_stage = 2
+
+            # Stage 3: relax type, any room with >=40% capacity
+            if len(candidate_rooms) < 3:
+                candidate_rooms = [
+                    room for room in self.rooms
+                    if room.capacity >= enrolled * 0.4
+                ][:MAX_ROOMS_PER_COURSE]
+                _room_stage = 3
+
+            # Stage 4: absolute last resort — any room, best-fit
+            if not candidate_rooms:
+                candidate_rooms = sorted(
+                    self.rooms,
+                    key=lambda r: abs(r.capacity - enrolled)
+                )[:MAX_ROOMS_PER_COURSE]
+                _room_stage = 4
+                logger.warning(
+                    "[Domain] Course %s: STAGE-4 fallback (all rooms) | "
+                    "enrolled=%d type=%s rooms_total=%d rooms_returned=%d",
+                    course.course_id, enrolled, required_type,
+                    len(self.rooms), len(candidate_rooms),
+                )
+
+            _stage_tally[_room_stage] += 1
+
+            # Include ALL time slots — lunch slots are handled by constraint
+            # layer, not domain pruning.  Removing them here shrinks the domain
+            # so aggressively that CP-SAT sees too few variables to satisfy
+            # even Faculty+Room constraints.
+            valid_slots = self.time_slots
+
             for session in range(course.duration):
                 valid_pairs = [
-                    (t_slot.slot_id, room.room_id)
-                    for t_slot in valid_slots
+                    (ts.slot_id, room.room_id)
+                    for ts in valid_slots
                     for room in candidate_rooms
                 ]
+                if not valid_pairs:
+                    _zero_pair_sessions.append(f"{course.course_id}:s{session}")
+                    logger.error(
+                        "[Domain] ZERO valid pairs for %s session %d "
+                        "— CP-SAT will immediately declare INFEASIBLE",
+                        course.course_id, session,
+                    )
                 valid_domains[(course.course_id, session)] = valid_pairs
-        
+
+        # Summary log — printed once per cluster, gives a full picture of room matching
+        total_pairs = sum(len(v) for v in valid_domains.values())
+        logger.info(
+            "[Domain] Cluster %s domain summary | courses=%d | total_pairs=%d | "
+            "rooms_avail=%d | slots=%d | stage1=%d stage2=%d stage3=%d stage4=%d | "
+            "zero_pair_sessions=%d%s",
+            self.cluster_id, len(cluster), total_pairs,
+            len(self.rooms), len(self.time_slots),
+            _stage_tally[1], _stage_tally[2], _stage_tally[3], _stage_tally[4],
+            len(_zero_pair_sessions),
+            (f" ZERO-PAIR={_zero_pair_sessions[:5]}{'...' if len(_zero_pair_sessions) > 5 else ''}"
+             if _zero_pair_sessions else ""),
+        )
+
         return valid_domains
+
+    # ------------------------------------------------------------------
+    # RF-6: Precomputed student conflict helpers
+    # ------------------------------------------------------------------
+
+    def _precompute_student_conflict_groups(self) -> Dict[tuple, list]:
+        """
+        One O(C×S×R×E) pass over valid_domains to find all (student, t_slot)
+        pairs that have courses competing for the same slot.
+
+        C = courses, S = sessions/course, R = rooms/slot, E = enrolled students.
+        Replaces the repeated O(V×E) scan inside add_student_constraints() that
+        was running once per strategy attempt (up to 4×) per cluster.
+
+        Returns:
+            {(student_id, t_slot_id): [(course_id, session, t_slot_id, room_id), ...]}
+            Only entries with 2+ elements are stored (actual conflicts).
+        """
+        groups: Dict[tuple, list] = defaultdict(list)
+        for (course_id, session), pairs in self.valid_domains.items():
+            students = self.students_of_course.get(course_id, set())
+            if not students:
+                continue
+            for (t_slot_id, r_id) in pairs:
+                for student_id in students:
+                    groups[(student_id, t_slot_id)].append(
+                        (course_id, session, t_slot_id, r_id)
+                    )
+        # Discard non-conflicting entries early to reduce memory
+        return {k: v for k, v in groups.items() if len(v) > 1}
+
+    def _compute_critical_students(self) -> set:
+        """
+        Students enrolled in 5+ courses within this cluster.
+        Precomputed once so CRITICAL-mode strategy attempts pay O(1) membership test.
+        """
+        counts: Dict[str, int] = defaultdict(int)
+        for students in self.students_of_course.values():
+            for sid in students:
+                counts[sid] += 1
+        return {sid for sid, n in counts.items() if n >= 5}
+
+    def _apply_student_constraints_fast(
+        self,
+        model,
+        variables: Dict,
+        student_priority: str,
+    ) -> None:
+        """
+        Apply HC4 student no-double-booking constraints using precomputed pairs.
+
+        RF-6 fast path: instead of scanning all variables × enrolled students,
+        iterate self._student_conflict_groups (computed once in solve_cluster)
+        and do O(1) dict lookups into the per-strategy `variables` dict.
+
+        Args:
+            student_priority: "ALL" | "CRITICAL" | "NONE"
+        """
+        if student_priority == "NONE":
+            logger.warning("[Constraints] Student constraints DISABLED (NONE mode)")
+            return
+
+        critical_set = self._critical_students if student_priority == "CRITICAL" else None
+        if student_priority == "CRITICAL":
+            logger.info(
+                "[Constraints] CRITICAL mode: constraining %d students with 5+ courses",
+                len(self._critical_students),
+            )
+
+        count = 0
+        for (student_id, t_slot_id), domain_keys in self._student_conflict_groups.items():
+            if critical_set is not None and student_id not in critical_set:
+                continue
+            vars_list = [variables[dk] for dk in domain_keys if dk in variables]
+            if len(vars_list) > 1:
+                model.Add(sum(vars_list) <= 1)
+                count += 1
+
+        mode_label = student_priority
+        logger.info(
+            "[Constraints] Added %d student conflict constraints "
+            "(HC4 — no student double-booking, mode=%s)",
+            count, mode_label,
+        )

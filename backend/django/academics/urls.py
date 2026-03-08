@@ -1,48 +1,58 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .generation_views import GenerationJobViewSet
-from .timetable_views import (
+from .views import (
+    # Auth
+    login_view,
+    logout_view,
+    current_user_view,
+    refresh_token_view,
+    password_reset_request_view,
+    password_reset_confirm_view,
+    password_change_view,
+    list_sessions_view,
+    revoke_session_view,
+    # Dashboard
+    dashboard_stats,
+    faculty_profile_and_courses,
+    student_profile_and_courses,
+    # Core ViewSets
+    UserViewSet,
+    SchoolViewSet,
+    DepartmentViewSet,
+    ProgramViewSet,
+    BatchViewSet,
+    CourseViewSet,
+    FacultyViewSet,
+    StudentViewSet,
+    RoomViewSet,
+    LabViewSet,
+    BuildingViewSet,
+    TimetableViewSet,
+    TimetableSlotViewSet,
+    # Generation & workflow
+    GenerationJobViewSet,
+    TimetableWorkflowViewSet,
+    TimetableVariantViewSet,
+    # Timetable display
     fastapi_callback,
     get_department_timetable,
     get_faculty_timetable,
     get_student_timetable,
+    # Progress / SSE
     get_progress,
-)
-from .workflow_views import TimetableWorkflowViewSet, TimetableVariantViewSet
-from .timetable_config_views import TimetableConfigurationViewSet
-from .conflict_views import ConflictViewSet
-from .cross_enrollment_views import CrossEnrollmentViewSet
-from .analytics_views import AnalyticsViewSet
-from .views_optimized import (
+    stream_progress,
+    health_check,
+    # Fast endpoints
     fast_generation_jobs,
     fast_faculty,
     fast_departments,
     fast_courses,
     fast_students,
     fast_rooms,
-)
-from .views import (
-    BatchViewSet,
-    BuildingViewSet,
-    CourseViewSet,
-    DepartmentViewSet,
-    FacultyViewSet,
-    LabViewSet,
-    ProgramViewSet,
-    RoomViewSet,
-    SchoolViewSet,
-    StudentViewSet,
-    TimetableSlotViewSet,
-    TimetableViewSet,
-    UserViewSet,
-    current_user_view,
-    dashboard_stats,
-    faculty_profile_and_courses,
-    student_profile_and_courses,
-    login_view,
-    logout_view,
-    refresh_token_view,
+    # Conflict & config
+    ConflictViewSet,
+    TimetableConfigurationViewSet,
 )
 
 router = DefaultRouter()
@@ -66,8 +76,6 @@ router.register(r"timetable/workflows", TimetableWorkflowViewSet, basename="work
 router.register(r"timetable/variants", TimetableVariantViewSet, basename="variant")
 router.register(r"timetable-configs", TimetableConfigurationViewSet, basename="timetable-config")
 router.register(r"conflicts", ConflictViewSet, basename="conflict")
-router.register(r"cross-enrollment", CrossEnrollmentViewSet, basename="cross-enrollment")
-router.register(r"analytics", AnalyticsViewSet, basename="analytics")
 
 urlpatterns = [
     # Faculty and Student profile - MUST be before router to avoid conflict
@@ -82,7 +90,12 @@ urlpatterns = [
     path("timetable/faculty/me/", get_faculty_timetable, name="faculty-timetable"),
     path("timetable/student/me/", get_student_timetable, name="student-timetable"),
     path("timetable/callback/", fastapi_callback, name="fastapi-callback"),
-    path("progress/<str:job_id>/", get_progress, name="get-progress"),
+    # Progress tracking endpoints (Enterprise SSE pattern)
+    path("generation/progress/<str:job_id>/", get_progress, name="generation-progress"),
+    path("generation/stream/<str:job_id>/", stream_progress, name="generation-stream"),
+    path("generation/stream/<str:job_id>", stream_progress, name="generation-stream-no-slash"),
+    path("generation/progress/<str:job_id>", get_progress, name="generation-progress-no-slash"),
+    path("generation/health/", health_check, name="generation-health"),
     # Auth endpoints - CSRF exempt via APICSRFExemptMiddleware
     path("auth/login/", login_view, name="login"),
     path("auth/login", login_view, name="login-no-slash"),
@@ -92,6 +105,13 @@ urlpatterns = [
     path("auth/refresh", refresh_token_view, name="refresh-token-no-slash"),
     path("auth/me/", current_user_view, name="current-user"),
     path("auth/me", current_user_view, name="current-user-no-slash"),
+    # Password reset & change
+    path("auth/password-reset/request/", password_reset_request_view, name="password-reset-request"),
+    path("auth/password-reset/confirm/", password_reset_confirm_view, name="password-reset-confirm"),
+    path("auth/password-change/", password_change_view, name="password-change"),
+    # Session management (FIX 1)
+    path("auth/sessions/", list_sessions_view, name="session-list"),
+    path("auth/sessions/<str:jti>/", revoke_session_view, name="session-revoke"),
     # Dashboard stats
     path("dashboard/stats/", dashboard_stats, name="dashboard-stats"),
     # PERFORMANCE: Ultra-fast endpoints

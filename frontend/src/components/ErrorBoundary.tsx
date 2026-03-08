@@ -74,30 +74,39 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-          <div className="max-w-md w-full bg-white shadow-lg rounded-lg p-8">
-            <div className="flex items-center justify-center w-16 h-16 mx-auto bg-red-100 rounded-full mb-4">
-              <AlertTriangle className="w-8 h-8 text-red-600" />
+        <div className="min-h-screen flex items-center justify-center px-4" style={{ background: 'var(--color-bg-page)' }}>
+          <div className="card max-w-md w-full" style={{ padding: '32px' }}>
+            <div
+              className="flex items-center justify-center w-16 h-16 mx-auto rounded-full mb-4"
+              style={{ background: 'var(--color-danger-subtle)' }}
+            >
+              <AlertTriangle className="w-8 h-8" style={{ color: 'var(--color-danger)' }} />
             </div>
 
-            <h1 className="text-2xl font-bold text-gray-900 text-center mb-2">
+            <h1 className="text-2xl font-bold text-center mb-2" style={{ color: 'var(--color-text-primary)' }}>
               Something went wrong
             </h1>
 
-            <p className="text-gray-600 text-center mb-6">
+            <p className="text-center mb-6" style={{ color: 'var(--color-text-secondary)' }}>
               We&apos;re sorry, but something unexpected happened. Please try again.
             </p>
 
             {process.env.NODE_ENV === 'development' && this.state.error && (
-              <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                <p className="text-sm font-semibold text-gray-700 mb-2">Error Details:</p>
-                <p className="text-xs text-red-600 font-mono mb-2">{this.state.error.toString()}</p>
+              <div
+                className="mb-6 p-4 rounded-lg border"
+                style={{ background: 'var(--color-bg-surface-2)', borderColor: 'var(--color-border)' }}
+              >
+                <p className="text-sm font-semibold mb-2" style={{ color: 'var(--color-text-primary)' }}>Error Details:</p>
+                <p className="text-xs font-mono mb-2" style={{ color: 'var(--color-danger-text)' }}>{this.state.error.toString()}</p>
                 {this.state.errorInfo && (
-                  <details className="text-xs text-gray-500">
-                    <summary className="cursor-pointer hover:text-gray-700">
+                  <details className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    <summary className="cursor-pointer hover:underline">
                       Component Stack
                     </summary>
-                    <pre className="mt-2 overflow-auto max-h-40 p-2 bg-white rounded border">
+                    <pre
+                      className="mt-2 overflow-auto max-h-40 p-2 rounded border"
+                      style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border)' }}
+                    >
                       {this.state.errorInfo.componentStack}
                     </pre>
                   </details>
@@ -108,7 +117,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <div className="flex gap-3">
               <button
                 onClick={this.handleReset}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
               >
                 <RefreshCw className="w-4 h-4" />
                 Try Again
@@ -116,7 +125,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
               <button
                 onClick={this.handleGoHome}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                className="btn-secondary flex-1 flex items-center justify-center gap-2"
               >
                 <Home className="w-4 h-4" />
                 Go Home

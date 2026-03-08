@@ -1,10 +1,23 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import DashboardLayout from '@/components/dashboard-layout'
+import { TimetableGridSkeleton } from '@/components/LoadingSkeletons'
 
 export default function FacultySchedule() {
-  const [schedule, setSchedule] = useState<any[]>([])
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
+  const CACHE_KEY = 'faculty_schedule_cache'
+  const CACHE_TTL = 10 * 60 * 1000 // 10 minutes
+
+  const [schedule, setSchedule] = useState<any[]>(() => {
+    try {
+      const raw = sessionStorage.getItem(CACHE_KEY)
+      if (raw) {
+        const { data, ts } = JSON.parse(raw)
+        if (Date.now() - ts < CACHE_TTL) return data
+      }
+    } catch { /* storage unavailable */ }
+    return []
+  })
   const [loading, setLoading] = useState(true)
   const [faculty, setFaculty] = useState<any>(null)
 
@@ -14,14 +27,16 @@ export default function FacultySchedule() {
 
   const fetchSchedule = async () => {
     try {
-      // 🔐 Use HttpOnly cookies (no manual token handling)
-      const res = await fetch('http://localhost:8000/api/timetable/faculty/me/', {
-        credentials: 'include', // Send HttpOnly cookies automatically
+      const res = await fetch(`${API_BASE}/timetable/faculty/me/`, {
+        credentials: 'include',
       })
       const data = await res.json()
       if (data.success) {
         setSchedule(data.slots)
         setFaculty(data.faculty)
+        try {
+          sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data: data.slots, ts: Date.now() }))
+        } catch { /* quota exceeded */ }
       }
     } catch (error) {
       console.error('Failed to fetch schedule:', error)
@@ -32,27 +47,21 @@ export default function FacultySchedule() {
 
   if (loading) {
     return (
-      <DashboardLayout role="faculty">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="loading-spinner w-8 h-8 mx-auto mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-400">Loading schedule...</p>
-          </div>
-        </div>
-      </DashboardLayout>
+      <div className="space-responsive">
+        <TimetableGridSkeleton />
+      </div>
     )
   }
 
   return (
-    <DashboardLayout role="faculty">
-      <div className="space-responsive">
+    <div className="space-responsive">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800 dark:text-gray-200 truncate">
+            <h1 className="text-lg sm:text-xl lg:text-2xl font-normal truncate" style={{ color: 'var(--color-text-primary)' }}>
               My Schedule
             </h1>
-            <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 mt-1">
+            <p className="text-xs sm:text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
               {faculty
                 ? `${faculty.faculty_name} • ${faculty.department}`
                 : 'View your weekly teaching schedule'}
@@ -74,18 +83,18 @@ export default function FacultySchedule() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
           <div className="card-compact">
             <div className="text-center">
-              <div className="text-lg sm:text-xl font-semibold text-blue-600 dark:text-blue-400">
+              <div className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-primary)' }}>
                 {schedule.length}
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Total Classes</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Total Classes</div>
             </div>
           </div>
           <div className="card-compact">
             <div className="text-center">
-              <div className="text-lg sm:text-xl font-semibold text-green-600 dark:text-green-400">
+              <div className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-success-text)' }}>
                 {new Set(schedule.map(s => s.subject_name)).size}
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Subjects</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Subjects</div>
             </div>
           </div>
           <div className="card-compact">
@@ -93,15 +102,15 @@ export default function FacultySchedule() {
               <div className="text-lg sm:text-xl font-semibold text-purple-600 dark:text-purple-400">
                 {new Set(schedule.map(s => s.classroom_number)).size}
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Classrooms</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Classrooms</div>
             </div>
           </div>
           <div className="card-compact">
             <div className="text-center">
-              <div className="text-lg sm:text-xl font-semibold text-orange-600 dark:text-orange-400">
+              <div className="text-lg sm:text-xl font-semibold" style={{ color: 'var(--color-warning-text)' }}>
                 0
               </div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Conflicts</div>
+              <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Conflicts</div>
             </div>
           </div>
         </div>
@@ -132,18 +141,18 @@ export default function FacultySchedule() {
               {schedule.map((slot, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg"
-                >
-                  <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/40 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <span className="text-xs font-bold text-blue-800 dark:text-blue-300">
+                  className="flex items-center gap-3 p-3 rounded-lg border"
+                  style={{ background: 'var(--color-primary-subtle)', borderColor: 'var(--color-primary-subtle)' }}>
+                  <div className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--color-primary-subtle)' }}>
+                    <span className="text-xs font-bold" style={{ color: 'var(--color-primary)' }}>
                       {slot.start_time?.substring(0, 5)}
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                    <h4 className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
                       {slot.subject_name}
                     </h4>
-                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                       {slot.day} • {slot.classroom_number}
                     </p>
                   </div>
@@ -162,30 +171,30 @@ export default function FacultySchedule() {
             </div>
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Mathematics 101</span>
+                <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Mathematics 101</span>
                 <div className="flex items-center gap-2">
-                  <div className="w-20 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div className="w-20 rounded-full h-2" style={{ background: 'var(--color-bg-surface-3)' }}>
                     <div className="bg-blue-500 h-2 rounded-full" style={{ width: '60%' }}></div>
                   </div>
-                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">12h</span>
+                  <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>12h</span>
                 </div>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Physics 201</span>
+                <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Physics 201</span>
                 <div className="flex items-center gap-2">
-                  <div className="w-20 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div className="w-20 rounded-full h-2" style={{ background: 'var(--color-bg-surface-3)' }}>
                     <div className="bg-green-500 h-2 rounded-full" style={{ width: '40%' }}></div>
                   </div>
-                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">8h</span>
+                  <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>8h</span>
                 </div>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600 dark:text-gray-400">Lab Sessions</span>
+                <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Lab Sessions</span>
                 <div className="flex items-center gap-2">
-                  <div className="w-20 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div className="w-20 rounded-full h-2" style={{ background: 'var(--color-bg-surface-3)' }}>
                     <div className="bg-purple-500 h-2 rounded-full" style={{ width: '20%' }}></div>
                   </div>
-                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200">4h</span>
+                  <span className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>4h</span>
                 </div>
               </div>
             </div>
@@ -197,28 +206,27 @@ export default function FacultySchedule() {
               <p className="card-description">Important dates</p>
             </div>
             <div className="space-y-3">
-              <div className="flex items-center gap-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+              <div className="flex items-center gap-3 p-3 rounded-lg border" style={{ background: 'var(--color-warning-subtle)', borderColor: 'var(--color-border)' }}>
                 <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                  <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
                     Faculty Meeting
                   </p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Tomorrow, 2:00 PM</p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Tomorrow, 2:00 PM</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <div className="flex items-center gap-3 p-3 rounded-lg border" style={{ background: 'var(--color-primary-subtle)', borderColor: 'var(--color-border)' }}>
                 <div className="w-3 h-3 rounded-full bg-blue-500"></div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                  <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text-primary)' }}>
                     Exam Schedule Review
                   </p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Dec 20, 10:00 AM</p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Dec 20, 10:00 AM</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-    </DashboardLayout>
   )
 }

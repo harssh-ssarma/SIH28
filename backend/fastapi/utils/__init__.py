@@ -1,5 +1,5 @@
 """Utils package"""
-from .progress_tracker import EnterpriseProgressTracker, ProgressUpdateTask
 from .django_client import DjangoAPIClient
+from .progress_tracker import ProgressTracker
 
-__all__ = ['EnterpriseProgressTracker', 'ProgressUpdateTask', 'DjangoAPIClient']
+__all__ = ['DjangoAPIClient', 'ProgressTracker']

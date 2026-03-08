@@ -19,6 +19,9 @@ from sentry_sdk.integrations.django import DjangoIntegration
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Ensure logs directory exists before LOGGING config tries to open files.
+(BASE_DIR / "logs").mkdir(exist_ok=True)
+
 # Load environment variables from backend/.env
 env_path = BASE_DIR.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -43,7 +46,10 @@ if SENTRY_DSN:
         dsn=SENTRY_DSN,
         integrations=[DjangoIntegration()],
         environment=SENTRY_ENVIRONMENT,
-        traces_sample_rate=1.0,  # Send all traces in development
+        # PERFORMANCE: 100% tracing in dev; 10% sampling in production.
+        # traces_sample_rate=1.0 means EVERY request gets a full trace — enormous
+        # CPU overhead at scale (Sentry themselves recommend ≤0.2 in production).
+        traces_sample_rate=1.0 if SENTRY_ENVIRONMENT != "production" else 0.1,
         send_default_pii=True,
         attach_stacktrace=True,
         before_send=strip_local_variables,  # Python 3.13 compatibility
@@ -70,7 +76,6 @@ APPEND_SLASH = False
 # Application definition
 
 INSTALLED_APPS = [
-    "daphne",  # WebSocket support - must be first
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -85,7 +90,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "corsheaders",
     "django_filters",
-    "channels",  # WebSocket support
+    "csp",  # Content Security Policy (django-csp 4.x)
     # Local apps
     "core",
     "academics",
@@ -95,6 +100,8 @@ MIDDLEWARE = [
     "django.middleware.gzip.GZipMiddleware",  # PERFORMANCE: Compress responses
     "django.middleware.http.ConditionalGetMiddleware",  # PERFORMANCE: ETag support
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # PERFORMANCE: Fast static files w/ immutable cache headers
+    "csp.middleware.CSPMiddleware",  # SECURITY: Content-Security-Policy header
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -153,6 +160,7 @@ else:
             "PORT": os.getenv("DB_PORT", "5432"),
             "ATOMIC_REQUESTS": True,
             "CONN_MAX_AGE": 600,  # PERFORMANCE: Connection pooling
+            "CONN_HEALTH_CHECKS": True,  # Re-validate stale connections before use
             "OPTIONS": {
                 "sslmode": "require",
                 "connect_timeout": 5,  # PERFORMANCE: Faster timeout
@@ -198,6 +206,21 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
+# WhiteNoise: serve static files with long-lived immutable cache headers
+# CompressedManifestStaticFilesStorage appends a content hash to filenames
+# (e.g. app.abc123.js) so the browser can cache them for up to 1 year safely.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+# WhiteNoise: max-age for hashed static assets (1 year = immutable)
+WHITENOISE_MAX_AGE = 31536000
+
 # Media files
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
@@ -235,6 +258,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "1000/hour",
         "user": "10000/hour",
+        "login": "5/minute",  # Brute-force protection on login endpoint
     },
 }
 
@@ -283,63 +307,126 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/1")
 # Upstash Redis uses TLS - detect and configure accordingly
 REDIS_USE_TLS = REDIS_URL.startswith("rediss://")
 
-CACHE_OPTIONS = {
-    "CLIENT_CLASS": "django_redis.client.DefaultClient",
-    "IGNORE_EXCEPTIONS": DEBUG == False,  # Only ignore exceptions in production
-    "CONNECTION_POOL_KWARGS": {
-        "max_connections": 50,
-        "retry_on_timeout": True,
-        "socket_keepalive": True,
-        "socket_keepalive_options": {
-            1: 1,  # TCP_KEEPIDLE
-            2: 1,  # TCP_KEEPINTVL  
-            3: 3,  # TCP_KEEPCNT
-        } if os.name != 'nt' else {},  # Windows doesn't support these options
-    },
-    "SOCKET_CONNECT_TIMEOUT": 30,  # Increased timeout for Upstash
-    "SOCKET_TIMEOUT": 30,
-    "RETRY_ON_TIMEOUT": True,
-}
+# ============================================================
+# ENTERPRISE REDIS CONFIGURATION  (Google / Netflix grade)
+# ============================================================
+# DB layout:
+#   DB 1  — application cache  (default alias)
+#   DB 2  — session store      (session alias)
+#
+# Tuning knobs:
+#   max_connections   200   — sustain ~200 concurrent Django workers
+#   socket_timeout     5 s  — fail-fast; don't block workers on a dead Redis
+#   COMPRESSOR zlib        — ~3-5× size reduction for large querysets
+#   VERSION             1   — bump to invalidate the whole keyspace without
+#                             touching Redis (zero-downtime schema migration)
+# ============================================================
 
-# Add TLS/SSL support for Upstash Redis
+def _build_pool_kwargs(max_conn: int) -> dict:
+    """Build connection-pool kwargs; keep Windows-safe."""
+    kwargs: dict = {
+        "max_connections": max_conn,
+        "retry_on_timeout": True,
+        "socket_connect_timeout": 5,
+        "socket_timeout": 5,
+        "health_check_interval": 30,   # ping idle connections every 30 s
+    }
+    if os.name != "nt":   # Linux/macOS: enable TCP keepalive to detect dead peers
+        kwargs["socket_keepalive"] = True
+        kwargs["socket_keepalive_options"] = {
+            1: 10,   # TCP_KEEPIDLE  – start probing after 10 s idle
+            2: 5,    # TCP_KEEPINTVL – probe every 5 s
+            3: 3,    # TCP_KEEPCNT   – drop after 3 missed probes
+        }
+    return kwargs
+
+
+_POOL_KWARGS_APP     = _build_pool_kwargs(200)
+_POOL_KWARGS_SESSION = _build_pool_kwargs(50)
+
+# TLS override for Upstash / Redis Cloud
 if REDIS_USE_TLS:
-    import ssl
-    CACHE_OPTIONS["CONNECTION_POOL_KWARGS"]["ssl_cert_reqs"] = ssl.CERT_NONE
-    CACHE_OPTIONS["CONNECTION_POOL_KWARGS"]["ssl_check_hostname"] = False
+    import ssl as _ssl
+    _TLS_EXTRAS = {
+        "ssl_cert_reqs": _ssl.CERT_NONE,
+        "ssl_check_hostname": False,
+    }
+    _POOL_KWARGS_APP.update(_TLS_EXTRAS)
+    _POOL_KWARGS_SESSION.update(_TLS_EXTRAS)
+
+
+def _redis_db(url: str, db: int) -> str:
+    """Return the URL with a specific Redis DB index."""
+    import re
+    return re.sub(r"/\d+$", f"/{db}", url) if re.search(r"/\d+$", url) else f"{url}/{db}"
+
 
 CACHES = {
+    # ── Application cache (DB 1) ──────────────────────────────────────────────
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": REDIS_URL,
-        "OPTIONS": CACHE_OPTIONS,
-        "KEY_PREFIX": "sih28",
-        "TIMEOUT": 300,  # 5 minutes default
-    }
+        "LOCATION": _redis_db(REDIS_URL, 1),
+        "TIMEOUT": 300,          # 5-min global default; each view overrides per-model
+        "VERSION": 1,            # bump → whole keyspace instantly obsolete
+        "KEY_PREFIX": "sih28",   # sih28:1:<key> – avoids collisions with other apps
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            # Silently return None on Redis failure → app degrades gracefully
+            "IGNORE_EXCEPTIONS": True,
+            "CONNECTION_POOL_KWARGS": _POOL_KWARGS_APP,
+            "SOCKET_CONNECT_TIMEOUT": 5,
+            "SOCKET_TIMEOUT": 5,
+            "RETRY_ON_TIMEOUT": True,
+            # zlib compression – transparent to callers, saves ~70 % on JSON payloads
+            "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
+            # Pickle serialiser supports all Python types (datetime, Decimal, UUID …)
+            "SERIALIZER": "django_redis.serializers.pickle.PickleSerializer",
+        },
+    },
+    # ── Session store (DB 2) — kept on Redis for sub-ms auth lookups ─────────
+    "session": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": _redis_db(REDIS_URL, 2),
+        "TIMEOUT": 1_209_600,    # 14 days — matches SESSION_COOKIE_AGE
+        "KEY_PREFIX": "sih28:sess",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "IGNORE_EXCEPTIONS": True,
+            "CONNECTION_POOL_KWARGS": _POOL_KWARGS_SESSION,
+            "SOCKET_CONNECT_TIMEOUT": 5,
+            "SOCKET_TIMEOUT": 5,
+            "RETRY_ON_TIMEOUT": True,
+            "SERIALIZER": "django_redis.serializers.pickle.PickleSerializer",
+        },
+    },
 }
+
+# Use Redis-backed sessions (sub-ms lookups vs. DB sessions)
+SESSION_ENGINE      = "django.contrib.sessions.backends.cache"
+SESSION_CACHE_ALIAS = "session"
 
 # Cache key prefix for different environments
 CACHE_MIDDLEWARE_ALIAS = "default"
 CACHE_MIDDLEWARE_SECONDS = 300
 CACHE_MIDDLEWARE_KEY_PREFIX = f"sih28_{SENTRY_ENVIRONMENT}"
 
-# Channels Configuration (WebSocket support)
-ASGI_APPLICATION = "erp.asgi.application"
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [REDIS_URL],
-        },
-    },
-}
+# ── TTL constants shared with cache_service.py ─────────────────────────────
+#   Imported via: from django.conf import settings → settings.CACHE_TTL_*
+CACHE_TTL_FLASH     = 30          # live stats (never stale for long)
+CACHE_TTL_SHORT     = 60          # 1 min  – rapidly changing data
+CACHE_TTL_MEDIUM    = 300         # 5 min  – moderate churn (students, faculty)
+CACHE_TTL_LONG      = 900         # 15 min – stable lists (courses, rooms)
+CACHE_TTL_VERY_LONG = 3_600       # 1 hr   – near-static (buildings, schools)
+CACHE_TTL_ETERNAL   = 86_400      # 24 hr  – config / lookup tables
 
 # FastAPI AI Service URL
 FASTAPI_URL = os.getenv("FASTAPI_URL", "http://localhost:8001")
 
-# Celery Configuration
+# Celery Configuration  (DB 3 – isolated from app cache and sessions)
 import ssl
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
+_CELERY_REDIS_URL = _redis_db(REDIS_URL, 3)
+CELERY_BROKER_URL = _CELERY_REDIS_URL
+CELERY_RESULT_BACKEND = _CELERY_REDIS_URL
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
@@ -348,14 +435,46 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BROKER_CONNECTION_RETRY = True
-CELERY_BROKER_CONNECTION_MAX_RETRIES = 10
-CELERY_BROKER_POOL_LIMIT = 50
-CELERY_BROKER_HEARTBEAT = 30
-CELERY_BROKER_CONNECTION_TIMEOUT = 30
+CELERY_BROKER_CONNECTION_MAX_RETRIES = None   # retry forever on disconnect
+CELERY_BROKER_POOL_LIMIT = 3                  # Upstash free tier: keep connections low
+CELERY_BROKER_HEARTBEAT = None                # disable AMQP heartbeat (not supported on Redis transport)
+CELERY_BROKER_CONNECTION_TIMEOUT = 10
+# Suppress CPendingDeprecationWarning about cancelling tasks on connection loss
+CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = False
+
+# Transport options — keepalive + retry so Upstash idle-disconnect auto-recovers
+_BROKER_SOCKET_KEEPALIVE_OPTIONS = {
+    4: 60,   # TCP_KEEPIDLE  — start keepalive probes after 60 s idle
+    5: 10,   # TCP_KEEPINTVL — send a probe every 10 s
+    6: 3,    # TCP_KEEPCNT   — give up after 3 failed probes
+} if os.name != 'nt' else {}  # keepalive socket options not supported on Windows
+
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'socket_timeout': 30,
+    'socket_connect_timeout': 10,
+    'retry_on_timeout': True,
+    'socket_keepalive': True,
+    'socket_keepalive_options': _BROKER_SOCKET_KEEPALIVE_OPTIONS,
+    # Reconnect backoff: start at 0.1 s, cap at 30 s
+    'interval_start': 0.1,
+    'interval_step': 0.5,
+    'interval_max': 30,
+}
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {
     'socket_timeout': 30,
-    'socket_connect_timeout': 30,
+    'socket_connect_timeout': 10,
     'retry_on_timeout': True,
+}
+
+# Celery Beat — periodic task schedule
+# cleanup_tokens runs daily at 03:00 UTC (off-peak for BHU, UTC+5:30 = 08:30 IST)
+# This prevents the token_blacklist tables from growing unboundedly.
+from celery.schedules import crontab
+CELERY_BEAT_SCHEDULE = {
+    "cleanup-expired-jwt-tokens": {
+        "task": "academics.celery_tasks.cleanup_tokens_task",
+        "schedule": crontab(hour=3, minute=0),  # 03:00 UTC daily
+    },
 }
 
 # SSL configuration for Upstash Redis (rediss://)
@@ -392,10 +511,13 @@ LOGGING = {
             "formatter": "verbose",
         },
         "file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            # Plain FileHandler with mode='w': django.log is completely
+            # overwritten on every server restart — always shows current
+            # session only, ideal for debugging.
+            "class": "logging.FileHandler",
             "filename": os.path.join(BASE_DIR, "logs", "django.log"),
-            "maxBytes": 1024 * 1024 * 50,  # 50 MB
-            "backupCount": 5,
+            "mode": "w",
+            "encoding": "utf-8",
             "formatter": "verbose",
         },
         "api_requests_file": {
@@ -420,12 +542,12 @@ LOGGING = {
             "propagate": False,
         },
         "api_requests": {
-            "handlers": ["console", "api_requests_file"],
+            "handlers": ["console", "api_requests_file", "file"],
             "level": "INFO",
             "propagate": False,
         },
         "api_metrics": {
-            "handlers": ["api_metrics_file"],
+            "handlers": ["api_metrics_file", "file"],
             "level": "INFO",
             "propagate": False,
         },
@@ -436,13 +558,53 @@ LOGGING = {
         },
     },
     "root": {
-        "handlers": ["console"],
+        "handlers": ["console", "file"],
         "level": "WARNING",
     },
 }
 
 # JWT Settings
 from datetime import timedelta
+from django.core.exceptions import ImproperlyConfigured
+
+# =============================
+# JWT SIGNING KEY RESOLUTION
+# =============================
+# RS256 (asymmetric): Private key signs — only auth server holds it.
+#                     Public key verifies — safe to share with any service.
+# HS256 (symmetric):  One key does both — only safe for single-service dev.
+#
+# Priority:
+#   1. JWT_PRIVATE_KEY + JWT_PUBLIC_KEY env vars set → RS256 (production)
+#   2. Not set + DEBUG=True                         → HS256 fallback (dev only)
+#   3. Not set + DEBUG=False                        → hard startup failure
+#
+# Generate keys once:
+#   openssl genrsa -out private.pem 2048
+#   openssl rsa -in private.pem -pubout -out public.pem
+# Then set env vars (multi-line value, preserve newlines):
+#   JWT_PRIVATE_KEY="$(cat private.pem)"
+#   JWT_PUBLIC_KEY="$(cat public.pem)"
+
+_jwt_private_key = os.getenv("JWT_PRIVATE_KEY", "").strip()
+_jwt_public_key = os.getenv("JWT_PUBLIC_KEY", "").strip()
+
+if _jwt_private_key and _jwt_public_key:
+    _JWT_ALGORITHM = "RS256"
+    _JWT_SIGNING_KEY = _jwt_private_key
+    _JWT_VERIFYING_KEY = _jwt_public_key
+elif not DEBUG:
+    raise ImproperlyConfigured(
+        "JWT_PRIVATE_KEY and JWT_PUBLIC_KEY must be set in production. "
+        "Generate with: openssl genrsa -out private.pem 2048 && "
+        "openssl rsa -in private.pem -pubout -out public.pem"
+    )
+else:
+    # Local development only — HS256 with SECRET_KEY is acceptable when
+    # the server is not reachable from the internet.
+    _JWT_ALGORITHM = "HS256"
+    _JWT_SIGNING_KEY = SECRET_KEY
+    _JWT_VERIFYING_KEY = None
 
 SIMPLE_JWT = {
     # Token Lifetimes - Google-like security (shorter refresh, auto-rotate)
@@ -455,9 +617,9 @@ SIMPLE_JWT = {
     "UPDATE_LAST_LOGIN": True,
     
     # Encryption & Signing
-    "ALGORITHM": "HS256",
-    "SIGNING_KEY": SECRET_KEY,
-    "VERIFYING_KEY": None,
+    "ALGORITHM": _JWT_ALGORITHM,      # RS256 in prod; HS256 in dev
+    "SIGNING_KEY": _JWT_SIGNING_KEY,  # RSA private key (prod) or SECRET_KEY (dev)
+    "VERIFYING_KEY": _JWT_VERIFYING_KEY,  # RSA public key (prod) or None (dev)
     "AUDIENCE": None,
     "ISSUER": None,
     
@@ -510,7 +672,9 @@ JWT_AUTH_COOKIE = "access_token"  # Cookie name for access token
 JWT_AUTH_REFRESH_COOKIE = "refresh_token"  # Cookie name for refresh token
 JWT_AUTH_SECURE = not DEBUG  # HTTPS only in production
 JWT_AUTH_HTTPONLY = True  # JavaScript cannot access (prevents XSS)
-JWT_AUTH_SAMESITE = "Lax"  # CSRF protection (Lax allows GET from external sites)
+JWT_AUTH_SAMESITE = "Lax"  # CSRF protection on access token (Lax allows GET from external sites)
+# Refresh token is scoped to its one endpoint — never sent to /api/timetable/, /api/users/, etc.
+JWT_AUTH_REFRESH_COOKIE_PATH = "/api/auth/refresh/"  # Restrict refresh cookie scope
 JWT_AUTH_COOKIE_USE_CSRF = True  # Require CSRF token for cookie-based auth
 JWT_AUTH_COOKIE_ENFORCE_CSRF_ON_UNAUTHENTICATED = False  # Don't require CSRF for login
 
@@ -539,3 +703,30 @@ PASSWORD_HASHERS = [
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB max upload size
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10485760  # 10MB max file upload
 SECURE_REFERRER_POLICY = "same-origin"  # Control referrer information
+
+# =============================
+# CONTENT SECURITY POLICY (django-csp 4.x)
+# =============================
+# Requires: pip install django-csp
+# Middleware already added: csp.middleware.CSPMiddleware
+#
+# Decisions:
+#   script-src 'self'          — no inline scripts, no CDN (XSS hardening)
+#   style-src  'self' 'unsafe-inline' — Next.js injects inline styles at runtime
+#   img-src    'self' data:    — base64 data URIs used for avatars/thumbnails
+#   connect-src 'self'         — fetch/XHR only to same origin (admin & API docs)
+#   font-src   'self'          — no external font CDNs
+#   frame-ancestors 'none'     — belt-and-suspenders with X_FRAME_OPTIONS = DENY
+#   form-action 'self'         — prevents form hijacking to third-party URLs
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "default-src": ["'self'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "img-src": ["'self'", "data:"],
+        "connect-src": ["'self'"],
+        "font-src": ["'self'"],
+        "frame-ancestors": ["'none'"],
+        "form-action": ["'self'"],
+    }
+}

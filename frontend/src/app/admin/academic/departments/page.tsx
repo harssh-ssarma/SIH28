@@ -1,89 +1,110 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import apiClient from '@/lib/api'
 import { useToast } from '@/components/Toast'
+import AddEditDepartmentModal from './components/AddEditDepartmentModal'
+import PageHeader from '@/components/shared/PageHeader'
+import DataTable, { Column } from '@/components/shared/DataTable'
+import { Layers } from 'lucide-react'
 
 interface Department {
   id: number
   dept_id: string
+  dept_code: string
   dept_name: string
-  school?: { school_name: string }
+  school?: { id?: number; school_name: string }
 }
 
+const COLUMNS: Column<Record<string, unknown>>[] = [
+  { key: 'dept_code', header: 'Code', width: '120px' },
+  { key: 'dept_name', header: 'Name' },
+  {
+    key: 'school',
+    header: 'School',
+    render: v => (v as Department['school'])?.school_name
+      || <span style={{ color: 'var(--color-text-secondary)' }}>—</span>,
+  },
+]
+
 export default function DepartmentsPage() {
+  const { showToast } = useToast()
   const [departments, setDepartments] = useState<Department[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const { showToast } = useToast()
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showModal, setShowModal] = useState(false)
+  const [editingDept, setEditingDept] = useState<Department | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const itemsPerPage = 25
 
-  useEffect(() => {
-    fetchDepartments()
-  }, [])
-
-  const fetchDepartments = async () => {
+  const fetchDepartments = useCallback(async (page = currentPage) => {
     setIsLoading(true)
     try {
-      const response = await apiClient.getDepartments()
-      if (response.error) {
-        showToast('error', response.error)
-      } else if (response.data) {
-        setDepartments(Array.isArray(response.data) ? response.data : response.data.results || [])
+      const response = await apiClient.getDepartments(page, itemsPerPage, searchTerm)
+      if (response.error) showToast('error', response.error)
+      else if (response.data) {
+        setDepartments(response.data.results || response.data)
+        setTotalCount(response.data.count || 0)
       }
-    } catch (err) {
-      showToast('error', 'Failed to load departments')
-    } finally {
-      setIsLoading(false)
-    }
+    } catch { showToast('error', 'Failed to load departments') }
+    finally { setIsLoading(false) }
+  }, [currentPage, itemsPerPage, searchTerm]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const t = setTimeout(() => { setCurrentPage(1); fetchDepartments(1) }, 400)
+    return () => clearTimeout(t)
+  }, [searchTerm]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { fetchDepartments() }, [currentPage]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSave = async (data: any) => {
+    const res = editingDept
+      ? await apiClient.updateDepartment(String(editingDept.id), data)
+      : await apiClient.createDepartment(data)
+    if (res.error) { showToast('error', res.error); return }
+    showToast('success', editingDept ? 'Department updated' : 'Department created')
+    setShowModal(false)
+    await fetchDepartments()
+  }
+
+  const handleBulkDelete = async (ids: string[]) => {
+    const results = await Promise.all(ids.map(id => apiClient.deleteDepartment(id)))
+    const firstError = results.find(r => r.error)
+    if (firstError) { showToast('error', firstError.error!); return }
+    showToast('success', `${ids.length} department${ids.length > 1 ? 's' : ''} deleted`)
+    await fetchDepartments()
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <p className="text-sm text-gray-600 dark:text-gray-400">Total: {departments.length} departments</p>
-        <button className="btn-primary">Add Department</button>
-      </div>
-
-      <div className="card">
-        {isLoading && (
-          <div className="flex items-center justify-center py-8">
-            <div className="loading-spinner w-6 h-6 mr-2"></div>
-            <span className="text-gray-600 dark:text-gray-400">Loading departments...</span>
-          </div>
-        )}
-
-        {!isLoading && departments.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-gray-600 dark:text-gray-400">No departments found</p>
-          </div>
-        )}
-
-        {!isLoading && departments.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead className="table-header">
-                <tr>
-                  <th className="table-header-cell">Dept ID</th>
-                  <th className="table-header-cell">Name</th>
-                  <th className="table-header-cell">School</th>
-                  <th className="table-header-cell">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {departments.map(dept => (
-                  <tr key={dept.id} className="table-row">
-                    <td className="table-cell">{dept.dept_id}</td>
-                    <td className="table-cell">{dept.dept_name}</td>
-                    <td className="table-cell">{dept.school?.school_name || '-'}</td>
-                    <td className="table-cell">
-                      <button className="btn-ghost text-xs px-2 py-1">Edit</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <PageHeader
+        title="Departments"
+        parentLabel="Academic"
+        count={totalCount}
+        loading={isLoading}
+        primaryAction={{ label: 'Add Department', onClick: () => { setEditingDept(null); setShowModal(true) } }}
+      />
+      <DataTable
+        columns={COLUMNS}
+        data={departments as unknown as Record<string, unknown>[]}
+        loading={isLoading}
+        totalCount={totalCount}
+        page={currentPage}
+        pageSize={itemsPerPage}
+        onPageChange={setCurrentPage}
+        selectable
+        avatarColumn={row => (row as unknown as Department).dept_name}
+        onDelete={handleBulkDelete}
+        onEdit={row => { setEditingDept(row as unknown as Department); setShowModal(true) }}
+        emptyState={{ icon: Layers, title: 'No departments found', description: 'Add your first department to get started.' }}
+      />
+      <AddEditDepartmentModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        department={editingDept}
+        onSave={handleSave}
+      />
     </div>
   )
 }

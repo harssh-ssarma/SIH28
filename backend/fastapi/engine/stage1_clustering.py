@@ -19,9 +19,6 @@ class LouvainClusterer:
     
     def __init__(self, target_cluster_size: int = 10, edge_threshold: float = None):
         self.target_cluster_size = target_cluster_size
-        self.progress_tracker = None  # Set externally for real-time progress updates
-        self.job_id = None
-        self.redis_client = None
         # Adaptive edge threshold based on RAM
         if edge_threshold is None:
             import psutil
@@ -35,7 +32,10 @@ class LouvainClusterer:
                 self.EDGE_THRESHOLD = 0.3  # Medium
             else:
                 self.EDGE_THRESHOLD = 0.1  # Dense
-            logger.info(f"Adaptive edge threshold: {self.EDGE_THRESHOLD} (RAM: {available_gb:.1f}GB)")
+            logger.info(
+                "[CLUSTER] Adaptive edge threshold=%.2f  available_ram=%.1f GB",
+                self.EDGE_THRESHOLD, available_gb,
+            )
         else:
             self.EDGE_THRESHOLD = edge_threshold
     
@@ -47,46 +47,52 @@ class LouvainClusterer:
         NOTE: Cancellation handled by CancellationToken in saga (Google/Meta pattern)
         This method focuses on clustering logic only
         """
-        # Build constraint graph (with progress update)
-        logger.debug(f"Building constraint graph for {len(courses)} courses...")
-        self._update_progress("Building constraint graph...")
-        if self.progress_tracker:
-            self.progress_tracker.update_work_progress(3)
+        import time as _t
+
+        logger.info(
+            "[CLUSTER] cluster_courses START  courses=%d  target_size=%d"
+            "  edge_threshold=%.2f",
+            len(courses), self.target_cluster_size, self.EDGE_THRESHOLD,
+        )
+
+        # Build constraint graph
+        _t0 = _t.perf_counter()
+        logger.info(
+            "[CLUSTER] Building constraint graph  courses=%d", len(courses)
+        )
         G = self._build_constraint_graph(courses)
-        
-        # Run Louvain clustering (with progress update)
-        logger.debug(f"Running Louvain community detection...")
-        self._update_progress("Running Louvain detection...")
-        if self.progress_tracker:
-            self.progress_tracker.update_work_progress(6)
+        logger.info(
+            "[CLUSTER] Constraint graph built  nodes=%d  edges=%d  elapsed=%.2fs",
+            len(G.nodes), len(G.edges), _t.perf_counter() - _t0,
+        )
+
+        # Run Louvain clustering
+        _t0 = _t.perf_counter()
+        logger.info("[CLUSTER] Running Louvain community detection")
         partition = self._run_louvain(G)
-        
-        # Optimize cluster sizes (with progress update)
-        logger.debug(f"Optimizing cluster sizes...")
-        self._update_progress("Optimizing cluster sizes...")
-        if self.progress_tracker:
-            self.progress_tracker.update_work_progress(10)
+        n_raw_communities = len(set(partition.values())) if partition else 0
+        logger.info(
+            "[CLUSTER] Louvain done  raw_communities=%d  elapsed=%.2fs",
+            n_raw_communities, _t.perf_counter() - _t0,
+        )
+
+        # Optimize cluster sizes
+        _t0 = _t.perf_counter()
+        logger.info(
+            "[CLUSTER] Optimizing cluster sizes  raw_communities=%d",
+            n_raw_communities,
+        )
         final_clusters = self._optimize_cluster_sizes(partition, courses)
-        
-        logger.info(f"Created {len(final_clusters)} clusters from {len(courses)} courses")
+        logger.info(
+            "[CLUSTER] Cluster optimization done  final_clusters=%d  elapsed=%.2fs",
+            len(final_clusters), _t.perf_counter() - _t0,
+        )
+
+        logger.info(
+            "[CLUSTER] cluster_courses DONE  clusters=%d  total_courses=%d",
+            len(final_clusters), len(courses),
+        )
         return final_clusters
-    
-    def _update_progress(self, message: str):
-        """Update progress via Redis for real-time updates"""
-        try:
-            if self.redis_client and self.job_id:
-                import json
-                from datetime import datetime, timezone
-                progress_data = {
-                    'job_id': self.job_id,
-                    'stage': 'clustering',
-                    'message': message,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
-                }
-                self.redis_client.publish(f"progress:{self.job_id}", json.dumps(progress_data))
-                logger.debug(f"{message}")
-        except Exception as e:
-            logger.debug(f"Progress update failed: {e}")
     
     def _build_constraint_graph(self, courses: List[Course]) -> nx.Graph:
         """Build weighted constraint graph with parallel edge computation"""
@@ -101,7 +107,10 @@ class LouvainClusterer:
         
         # Parallel edge computation (ThreadPoolExecutor to avoid pickle issues)
         num_workers = min(multiprocessing.cpu_count(), 8)
-        logger.debug(f"Building constraint graph for {len(courses)} courses with {num_workers} workers...")
+        logger.info(
+            "[CLUSTER-GRAPH] Building constraint graph  courses=%d  workers=%d",
+            len(courses), num_workers,
+        )
         
         # Split courses into chunks for parallel processing
         chunk_size = max(1, len(courses) // num_workers)
@@ -119,8 +128,11 @@ class LouvainClusterer:
                 edges = future.result()
                 G.add_weighted_edges_from(edges)
                 edges_added += len(edges)
-        
-        logger.debug(f"Built graph: {len(G.nodes)} nodes, {edges_added} edges")
+
+        logger.info(
+            "[CLUSTER-GRAPH] Graph complete  nodes=%d  edges_added=%d",
+            len(G.nodes), edges_added,
+        )
         return G
     
     def _compute_edges_for_chunk(self, courses: List[Course], start: int, end: int) -> List[Tuple]:
@@ -188,22 +200,52 @@ class LouvainClusterer:
         return weight
     
     def _run_louvain(self, G: nx.Graph) -> Dict:
-        """Run Louvain community detection"""
+        """Run Louvain community detection.
+
+        Falls back to sequential-index partitioning on *any* failure so that
+        a missing package, an isolated-node graph (which raises ValueError in
+        community_louvain), or any other runtime error never surfaces as the
+        "[DeptSolver] Clustering failed" warning that forces a single-cluster
+        fallback and stresses CP-SAT.
+        """
         try:
             import community as community_louvain
-            
+
+            # best_partition raises ValueError on empty / fully-isolated graphs
+            if len(G.nodes) == 0:
+                return {}
+
             # Run Louvain with fixed seed for reproducibility
             partition = community_louvain.best_partition(G, weight='weight', random_state=42)
-            
+
             # Calculate modularity
             modularity = community_louvain.modularity(partition, G, weight='weight')
             logger.debug(f"Louvain modularity: {modularity:.3f}")
-            
+
             return partition
-            
+
         except ImportError:
-            logger.warning("python-louvain not available, using department fallback")
-            return self._department_fallback(G)
+            logger.warning("python-louvain not available, using sequential-chunk fallback")
+            return self._sequential_fallback(G)
+        except Exception as exc:
+            logger.warning(
+                "Louvain partitioning failed (%s: %s) — using sequential-chunk fallback",
+                type(exc).__name__, exc,
+            )
+            return self._sequential_fallback(G)
+
+    def _sequential_fallback(self, G: nx.Graph) -> Dict:
+        """Assign nodes to clusters in insertion order in chunks of target_cluster_size.
+
+        Returns a partition dict identical in shape to community_louvain output
+        (node_id → cluster_int).  This is a deterministic O(N) operation that
+        never fails, replacing the old _department_fallback which required a
+        'course' attribute on graph nodes that was never actually set.
+        """
+        partition = {}
+        for idx, node_id in enumerate(G.nodes()):
+            partition[node_id] = idx // self.target_cluster_size
+        return partition
     
     def _department_fallback(self, G: nx.Graph) -> Dict:
         """Fallback clustering by department"""

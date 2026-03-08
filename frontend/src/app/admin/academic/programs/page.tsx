@@ -1,96 +1,107 @@
-'use client'
+﻿'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import apiClient from '@/lib/api'
 import { useToast } from '@/components/Toast'
+import AddEditProgramModal from './components/AddEditProgramModal'
+import PageHeader from '@/components/shared/PageHeader'
+import DataTable, { Column } from '@/components/shared/DataTable'
+import { BookOpen } from 'lucide-react'
 
 interface Program {
   id: number
   program_id: string
+  program_code: string
   program_name: string
-  department?: { dept_name: string }
+  department?: { id?: number; dept_name: string }
   duration_years?: number
 }
 
-interface ProgramsResponse {
-  results?: Program[]
-}
+const COLUMNS: Column<Record<string, unknown>>[] = [
+  { key: 'program_code', header: 'Code', width: '120px' },
+  { key: 'program_name', header: 'Name' },
+  { key: 'department', header: 'Department', render: v => (v as Program['department'])?.dept_name ?? '—' },
+  { key: 'duration_years', header: 'Duration', width: '100px', render: v => v ? `${v} yrs` : '—' },
+]
 
 export default function ProgramsPage() {
+  const { showToast } = useToast()
   const [programs, setPrograms] = useState<Program[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const { showToast } = useToast()
+  const [searchTerm, setSearchTerm] = useState('')
+  const [showModal, setShowModal] = useState(false)
+  const [editingProgram, setEditingProgram] = useState<Program | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const itemsPerPage = 25
 
-  useEffect(() => {
-    fetchPrograms()
-  }, [])
-
-  const fetchPrograms = async () => {
+  const fetchPrograms = useCallback(async (page = currentPage) => {
     setIsLoading(true)
     try {
-      const response = await apiClient.request<Program[] | ProgramsResponse>('/programs/')
-      if (response.error) {
-        showToast('error', response.error)
-      } else if (response.data) {
-        setPrograms(Array.isArray(response.data) ? response.data : (response.data as ProgramsResponse).results || [])
+      const response = await apiClient.getPrograms(page, itemsPerPage, searchTerm)
+      if (response.error) showToast('error', response.error)
+      else if (response.data) {
+        setPrograms(response.data.results || response.data)
+        setTotalCount(response.data.count || 0)
       }
-    } catch (err) {
-      showToast('error', 'Failed to load programs')
-    } finally {
-      setIsLoading(false)
-    }
+    } catch { showToast('error', 'Failed to load programs') }
+    finally { setIsLoading(false) }
+  }, [currentPage, itemsPerPage, searchTerm]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const t = setTimeout(() => { setCurrentPage(1); fetchPrograms(1) }, 400)
+    return () => clearTimeout(t)
+  }, [searchTerm]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { fetchPrograms() }, [currentPage]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSave = async (data: any) => {
+    const res = editingProgram
+      ? await apiClient.updateProgram(String(editingProgram.id), data)
+      : await apiClient.createProgram(data)
+    if (res.error) { showToast('error', res.error); return }
+    showToast('success', editingProgram ? 'Program updated' : 'Program created')
+    setShowModal(false)
+    await fetchPrograms()
+  }
+
+  const handleBulkDelete = async (ids: string[]) => {
+    const results = await Promise.all(ids.map(id => apiClient.deleteProgram(id)))
+    const firstError = results.find(r => r.error)
+    if (firstError) { showToast('error', firstError.error!); return }
+    showToast('success', `${ids.length} program${ids.length > 1 ? 's' : ''} deleted`)
+    await fetchPrograms()
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <p className="text-sm text-gray-600 dark:text-gray-400">Total: {programs.length} programs</p>
-        <button className="btn-primary">Add Program</button>
-      </div>
-
-      <div className="card">
-        {isLoading && (
-          <div className="flex items-center justify-center py-8">
-            <div className="loading-spinner w-6 h-6 mr-2"></div>
-            <span className="text-gray-600 dark:text-gray-400">Loading programs...</span>
-          </div>
-        )}
-
-        {!isLoading && programs.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-gray-600 dark:text-gray-400">No programs found</p>
-          </div>
-        )}
-
-        {!isLoading && programs.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead className="table-header">
-                <tr>
-                  <th className="table-header-cell">Program ID</th>
-                  <th className="table-header-cell">Name</th>
-                  <th className="table-header-cell">Department</th>
-                  <th className="table-header-cell">Duration</th>
-                  <th className="table-header-cell">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {programs.map(program => (
-                  <tr key={program.id} className="table-row">
-                    <td className="table-cell">{program.program_id}</td>
-                    <td className="table-cell">{program.program_name}</td>
-                    <td className="table-cell">{program.department?.dept_name || '-'}</td>
-                    <td className="table-cell">{program.duration_years ? `${program.duration_years} years` : '-'}</td>
-                    <td className="table-cell">
-                      <button className="btn-ghost text-xs px-2 py-1">Edit</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <PageHeader
+        title="Programs"
+        parentLabel="Academic"
+        count={totalCount}
+        loading={isLoading}
+        primaryAction={{ label: 'Add Program', onClick: () => { setEditingProgram(null); setShowModal(true) } }}
+      />
+      <DataTable
+        columns={COLUMNS}
+        data={programs as unknown as Record<string, unknown>[]}
+        loading={isLoading}
+        totalCount={totalCount}
+        page={currentPage}
+        pageSize={itemsPerPage}
+        onPageChange={setCurrentPage}
+        selectable
+        avatarColumn={row => (row as unknown as Program).program_name}
+        onDelete={handleBulkDelete}
+        onEdit={row => { setEditingProgram(row as unknown as Program); setShowModal(true) }}
+        emptyState={{ icon: BookOpen, title: 'No programs found', description: 'Add your first program to get started.' }}
+      />
+      <AddEditProgramModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        program={editingProgram}
+        onSave={handleSave}
+      />
     </div>
   )
 }

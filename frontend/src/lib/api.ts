@@ -12,6 +12,19 @@ interface ApiResponse<T> {
   status: number;
 }
 
+/**
+ * Extends the standard RequestInit with internal flags that are consumed by
+ * ApiClient.request() and must never be forwarded to fetch().
+ */
+interface InternalRequestOptions extends RequestInit {
+  /**
+   * When true, suppresses the automatic redirect to /login on 401.
+   * Use this for silent auth-probes (e.g. getCurrentUser on mount) where
+   * an unauthenticated response is expected and handled by the caller.
+   */
+  noRedirectOn401?: boolean;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -31,29 +44,34 @@ class ApiClient {
    * 🔐 CRITICAL: credentials: 'include' sends HttpOnly cookies with every request
    * This is required for secure JWT authentication
    */
-  async request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
+  async request<T>(endpoint: string, options?: InternalRequestOptions): Promise<ApiResponse<T>> {
+    const { noRedirectOn401 = false, ...fetchOptions } = options ?? {};
     try {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
-        ...options,
+        ...fetchOptions,
         credentials: 'include',  // 🔐 CRITICAL: Send cookies with request
         headers: {
           ...this.getHeaders(),
-          ...options?.headers,
+          ...fetchOptions?.headers,
         },
       });
 
       // Handle 401 Unauthorized - try to refresh token
       if (response.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/refresh')) {
-        const refreshed = await this.refreshToken();
-        if (refreshed) {
-          // Retry original request after refresh
-          return this.request<T>(endpoint, options);
-        }
-        // Refresh failed, redirect to login using Next.js router
-        if (typeof window !== 'undefined') {
-          const { useRouter } = await import('next/navigation');
-          const router = useRouter();
-          router.push('/auth/signin');
+        // For silent auth-probes (noRedirectOn401=true, e.g. checkAuth on mount),
+        // skip the refresh entirely. A 401 here simply means "no active session" —
+        // there are no cookies to refresh with. Attempting a refresh would only
+        // produce a second wasted 401 in the console / network tab.
+        if (!noRedirectOn401) {
+          const refreshed = await this.refreshToken();
+          if (refreshed) {
+            // Retry original request after successful token refresh.
+            return this.request<T>(endpoint, options);
+          }
+          // Refresh failed — redirect to login (guard against loops on /login).
+          if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+            window.location.href = '/login';
+          }
         }
       }
 
@@ -113,7 +131,11 @@ class ApiClient {
   }
 
   async getCurrentUser() {
-    return this.request<any>('/auth/me/');
+    // noRedirectOn401: true — this is a silent probe called by AuthContext on
+    // every page mount. A 401 here just means "no active session"; the caller
+    // (AuthContext) handles it by setting user = null. Redirecting here would
+    // kick unauthenticated visitors off every public/marketing page.
+    return this.request<any>('/auth/me/', { noRedirectOn401: true });
   }
 
   // Users
@@ -164,6 +186,96 @@ class ApiClient {
     return this.request<any>(`/departments/${id}/`);
   }
 
+  async createDepartment(data: any) {
+    return this.request<any>('/departments/', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  async updateDepartment(id: string, data: any) {
+    return this.request<any>(`/departments/${id}/`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  async deleteDepartment(id: string) {
+    return this.request<any>(`/departments/${id}/`, { method: 'DELETE' });
+  }
+
+  // Buildings
+  async getBuildings(page = 1, pageSize = 25, search = '') {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+      ...(search && { search })
+    });
+    return this.request<any>(`/buildings/?${params}`);
+  }
+
+  async getBuilding(id: string) {
+    return this.request<any>(`/buildings/${id}/`);
+  }
+
+  async createBuilding(data: any) {
+    return this.request<any>('/buildings/', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  async updateBuilding(id: string, data: any) {
+    return this.request<any>(`/buildings/${id}/`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  async deleteBuilding(id: string) {
+    return this.request<any>(`/buildings/${id}/`, { method: 'DELETE' });
+  }
+
+  // Schools
+  async getSchools(page = 1, pageSize = 25, search = '') {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+      ...(search && { search })
+    });
+    return this.request<any>(`/schools/?${params}`);
+  }
+
+  async getSchool(id: string) {
+    return this.request<any>(`/schools/${id}/`);
+  }
+
+  async createSchool(data: any) {
+    return this.request<any>('/schools/', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  async updateSchool(id: string, data: any) {
+    return this.request<any>(`/schools/${id}/`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  async deleteSchool(id: string) {
+    return this.request<any>(`/schools/${id}/`, { method: 'DELETE' });
+  }
+
+  // Programs
+  async getPrograms(page = 1, pageSize = 25, search = '') {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+      ...(search && { search })
+    });
+    return this.request<any>(`/programs/?${params}`);
+  }
+
+  async getProgram(id: string) {
+    return this.request<any>(`/programs/${id}/`);
+  }
+
+  async createProgram(data: any) {
+    return this.request<any>('/programs/', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  async updateProgram(id: string, data: any) {
+    return this.request<any>(`/programs/${id}/`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  async deleteProgram(id: string) {
+    return this.request<any>(`/programs/${id}/`, { method: 'DELETE' });
+  }
+
   // Courses
   async getCourses(page = 1, pageSize = 25, search = '') {
     const params = new URLSearchParams({
@@ -176,6 +288,18 @@ class ApiClient {
 
   async getCourse(id: string) {
     return this.request<any>(`/courses/${id}/`);
+  }
+
+  async createCourse(data: any) {
+    return this.request<any>('/courses/', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  async updateCourse(id: string, data: any) {
+    return this.request<any>(`/courses/${id}/`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  async deleteCourse(id: string) {
+    return this.request<any>(`/courses/${id}/`, { method: 'DELETE' });
   }
 
   // Subjects
@@ -394,17 +518,45 @@ class ApiClient {
     return this.request<any>(`/generation-jobs/${jobId}/`);
   }
 
-  async getGenerationStatus(jobId: string) {
-    return this.request<any>(`/generation-jobs/${jobId}/status/`);
-  }
-
-  async getGenerationProgress(jobId: string) {
-    return this.request<any>(`/generation-jobs/${jobId}/progress/`);
-  }
-
   async approveGeneration(jobId: string) {
     return this.request<any>(`/generation-jobs/${jobId}/approve/`, {
       method: 'POST',
+    });
+  }
+
+  // Workflow approval review list
+  async getWorkflows(statusFilter?: string) {
+    const params = new URLSearchParams();
+    if (statusFilter) params.set('status', statusFilter);
+    const query = params.toString() ? `?${params}` : '';
+    return this.request<any>(`/timetable/workflows/${query}`);
+  }
+
+  async approveWorkflow(id: string, comments: string) {
+    return this.request<any>(`/timetable/workflows/${id}/approve/`, {
+      method: 'POST',
+      body: JSON.stringify({ comments }),
+    });
+  }
+
+  async rejectWorkflow(id: string, comments: string) {
+    return this.request<any>(`/timetable/workflows/${id}/reject/`, {
+      method: 'POST',
+      body: JSON.stringify({ comments }),
+    });
+  }
+
+  // Conflict detection with acknowledged state
+  async getConflicts(jobId: string, variantId = 0) {
+    return this.request<any>(
+      `/conflicts/detect/?job_id=${jobId}&variant_id=${variantId}`
+    );
+  }
+
+  async applySuggestion(jobId: string, variantId: number, conflictIndex: number) {
+    return this.request<any>('/conflicts/apply/', {
+      method: 'POST',
+      body: JSON.stringify({ job_id: jobId, variant_id: variantId, conflict_index: conflictIndex }),
     });
   }
 
@@ -415,15 +567,9 @@ class ApiClient {
   // Get the latest approved timetable for a department/batch
   async getLatestApprovedTimetable(departmentId?: string, batchId?: string) {
     try {
-      // For students, directly get timetables instead of generation jobs
-      const user = typeof window !== 'undefined' ? 
-        JSON.parse(localStorage.getItem('user') || '{}') : {};
-      
-      if (user.role === 'student') {
-        // Students should get timetables directly
-        return this.getTimetables();
-      }
-      
+      // 🔐 SECURITY: Never read role from localStorage for branching decisions.
+      // The backend enforces per-role access. Students have no approved generation
+      // jobs, so the fallback to getTimetables() below triggers automatically.
       const response = await this.getGenerationJobs();
       if (response.data && response.data.results) {
         // Find the latest approved job
@@ -443,7 +589,10 @@ class ApiClient {
           return this.getGenerationResult(latestJob.job_id);
         }
       }
-      return { data: null, error: 'No approved timetable found' };
+      // No approved generation jobs found — fall back to direct timetables.
+      // This path is correct for students (who never own generation jobs) and
+      // for any user whose role the server has not granted generation-job access.
+      return this.getTimetables();
     } catch (error) {
       return { data: null, error: 'Failed to fetch timetable' };
     }
