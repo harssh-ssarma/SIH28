@@ -359,6 +359,9 @@ def fastapi_callback_task(job_id, status, variants=None, error=None):
         # Cleanup temporary Redis keys
         cache.delete(f"generation_queue:{job_id}")
         cache.delete(f"cancel:job:{job_id}")  # Cleanup cancel flag
+        # Bust any stale per-job retrieve cache so the next GET returns
+        # the real terminal status instead of a cached 'running' response.
+        cache.delete(f"generation_job_meta_{job_id}")
         
         logger.info(f"[CALLBACK] Job {job_id} finalized")
         

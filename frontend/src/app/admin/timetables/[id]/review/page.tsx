@@ -267,6 +267,13 @@ export default function TimetableReviewPage() {
   const entryCache = useRef<Map<string, TimetableEntry[]>>(new Map())
   // AbortController ref so switching variants cancels the in-flight request
   const entryAbortRef = useRef<AbortController | null>(null)
+  // Guard against the stale-cache race: if the backend cache still has
+  // status='running' but the job really just completed (e.g. Celery hasn't
+  // flushed the cache yet), we retry a few times before giving up and
+  // redirecting to the status page.  Backend fix (workflow_views.py) stops
+  // caching non-terminal states, so this counter fires at most once in practice.
+  const runningRetryRef = useRef(0)
+  const MAX_RUNNING_RETRIES = 3
 
   // ── Lazy-render the timetable grid via IntersectionObserver ─────────────
   // BUG FIX: The previous code put the observer in useEffect([gridInView]).
@@ -313,6 +320,7 @@ export default function TimetableReviewPage() {
 
   useEffect(() => {
     if (workflowId) {
+      runningRetryRef.current = 0  // reset retries on fresh navigation
       loadWorkflowData()
     }
   }, [workflowId])
@@ -363,9 +371,23 @@ export default function TimetableReviewPage() {
 
       // Re-route if job is still running (status field is in the workflow response)
       if (workflowData.status === 'running' || workflowData.status === 'queued') {
+        // Guard against the stale-cache race condition: the Celery cache-warm
+        // task may not have run yet even though the DB already has status=completed.
+        // Retry up to MAX_RUNNING_RETRIES times (1.5 s apart) before redirecting,
+        // giving the backend time to flush the correct status.
+        if (runningRetryRef.current < MAX_RUNNING_RETRIES) {
+          runningRetryRef.current += 1
+          setLoadingMeta(false)
+          setLoading(false)
+          await new Promise(resolve => setTimeout(resolve, 1500))
+          await loadWorkflowData()
+          return
+        }
+        runningRetryRef.current = 0
         router.push(`/admin/timetables/${workflowId}/status`)
         return
       }
+      runningRetryRef.current = 0
 
       setWorkflow(workflowData)
       setVariants(variantsData)

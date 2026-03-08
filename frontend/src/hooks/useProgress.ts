@@ -57,6 +57,12 @@ export function useProgress(
   const eventSourceRef      = useRef<EventSource | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectCountRef   = useRef(0)
+  // Always-current progress ref — avoids stale closure in the 'done' handler.
+  // React state updates are batched/async; by the time 'done' fires synchronously
+  // after 'progress', the state variable 'progress' in the closure is still the
+  // previous value.  The ref is updated synchronously inside the 'progress'
+  // handler so the 'done' handler always sees the latest data.
+  const latestProgressRef   = useRef<ProgressData | null>(null)
 
   useEffect(() => {
     if (!jobId) return
@@ -80,7 +86,9 @@ export function useProgress(
         eventSource.addEventListener('progress', (event) => {
           if (!isMounted) return
           try {
-            setProgress(JSON.parse(event.data) as ProgressData)
+            const data = JSON.parse(event.data) as ProgressData
+            latestProgressRef.current = data  // sync update — safe in 'done' closure
+            setProgress(data)
           } catch (err) {
             console.error('[SSE] Failed to parse progress:', err)
           }
@@ -91,7 +99,8 @@ export function useProgress(
           try {
             const data = JSON.parse(event.data)
             if (data.status === 'completed') {
-              if (onComplete && progress) onComplete(progress)
+              // Use the ref (always current) instead of the stale closure value.
+              if (onComplete) onComplete(latestProgressRef.current ?? (data as ProgressData))
             } else {
               const msg = data.status === 'cancelled'
                 ? 'Generation was cancelled'

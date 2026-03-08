@@ -31,12 +31,13 @@ interface RunningJobRowProps {
   job: RunningJob
   onNavigate: () => void
   onJobFailed: (jobId: string) => void
+  onJobCompleted?: (jobId: string) => void
 }
 
-export function RunningJobRow({ job, onNavigate, onJobFailed }: RunningJobRowProps) {
+export function RunningJobRow({ job, onNavigate, onJobFailed, onJobCompleted }: RunningJobRowProps) {
   const { progress, isConnected } = useProgress(
     job.job_id,
-    undefined,
+    () => { onJobCompleted?.(job.job_id) },
     () => { onJobFailed(job.job_id) },
   )
 

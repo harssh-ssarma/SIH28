@@ -64,9 +64,18 @@ class TimetableWorkflowViewSet(viewsets.ViewSet):
         cache_key = f'workflow_{pk}'
         cached = cache.get(cache_key)
         if cached:
-            response = Response(cached)
-            response['Cache-Control'] = 'private, max-age=300'
-            return response
+            # CRITICAL: Never serve cached non-terminal status.
+            # If we cached status='running' earlier and the job has since
+            # completed, returning the stale 'running' value causes the
+            # review page to redirect back to the status page, which then
+            # sees 'completed' in Redis and redirects back to review — an
+            # infinite redirect loop.  Only trust the cache for terminal states.
+            terminal_statuses = ('completed', 'failed', 'cancelled', 'approved', 'rejected')
+            if cached.get('status') in terminal_statuses:
+                response = Response(cached)
+                response['Cache-Control'] = 'private, max-age=3600'
+                return response
+            # Non-terminal cached entry — fall through to a fresh DB read.
 
         try:
             job = GenerationJob.objects.only(
@@ -84,10 +93,12 @@ class TimetableWorkflowViewSet(viewsets.ViewSet):
                 'created_at': job.created_at.isoformat(),
                 'timetable_entries': [],  # Don't load entries here
             }
-            # Immutable once completed/failed - cache for 1 hour; otherwise 5 min
-            ttl = 3600 if job.status in ('completed', 'failed') else 300
-            cache.set(cache_key, data, ttl)
+            # Only cache immutable terminal states to prevent stale 'running'
+            # cache entries from causing infinite review ↔ status redirects.
+            if job.status in ('completed', 'failed', 'cancelled', 'approved', 'rejected'):
+                cache.set(cache_key, data, 3600)
             response = Response(data)
+            ttl = 3600 if job.status in ('completed', 'failed', 'cancelled', 'approved', 'rejected') else 5
             response['Cache-Control'] = f'private, max-age={ttl}'
             return response
         except GenerationJob.DoesNotExist:

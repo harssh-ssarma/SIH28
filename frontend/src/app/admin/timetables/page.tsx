@@ -257,6 +257,10 @@ export default function AdminTimetablesPage() {
                   setTerminatedJobIds(prev => new Set(prev).add(jobId))
                   loadTimetableData()
                 }}
+                onJobCompleted={(jobId) => {
+                  setTerminatedJobIds(prev => new Set(prev).add(jobId))
+                  loadTimetableData()
+                }}
               />
             ))}
           </div>
