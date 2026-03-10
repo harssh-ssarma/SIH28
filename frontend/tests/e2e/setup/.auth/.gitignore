@@ -1,0 +1,19 @@
+# Playwright storageState authentication files.
+#
+# These JSON files contain serialised browser cookies and localStorage entries
+# for pre-authenticated sessions (admin, faculty, student roles).  They are
+# generated at runtime by global_setup.ts and consumed by each Playwright
+# project via the `storageState` option in playwright.config.ts.
+#
+# Why gitignore?
+#   - They may contain real session tokens / cookies — committing them would
+#     expose valid credentials in the repository history.
+#   - They are ephemeral: regenerated fresh on every CI run and local run.
+#   - Google's hermetic test principle: auth context is created, used, and
+#     discarded within a single test run; it is never persisted in source control.
+#
+# Files ignored:
+#   admin.json   — admin role storageState
+#   faculty.json — faculty role storageState
+#   student.json — student role storageState
+*.json

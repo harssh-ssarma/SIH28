@@ -1,0 +1,211 @@
+# ============================================================
+# .github/workflows/ci_frontend.yml
+#
+# CI pipeline for the Next.js 14 frontend.
+#
+# Pipeline stages:
+#   1. lint        — ESLint, TypeScript type-check, Prettier --check
+#   2. unit        — Vitest (jsdom) with @testing-library/react
+#   3. build       — next build (ensures no build-time regressions)
+#   4. e2e         — Playwright against a Docker-Compose staging stack
+#                    (Google SWE practice: test against production-equivalent
+#                     environment, not dev-mode hot-reload server)
+#   5. coverage    — Upload Vitest v8 coverage to Codecov
+#
+# Why Docker Compose for E2E?
+#   - Dev-mode servers have HMR overhead and non-production behavior.
+#   - Google's approach is to deploy a hermetic, production-like binary
+#     and run E2E against it — this is replicated using the staging
+#     compose service defined in docker-compose.staging.yml.
+# ============================================================
+
+name: Frontend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/ci_frontend.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "frontend/**"
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # Stage 1: Lint + Type-check
+  # ──────────────────────────────────────────────────────────
+  lint:
+    name: Lint & Type-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript type-check
+        run: npx tsc --noEmit
+
+      - name: Run Prettier (format check)
+        run: npx prettier --check "src/**/*.{ts,tsx,css}"
+
+  # ──────────────────────────────────────────────────────────
+  # Stage 2: Unit tests (Vitest + React Testing Library)
+  # ──────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests (Vitest)
+    runs-on: ubuntu-latest
+    needs: [lint]
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Vitest with coverage
+        run: npm run test:coverage
+
+      - name: Upload frontend coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: frontend/coverage/lcov.info
+          flags: frontend-unit
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────
+  # Stage 3: Production build check
+  # ──────────────────────────────────────────────────────────
+  build:
+    name: next build
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    defaults:
+      run:
+        working-directory: frontend
+
+    env:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_FASTAPI_URL: http://localhost:8001
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js application
+        run: npm run build
+
+  # ──────────────────────────────────────────────────────────
+  # Stage 4: E2E tests (Playwright against staging stack)
+  # ──────────────────────────────────────────────────────────
+  e2e-tests:
+    name: E2E Tests (Playwright — Staging)
+    runs-on: ubuntu-latest
+    needs: [build]
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Set up Python 3.12 (for backend staging services)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies (staging backend)
+        run: pip install -r backend/requirements.txt
+
+      - name: Install Node.js dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium firefox
+
+      # Start the staging stack via Docker Compose.
+      # Adjust the compose file name to match your project.
+      - name: Start staging stack
+        run: |
+          docker compose \
+            -f docker-compose.yml \
+            up -d --build --wait
+        env:
+          DATABASE_URL: postgresql://admin:admin@localhost:5432/erp
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: ci-staging-secret
+          DJANGO_SETTINGS_MODULE: erp.settings
+
+      - name: Wait for staging to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/api/health; then
+              echo "Staging ready"; break
+            fi
+            echo "Waiting... ($i/30)"; sleep 5
+          done
+
+      - name: Run Playwright E2E tests
+        working-directory: frontend
+        run: npm run test:e2e
+        env:
+          BASE_URL: http://localhost:3000
+          CI: "true"
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Stop staging stack
+        if: always()
+        run: docker compose -f docker-compose.yml down -v

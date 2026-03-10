@@ -1,0 +1,223 @@
+# ===========================================================================
+# backend/pyproject.toml
+#
+# Single source of truth for all Python tooling configuration.
+# Covers: pytest, coverage, mypy, ruff (linter), black (formatter), isort.
+#
+# Google Engineering Practice: centralise tool config in pyproject.toml so
+# every CI step, editor plugin, and pre-commit hook reads from one file.
+# Reference: https://peps.python.org/pep-0517/ / PEP 518
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Build system (no build backend needed for this service-only repo, but
+# pyproject.toml is still the canonical location for tool config)
+# ---------------------------------------------------------------------------
+[build-system]
+requires      = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+# ===========================================================================
+# pytest
+# ===========================================================================
+[tool.pytest.ini_options]
+
+# Where to look for tests (relative to this file, which is backend/)
+testpaths = [
+    "django/tests",
+    "fastapi/tests",
+]
+
+# asyncio_mode=auto: every async test function is automatically treated as an
+# asyncio coroutine without needing @pytest.mark.asyncio.
+# Required for pytest-asyncio >= 0.21.
+asyncio_mode = "auto"
+
+# Default extra options applied to every run.
+# -v              : verbose output (test name + PASS/FAIL)
+# --tb=short      : compact tracebacks — Google style avoids 100-line walls
+# -p no:warnings  : suppress deprecation noise in CI output; warnings are
+#                   separately surfaced by the ruff linter
+addopts = "-v --tb=short -p no:warnings"
+
+# Human-readable markers prevent accidental unmarked test pollution.
+# Usage:   @pytest.mark.slow   @pytest.mark.integration   @pytest.mark.contract
+# CI runs `pytest -m "not slow"` to skip long-running tests on PR checks.
+markers = [
+    "slow: marks tests as slow-running (deselect with '-m not slow')",
+    "integration: marks tests that require live services (DB, Redis)",
+    "contract: marks API contract tests (pact / schema validation)",
+    "unit: marks pure-unit tests with all I/O mocked",
+]
+
+# Minimum coverage enforced in CI (fail the run if below this percentage).
+# Individual coverage thresholds per module can be set under [tool.coverage].
+# Set to 0 here to let the CI --cov-fail-under flag control per stage.
+# Uncomment to enforce globally:
+# --cov-fail-under = 80
+
+# Log format for captured log output (visible with -s or when a test fails).
+log_cli       = true
+log_cli_level = "WARNING"
+log_format    = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+log_date_format = "%Y-%m-%dT%H:%M:%S"
+
+# Fail immediately on the first X failures (useful for debugging).
+# Overridden to -x=1 in local dev; CI keeps the default (run all).
+# --maxfail = 5
+
+# Timeout per test in seconds (requires pytest-timeout).
+# Individual slow tests can override with @pytest.mark.timeout(300).
+timeout = 60
+
+# ===========================================================================
+# Coverage
+# ===========================================================================
+[tool.coverage.run]
+branch     = true   # measure branch coverage, not just line coverage
+parallel   = true   # support pytest-xdist — each worker writes its own .coverage.*
+source     = [
+    "django",
+    "fastapi",
+]
+omit = [
+    "*/migrations/*",           # Django auto-generated migration files
+    "*/tests/*",                # test files themselves
+    "*/__pycache__/*",
+    "*/settings*.py",           # configuration, not business logic
+    "*/asgi.py",
+    "*/wsgi.py",
+    "*/celery.py",
+    "fastapi/data/*",           # static RL policy data files
+    "fastapi/logs/*",
+    "django/logs/*",
+]
+
+[tool.coverage.report]
+show_missing  = true  # print line numbers of uncovered lines
+skip_covered  = false # show 100%-covered files too (visibility)
+fail_under    = 80    # CI fails if total coverage drops below 80%
+exclude_lines = [
+    # Skip abstract / protocol definitions
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+    # Skip defensive unreachable branches
+    "if __name__ == .__main__.:",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+# ===========================================================================
+# mypy  — static type checking
+# ===========================================================================
+[tool.mypy]
+python_version         = "3.12"
+strict                 = true
+
+# Slightly relax strict mode for areas that are hard to type fully:
+disallow_untyped_decorators = false  # Django/DRF decorators often untyped
+
+warn_return_any        = true
+warn_unused_configs    = true
+warn_redundant_casts   = true
+warn_unused_ignores    = true
+
+# Show error codes in output so engineers can suppress with `# type: ignore[code]`
+show_error_codes       = true
+
+# Namespace packages (no __init__.py required) — matches FastAPI layout
+namespace_packages     = true
+explicit_package_bases = true
+
+# Django stubs
+plugins = ["mypy_django_plugin.main"]
+
+[[tool.mypy.overrides]]
+module = [
+    "*.migrations.*",       # Django auto-generated files — not worth typing
+    "celery.*",             # celery stubs incomplete
+    "fakeredis.*",          # test dep — stubs not published
+    "model_bakery.*",       # test dep
+    "respx.*",              # test dep
+    "freezegun.*",          # test dep
+    "factory.*",            # factory-boy
+]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "erp.settings"
+
+# ===========================================================================
+# Ruff — ultrafast Python linter (replaces flake8 + isort + pyupgrade)
+# ===========================================================================
+[tool.ruff]
+target-version = "py312"
+line-length    = 100
+
+# Enable rule categories:
+#   E/W  — pycodestyle errors/warnings
+#   F    — pyflakes (undefined names, unused imports)
+#   I    — isort (import ordering)
+#   N    — pep8-naming
+#   UP   — pyupgrade (use modern Python syntax)
+#   B    — flake8-bugbear (likely bugs / design issues)
+#   S    — flake8-bandit (security — lightweight version)
+#   PT   — flake8-pytest-style (pytest best-practices)
+#   RUF  — Ruff-specific rules
+select = ["E", "W", "F", "I", "N", "UP", "B", "S", "PT", "RUF"]
+
+ignore = [
+    "S101",   # allow assert statements (required in pytest)
+    "S105",   # allow hardcoded passwords in test fixtures
+    "S106",   # same
+    "S311",   # allow standard random in non-security contexts
+    "B008",   # allow function calls in default args (FastAPI Depends pattern)
+    "N806",   # allow uppercase variable names (matches math / sklearn conventions)
+    "RUF012", # allow mutable ClassVar defaults (Django model Meta)
+]
+
+[tool.ruff.per-file-ignores]
+# Test files can use private members, magic values, etc.
+"**/tests/**" = ["S", "PT", "N803", "N802"]
+# Settings files use UPPERCASE_CONSTANTS
+"**/settings*.py" = ["N802", "N803"]
+# Migration files auto-generated — skip all style checks
+"**/migrations/**" = ["ALL"]
+
+[tool.ruff.isort]
+known-first-party  = ["academics", "core", "erp"]
+known-third-party  = ["rest_framework", "django", "celery", "fastapi", "pydantic"]
+force-sort-within-sections = true
+
+# ===========================================================================
+# Black — opinionated code formatter
+# ===========================================================================
+[tool.black]
+line-length    = 100
+target-version = ["py312"]
+include        = "\\.pyi?$"
+extend-exclude = """
+/(
+    migrations
+  | __pycache__
+  | \\.git
+)/
+"""
+
+# ===========================================================================
+# isort — kept for editors/pre-commit hooks that still use it directly
+# (Ruff's I rules handle CI; isort config kept in sync)
+# ===========================================================================
+[tool.isort]
+profile                   = "black"
+line_length               = 100
+known_first_party         = ["academics", "core", "erp"]
+known_third_party         = ["rest_framework", "django", "celery", "fastapi", "pydantic"]
+skip_glob                 = ["*/migrations/*"]
+force_sort_within_sections = true

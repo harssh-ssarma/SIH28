@@ -1,0 +1,223 @@
+# ============================================================
+# .github/workflows/ci_backend.yml
+#
+# CI pipeline for the Django + FastAPI backend.
+#
+# Triggers:
+#   push to main / develop
+#   pull_request targeting main / develop
+#
+# Database strategy (industry / Google practice):
+#   Uses a real PostgreSQL 16 service container — not SQLite.
+#   Reasons:
+#     - PostgreSQL-specific features (JSON fields, ILIKE, array ops) behave
+#       differently in SQLite and produce silent false-passes.
+#     - Google SWE guideline: test against the same engine used in production.
+#     - GitHub Actions provision the postgres container in < 15 seconds.
+#
+# Pipeline stages:
+#   1. lint           — ruff, black --check, isort --check, mypy
+#   2. security       — bandit (SAST), safety (CVE scan), trivy (SCA)
+#   3. django-tests   — pytest-django unit + integration + API tests
+#   4. fastapi-tests  — pytest unit + integration + contract tests
+#   5. coverage       — upload to Codecov
+# ============================================================
+
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci_backend.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "backend/**"
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # Stage 1: Lint + Type-check
+  # ──────────────────────────────────────────────────────────
+  lint:
+    name: Lint & Type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dev dependencies
+        run: |
+          pip install -r backend/requirements.txt \
+                      -r backend/requirements-dev.txt
+
+      - name: Run ruff (linter)
+        run: ruff check backend/
+
+      - name: Run black (format check)
+        run: black --check backend/
+
+      - name: Run isort (import order check)
+        run: isort --check-only backend/
+
+      - name: Run mypy (type check — Django)
+        run: |
+          cd backend/django
+          mypy . --config-file ../../pyproject.toml
+
+      - name: Run mypy (type check — FastAPI)
+        run: |
+          cd backend/fastapi
+          mypy . --config-file ../../pyproject.toml
+
+  # ──────────────────────────────────────────────────────────
+  # Stage 2: Security scan
+  # ──────────────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
+      - name: Run bandit (SAST)
+        run: bandit -r backend/ -ll --exclude backend/django/migrations
+
+      - name: Run safety (CVE check)
+        run: safety check --full-report -r backend/requirements.txt
+
+      - name: Run trivy (SCA — container + FS)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: backend/
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+  # ──────────────────────────────────────────────────────────
+  # Stage 3: Django tests (PostgreSQL)
+  # ──────────────────────────────────────────────────────────
+  django-tests:
+    name: Django Tests (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    needs: [lint]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: test_erp
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test_user"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 5s
+
+    env:
+      DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_erp
+      REDIS_URL: redis://localhost:6379/0
+      DJANGO_SETTINGS_MODULE: erp.settings
+      SECRET_KEY: ci-test-secret-key-not-used-in-production
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      CELERY_TASK_ALWAYS_EAGER: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
+      - name: Run Django migrations on test DB
+        run: |
+          cd backend/django
+          python manage.py migrate --noinput
+
+      - name: Run Django test suite
+        run: |
+          cd backend/django
+          pytest ../django/tests/ \
+            -v \
+            --cov=. \
+            --cov-report=xml:coverage_django.xml \
+            --cov-report=term-missing \
+            -n auto \
+            --timeout=60 \
+            -m "not slow"
+
+      - name: Upload Django coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/django/coverage_django.xml
+          flags: django
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────
+  # Stage 4: FastAPI tests (no DB, Redis via fakeredis)
+  # ──────────────────────────────────────────────────────────
+  fastapi-tests:
+    name: FastAPI Tests
+    runs-on: ubuntu-latest
+    needs: [lint]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+
+      - name: Run FastAPI test suite
+        run: |
+          cd backend/fastapi
+          pytest ../fastapi/tests/ \
+            -v \
+            --cov=. \
+            --cov-report=xml:coverage_fastapi.xml \
+            --cov-report=term-missing \
+            -n auto \
+            --timeout=60
+
+      - name: Upload FastAPI coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: backend/fastapi/coverage_fastapi.xml
+          flags: fastapi
+          token: ${{ secrets.CODECOV_TOKEN }}
