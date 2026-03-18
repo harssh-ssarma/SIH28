@@ -1498,9 +1498,17 @@ class TimetableGenerationSaga:
                     'batch_ids':    list(getattr(course, 'batch_ids', [])),
                 })
 
-            # Normalise fitness to 0–100 relative to best variant in this run
-            score_pct = round((v['fitness'] / _max_fitness) * 100, 1)
             room_util = round((len(rooms_used) / _total_rooms) * 100, 1)
+
+            total_classes = len(v_entries)
+            if total_classes > 0:
+                conflict_ratio = conflicts / total_classes
+                conflict_score = max(0.0, min(100.0, round(100 - (conflict_ratio * 400), 1)))
+            else:
+                conflict_score = max(0.0, min(100.0, round(100 - (conflicts * 15), 1)))
+
+            # Absolute quality score (0-100), not relative to the best variant.
+            score_pct = round((0.7 * conflict_score) + (0.3 * room_util), 1)
 
             return {
                 # Field names Django reads
@@ -1515,6 +1523,7 @@ class TimetableGenerationSaga:
                 'quality_metrics': {
                     'overall_score':            score_pct,
                     'total_conflicts':          conflicts,
+                    'score_conflicts':          conflict_score,
                     'room_utilization_score':   room_util,
                 },
                 'statistics': {

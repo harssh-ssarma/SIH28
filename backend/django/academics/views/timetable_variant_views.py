@@ -157,7 +157,7 @@ class TimetableVariantViewSet(viewsets.ViewSet):
         if not job_id:
             return Response({"error": "job_id required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        cache_key = f"variants_list_{job_id}"
+        cache_key = f"variants_list_v2_{job_id}"
         cached = cache.get(cache_key)
         if cached:
             response = Response(cached)
@@ -587,6 +587,46 @@ class TimetableVariantViewSet(viewsets.ViewSet):
         return 70  # neutral default
 
     @staticmethod
+    def _compute_score_conflicts(conflict_count: int, total_classes: int) -> int:
+        """
+        Derive hard-constraint quality score (0-100) from conflicts.
+
+        Uses conflict ratio when class count is known so large timetables are
+        not penalized too aggressively for a small absolute conflict count.
+        """
+        if conflict_count <= 0:
+            return 100
+
+        if total_classes > 0:
+            conflict_ratio = conflict_count / max(total_classes, 1)
+            # 0% conflicts -> 100, 5% -> 80, 10% -> 60, 25%+ -> 0
+            return min(100, max(0, int(round(100 - (conflict_ratio * 400)))))
+
+        # Fallback when class count is unknown.
+        return min(100, max(0, int(round(100 - conflict_count * 15))))
+
+    @classmethod
+    def _compute_overall_score(
+        cls,
+        *,
+        conflict_count: int,
+        total_classes: int,
+        score_room: int,
+        score_faculty: int,
+        score_student: int,
+    ) -> int:
+        """Compute an absolute overall timetable quality score (0-100)."""
+        score_conflicts = cls._compute_score_conflicts(conflict_count, total_classes)
+
+        overall = (
+            0.55 * score_conflicts
+            + 0.20 * score_room
+            + 0.15 * score_faculty
+            + 0.10 * score_student
+        )
+        return min(100, max(0, int(round(overall))))
+
+    @staticmethod
     def _derive_optimization_label(
         score_faculty: int,
         score_room: int,
@@ -619,10 +659,7 @@ class TimetableVariantViewSet(viewsets.ViewSet):
         """
         qm = v.get("quality_metrics", {}) or {}
         sta = v.get("statistics", {}) or {}
-
-        score_overall = int(round(float(
-            qm.get("overall_score", v.get("score", 0)) or 0
-        )))
+        total_classes = int(sta.get("total_classes", v.get("entry_count", 0)) or 0)
         score_room = int(round(float(
             qm.get("room_utilization_score", v.get("room_utilization", 0)) or 0
         )))
@@ -630,6 +667,13 @@ class TimetableVariantViewSet(viewsets.ViewSet):
         score_student = self._compute_score_student_gaps(qm)
         conflict_count = int(qm.get("total_conflicts", v.get("conflicts", 0)) or 0)
         soft_violations = int(qm.get("soft_violation_count", v.get("soft_violations", 0)) or 0)
+        score_overall = self._compute_overall_score(
+            conflict_count=conflict_count,
+            total_classes=total_classes,
+            score_room=score_room,
+            score_faculty=score_faculty,
+            score_student=score_student,
+        )
 
         # is_recommended: True when this variant has the highest overall_score
         # across all variants in the same job. Pass `all_variants` to enable.
@@ -637,12 +681,17 @@ class TimetableVariantViewSet(viewsets.ViewSet):
         if all_variants:
             best_score = max(
                 (
-                    float((av.get("quality_metrics") or {}).get("overall_score") or
-                          av.get("score", 0) or 0)
+                    self._compute_overall_score(
+                        conflict_count=int(((av.get("quality_metrics") or {}).get("total_conflicts", av.get("conflicts", 0)) or 0)),
+                        total_classes=int(((av.get("statistics") or {}).get("total_classes", av.get("entry_count", 0)) or 0)),
+                        score_room=int(round(float(((av.get("quality_metrics") or {}).get("room_utilization_score", av.get("room_utilization", 0)) or 0))),
+                        score_faculty=self._compute_score_faculty_load(av.get("quality_metrics", {}) or {}),
+                        score_student=self._compute_score_student_gaps(av.get("quality_metrics", {}) or {}),
+                    )
                     for av in all_variants if av
                 ),
                 default=0,
-            )
+            ))
             is_recommended = (score_overall >= best_score and best_score > 0)
 
         return {
@@ -652,12 +701,13 @@ class TimetableVariantViewSet(viewsets.ViewSet):
             "organization_id": str(job.organization_id),
             "timetable_entries": [],  # populated on-demand via /entries/
             "statistics": {
-                "total_classes": sta.get("total_classes", v.get("entry_count", 0)),
+                "total_classes": total_classes,
                 "total_conflicts": conflict_count,
             },
             "quality_metrics": {
                 "overall_score": score_overall,
                 "total_conflicts": conflict_count,
+                "score_conflicts": self._compute_score_conflicts(conflict_count, total_classes),
                 "room_utilization_score": score_room,
                 "score_faculty_load": score_faculty,
                 "score_student_gaps": score_student,

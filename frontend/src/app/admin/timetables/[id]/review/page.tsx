@@ -1300,10 +1300,6 @@ export default function TimetableReviewPage() {
                   </div>
                 )}
 
-                {viewScope === 'faculty' && resolvedFacultyId && (
-                  <span className="badge badge-info">Resolved Faculty: {resolvedFacultyId}</span>
-                )}
-
                 {viewScope === 'student' && (
                   <div className="flex flex-wrap items-end gap-2">
                     <label className="flex flex-col gap-1 text-xs text-[var(--color-text-secondary)]">
