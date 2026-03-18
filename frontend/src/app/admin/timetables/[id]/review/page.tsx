@@ -41,6 +41,8 @@ interface TimetableEntry {
   room_number?: string
   duration_minutes?: number
   department_id?: string
+  department_name?: string   // ← ye add karo
+  department_code?: string   // ← ye add karo
 }
 
 interface QualityMetrics {
