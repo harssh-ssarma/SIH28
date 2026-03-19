@@ -7,6 +7,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { authenticatedFetch } from '@/lib/auth'
@@ -1173,8 +1174,8 @@ export default function TimetableReviewPage() {
           </section>
         )}
 
-        {showSubstitutionModal && (
-          <div className="fixed inset-0 bg-[#00000052] flex items-center justify-center z-[260] px-4">
+        {showSubstitutionModal && typeof document !== 'undefined' && createPortal(
+          <div className="fixed top-0 left-0 w-screen h-screen bg-[#00000052] flex items-center justify-center z-[320] px-4">
             <div className="bg-[#d3dbe5] rounded-[28px] border border-[var(--color-border)] shadow-2xl p-6 w-[560px] h-[560px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Quick Proxy Assignment</h3>
@@ -1277,12 +1278,13 @@ export default function TimetableReviewPage() {
                 </div>
               )}
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
 
         {/* ── Approval Modal ── */}
-        {showApprovalModal && (
-          <div className="fixed inset-0 bg-[#00000052] flex items-center justify-center z-50 px-4">
+        {showApprovalModal && typeof document !== 'undefined' && createPortal(
+          <div className="fixed top-0 left-0 w-screen h-screen bg-[#00000052] flex items-center justify-center z-[320] px-4">
             <div className="bg-[#d3dbe5] rounded-[28px] border border-[var(--color-border)] shadow-2xl p-6 max-w-md w-full">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-[var(--color-success-subtle)]">
@@ -1307,12 +1309,13 @@ export default function TimetableReviewPage() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
 
         {/* ── Rejection Modal ── */}
-        {showRejectionModal && (
-          <div className="fixed inset-0 bg-[#00000052] flex items-center justify-center z-50 px-4">
+        {showRejectionModal && typeof document !== 'undefined' && createPortal(
+          <div className="fixed top-0 left-0 w-screen h-screen bg-[#00000052] flex items-center justify-center z-[320] px-4">
             <div className="bg-[#d3dbe5] rounded-[28px] border border-[var(--color-border)] shadow-2xl p-6 max-w-md w-full">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-[var(--color-danger-subtle)]">
@@ -1338,7 +1341,8 @@ export default function TimetableReviewPage() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
 
     </div>

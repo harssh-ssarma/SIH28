@@ -86,14 +86,14 @@
   --color-danger-text:    #B31412;
 
   /* Sidebar */
-  --color-sidebar-bg:           #FFFFFF;
+  --color-sidebar-bg:           #f6f8fc;
   --color-sidebar-border:       #DADCE0;
   --color-sidebar-active-bg:    #c2e7ff;
   --color-sidebar-active-text:  #001d35;
   --color-sidebar-icon:         #5F6368;
 
   /* Header */
-  --color-header-bg:     #FFFFFF;
+  --color-header-bg:     #f6f8fc;
   --color-header-border: #DADCE0;
   --color-search-bg:     #F1F3F4;
   --header-height-md:    64px;          /* desktop header (md+: h-16) */
@@ -228,13 +228,13 @@
   --color-warning-text:   #FDD663;
   --color-danger-text:    #F28B82;
 
-  --color-sidebar-bg:           #242526;
+  --color-sidebar-bg:           #111111;
   --color-sidebar-border:       #3C3E41;
   --color-sidebar-active-bg:    #1C2B4A;
   --color-sidebar-active-text:  #8AB4F8;
   --color-sidebar-icon:         #9AA0A6;
 
-  --color-header-bg:     #242526;
+  --color-header-bg:     #111111;
   --color-header-border: #3C3E41;
   --color-search-bg:     #303134;
 
@@ -2039,3 +2039,12 @@
 /* Firefox */
 .content-scroll { scrollbar-width: auto; scrollbar-color: rgba(0,0,0,0.28) transparent; }
 .dark .content-scroll { scrollbar-color: rgba(255,255,255,0.25) transparent; }
+
+.uW2Fw-Sx9Kwc-OWXEXe-n2to0e .uW2Fw-k2Wrsb {
+  color: var(--NAW3rf, var(--gm3-sys-color-on-surface, #1f1f1f));
+  font-family: var(--Ux39Cb, 'Google Sans'), Roboto, sans-serif;
+  line-height: var(--f0mbYd, 2rem);
+  font-size: var(--uIsBm, 1.5rem);
+  letter-spacing: var(--H8HCPd, 0);
+  font-weight: var(--Bpk69, 400);
+}

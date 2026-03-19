@@ -6,6 +6,7 @@
 
 import { X, User, MapPin, BookOpen, AlertCircle, CheckCircle, Users } from 'lucide-react'
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import Avatar from '@/components/shared/Avatar'
 import type { TimetableSlotDetailed } from '@/types/timetable'
 
@@ -72,21 +73,21 @@ export function SlotDetailPanel({
     }
   }, [isOpen, onClose])
 
-  return (
+  const panelContent = (
     <>
       {isOpen && (
         <button
           type="button"
           aria-label="Close slot details"
           onClick={onClose}
-          className={isInline ? 'hidden' : 'fixed inset-0 z-[230] bg-[#00000052]'}
+          className={isInline ? 'hidden' : 'fixed top-0 left-0 w-screen h-screen z-[300] bg-[#00000052]'}
         />
       )}
 
       <div
         className={[
           isDialog
-            ? 'fixed z-[240] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[560px] h-[560px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] flex flex-col bg-[#d3dbe5] rounded-[28px] border border-[var(--color-border)] shadow-2xl overflow-y-auto'
+            ? 'fixed z-[310] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[560px] h-[560px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-2rem)] flex flex-col bg-[#d3dbe5] rounded-[28px] border border-[var(--color-border)] shadow-2xl overflow-hidden'
             : '',
           isDialog
             ? ''
@@ -97,8 +98,13 @@ export function SlotDetailPanel({
         ].join(' ')}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-[18px] py-4 [border-bottom:1px_solid_var(--color-border)]">
-          <p className="text-sm font-bold [color:var(--color-text-primary)]">Slot Details</p>
+        <div
+          className={[
+            'flex items-center justify-between px-[18px] [border-bottom:1px_solid_var(--color-border)]',
+            isDialog ? 'h-[80.8px] bg-[#c4c7c5] uW2Fw-Sx9Kwc-OWXEXe-n2to0e' : 'py-4 [background:var(--color-header-bg)]',
+          ].join(' ')}
+        >
+          <p className={isDialog ? 'uW2Fw-k2Wrsb' : 'text-sm font-bold [color:var(--color-text-primary)]'}>Slot Details</p>
           <button
             type="button"
             onClick={onClose}
@@ -112,7 +118,7 @@ export function SlotDetailPanel({
 
         {/* Body */}
         {slot && (
-          <div className="flex-1 overflow-y-auto px-[18px] py-5 flex flex-col gap-5">
+          <div className="flex-1 overflow-y-auto px-[18px] py-5 flex flex-col gap-5 bg-[#d3dbe5]">
 
           {/* Conflict banner */}
           {slot.has_conflict ? (
@@ -206,7 +212,7 @@ export function SlotDetailPanel({
             </InfoRow>
           )}
 
-          {onRequestSubstitution && (
+          {!isDialog && onRequestSubstitution && (
             <button
               type="button"
               onClick={() => {
@@ -220,7 +226,28 @@ export function SlotDetailPanel({
           )}
           </div>
         )}
+
+        {slot && isDialog && onRequestSubstitution && (
+          <div className="px-[18px] h-[80.8px] flex items-center [border-top:1px_solid_var(--color-border)] bg-[#c4c7c5]">
+            <button
+              type="button"
+              onClick={() => {
+                if (slot) onRequestSubstitution(slot)
+              }}
+              disabled={substitutionLoading}
+              className="btn-primary w-full h-9 text-xs disabled:opacity-50"
+            >
+              {substitutionLoading ? 'Finding Proxy…' : 'Find Proxy'}
+            </button>
+          </div>
+        )}
       </div>
     </>
   )
+
+  if (isDialog && typeof document !== 'undefined') {
+    return createPortal(panelContent, document.body)
+  }
+
+  return panelContent
 }
