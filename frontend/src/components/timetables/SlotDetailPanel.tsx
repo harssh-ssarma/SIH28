@@ -12,6 +12,8 @@ import type { TimetableSlotDetailed } from '@/types/timetable'
 interface SlotDetailPanelProps {
   slot: TimetableSlotDetailed | null
   onClose: () => void
+  onRequestSubstitution?: (slot: TimetableSlotDetailed) => void
+  substitutionLoading?: boolean
 }
 
 const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -41,7 +43,12 @@ function InfoRow({ icon, label, children }: { icon: React.ReactNode; label: stri
 
 
 
-export function SlotDetailPanel({ slot, onClose }: SlotDetailPanelProps) {
+export function SlotDetailPanel({
+  slot,
+  onClose,
+  onRequestSubstitution,
+  substitutionLoading = false,
+}: SlotDetailPanelProps) {
   const isOpen = slot !== null
 
   useEffect(() => {
@@ -187,6 +194,19 @@ export function SlotDetailPanel({ slot, onClose }: SlotDetailPanelProps) {
             <InfoRow icon={<Users size={15} />} label="Batch">
               {slot.batch_name}
             </InfoRow>
+          )}
+
+          {onRequestSubstitution && (
+            <button
+              type="button"
+              onClick={() => {
+                if (slot) onRequestSubstitution(slot)
+              }}
+              disabled={substitutionLoading}
+              className="btn-primary mt-1 w-full h-9 text-xs disabled:opacity-50"
+            >
+              {substitutionLoading ? 'Finding Proxy…' : 'Find Proxy'}
+            </button>
           )}
           </div>
         )}

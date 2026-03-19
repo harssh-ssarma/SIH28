@@ -18,7 +18,16 @@ import { VariantGrid } from '@/components/timetables/VariantGrid'
 import { SlotDetailPanel } from '@/components/timetables/SlotDetailPanel'
 import { TimetableGridFiltered } from '@/components/timetables/TimetableGridFiltered'
 import { fetchDepartmentNames } from '@/lib/api/timetable-variants'
-import type { VariantSummary, VariantScoreCard, TimetableSlotDetailed, DepartmentOption, BackendTimetableEntry } from '@/types/timetable'
+import { applySubstitution, requestSubstitutionRecommendations } from '@/lib/api/substitution'
+import type {
+  VariantSummary,
+  VariantScoreCard,
+  TimetableSlotDetailed,
+  DepartmentOption,
+  BackendTimetableEntry,
+  SubstitutionRecommendationResponse,
+  SubstitutionUrgency,
+} from '@/types/timetable'
 
 // Backend types matching Django models
 interface TimetableEntry {
@@ -238,6 +247,14 @@ export default function TimetableReviewPage() {
   const [resolvedStudentId, setResolvedStudentId] = useState<string | null>(null)
   // SlotDetailPanel state — open on cell click
   const [selectedSlot, setSelectedSlot] = useState<TimetableSlotDetailed | null>(null)
+  const [substitutionTargetSlot, setSubstitutionTargetSlot] = useState<TimetableSlotDetailed | null>(null)
+  const [showSubstitutionModal, setShowSubstitutionModal] = useState(false)
+  const [substitutionDate, setSubstitutionDate] = useState<string>(() => new Date().toISOString().slice(0, 10))
+  const [substitutionReason, setSubstitutionReason] = useState('')
+  const [substitutionUrgency, setSubstitutionUrgency] = useState<SubstitutionUrgency>('high')
+  const [substitutionLoading, setSubstitutionLoading] = useState(false)
+  const [substitutionApplyLoading, setSubstitutionApplyLoading] = useState(false)
+  const [substitutionResult, setSubstitutionResult] = useState<SubstitutionRecommendationResponse | null>(null)
 
   const handleSlotClick = useCallback((slot: TimetableSlotDetailed) => {
     setSelectedSlot((prev) => {
@@ -254,6 +271,84 @@ export default function TimetableReviewPage() {
       return slot
     })
   }, [])
+
+  const openSubstitutionModal = useCallback((slot: TimetableSlotDetailed) => {
+    if (!slot) {
+      showInfoToast('Select a timetable slot first')
+      return
+    }
+    setSubstitutionTargetSlot(slot)
+    setSubstitutionResult(null)
+    setShowSubstitutionModal(true)
+  }, [showInfoToast])
+
+  const requestSubstitution = useCallback(async () => {
+    const targetSlot = substitutionTargetSlot ?? selectedSlot
+    if (!targetSlot || !activeVariant) {
+      showInfoToast('Select a timetable slot first')
+      return
+    }
+    if (!targetSlot.faculty_id) {
+      showErrorToast('Selected slot has no faculty to substitute')
+      return
+    }
+
+    setSubstitutionLoading(true)
+    try {
+      const response = await requestSubstitutionRecommendations({
+        job_id: activeVariant.job_id,
+        variant_id: activeVariant.id,
+        schedule_date: substitutionDate,
+        day_index: targetSlot.day,
+        time_slot: targetSlot.time_slot,
+        faculty_id: targetSlot.faculty_id,
+        subject_code: targetSlot.subject_code,
+        subject_name: targetSlot.subject_name,
+        reason: substitutionReason,
+        urgency: substitutionUrgency,
+      })
+      setSubstitutionResult(response)
+      if (!response.recommendations.length) {
+        showInfoToast('No eligible proxy found for this slot')
+      }
+    } catch (error) {
+      console.error('Failed to fetch substitution recommendations', error)
+      showErrorToast('Unable to fetch proxy recommendations')
+    } finally {
+      setSubstitutionLoading(false)
+    }
+  }, [
+    selectedSlot,
+    substitutionTargetSlot,
+    activeVariant,
+    substitutionDate,
+    substitutionReason,
+    substitutionUrgency,
+    showInfoToast,
+    showErrorToast,
+  ])
+
+  const applyRecommendedSubstitution = useCallback(async (proposalId: string) => {
+    if (!substitutionResult?.request_id) {
+      showErrorToast('No substitution request found to apply')
+      return
+    }
+
+    setSubstitutionApplyLoading(true)
+    try {
+      const response = await applySubstitution(substitutionResult.request_id, { proposal_id: proposalId })
+      showSuccessToast(`Proxy applied: ${response.substitute_faculty.name}`)
+      setShowSubstitutionModal(false)
+      setSubstitutionResult(null)
+      setSubstitutionTargetSlot(null)
+      setSubstitutionReason('')
+    } catch (error) {
+      console.error('Failed to apply substitution', error)
+      showErrorToast('Failed to apply proxy assignment')
+    } finally {
+      setSubstitutionApplyLoading(false)
+    }
+  }, [substitutionResult?.request_id, showSuccessToast, showErrorToast])
   // Department display-name lookup (UUID → { name, code })
   const [deptNames, setDeptNames] = useState<Map<string, { name: string; code: string }>>(() => new Map())
 
@@ -1070,15 +1165,124 @@ export default function TimetableReviewPage() {
                 <SlotDetailPanel
                   slot={selectedSlot}
                   onClose={() => setSelectedSlot(null)}
+                  onRequestSubstitution={openSubstitutionModal}
+                  substitutionLoading={substitutionLoading || substitutionApplyLoading}
                 />
               </div>
             </div>
           </section>
         )}
 
+        {showSubstitutionModal && (
+          <div className="fixed inset-0 bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center z-50 px-4">
+            <div className="card rounded-2xl p-6 max-w-2xl w-full max-h-[85vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Quick Proxy Assignment</h3>
+                <button
+                  onClick={() => {
+                    setShowSubstitutionModal(false)
+                    setSubstitutionResult(null)
+                  }}
+                  className="btn-secondary text-xs"
+                >
+                  Close
+                </button>
+              </div>
+
+              {(substitutionTargetSlot ?? selectedSlot) && (
+                <div className="mb-4 text-xs text-[var(--color-text-secondary)] space-y-1">
+                  <p>
+                    Target: <span className="font-semibold text-[var(--color-text-primary)]">{(substitutionTargetSlot ?? selectedSlot)?.subject_code || (substitutionTargetSlot ?? selectedSlot)?.subject_name}</span>
+                    {' '}on day {((substitutionTargetSlot ?? selectedSlot)?.day ?? 0) + 1}, {(substitutionTargetSlot ?? selectedSlot)?.time_slot}
+                  </p>
+                  <p>
+                    Absent faculty: <span className="font-semibold text-[var(--color-text-primary)]">{(substitutionTargetSlot ?? selectedSlot)?.faculty_name || (substitutionTargetSlot ?? selectedSlot)?.faculty_id}</span>
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                <label className="flex flex-col gap-1 text-xs text-[var(--color-text-secondary)]">
+                  Date
+                  <input
+                    type="date"
+                    className="input-primary h-9"
+                    value={substitutionDate}
+                    onChange={(e) => setSubstitutionDate(e.target.value)}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-[var(--color-text-secondary)]">
+                  Urgency
+                  <select
+                    className="input-primary h-9"
+                    value={substitutionUrgency}
+                    onChange={(e) => setSubstitutionUrgency(e.target.value as SubstitutionUrgency)}
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                </label>
+                <div className="flex items-end">
+                  <button
+                    onClick={() => void requestSubstitution()}
+                    disabled={substitutionLoading || substitutionApplyLoading}
+                    className="btn-primary h-9 px-4 text-xs w-full disabled:opacity-50"
+                  >
+                    {substitutionLoading ? 'Finding…' : 'Get Proxy Options'}
+                  </button>
+                </div>
+              </div>
+
+              <label className="flex flex-col gap-1 text-xs text-[var(--color-text-secondary)] mb-4">
+                Reason (optional)
+                <textarea
+                  className="input-primary resize-none"
+                  rows={3}
+                  value={substitutionReason}
+                  onChange={(e) => setSubstitutionReason(e.target.value)}
+                  placeholder="e.g. Medical leave, urgent duty, conference"
+                />
+              </label>
+
+              {substitutionResult && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                    Top Proxy Recommendations
+                  </p>
+                  {substitutionResult.recommendations.length === 0 ? (
+                    <p className="text-sm text-[var(--color-text-secondary)]">No proxy candidates matched all hard constraints.</p>
+                  ) : (
+                    substitutionResult.recommendations.map((rec) => (
+                      <div key={rec.proposal_id} className="rounded-lg border border-[var(--color-border)] p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+                              {rec.faculty_name} <span className="text-xs text-[var(--color-text-muted)]">({rec.faculty_code})</span>
+                            </p>
+                            <p className="text-xs text-[var(--color-text-secondary)]">Score: {Math.round(rec.score)}</p>
+                          </div>
+                          <button
+                            onClick={() => void applyRecommendedSubstitution(rec.proposal_id)}
+                            disabled={substitutionApplyLoading}
+                            className="btn-success text-xs px-3 h-8 disabled:opacity-50"
+                          >
+                            {substitutionApplyLoading ? 'Applying…' : 'Apply Proxy'}
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── Approval Modal ── */}
         {showApprovalModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="fixed inset-0 bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center z-50 px-4">
             <div className="card rounded-2xl p-6 max-w-md w-full">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-[var(--color-success-subtle)]">
@@ -1108,7 +1312,7 @@ export default function TimetableReviewPage() {
 
         {/* ── Rejection Modal ── */}
         {showRejectionModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="fixed inset-0 bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center z-50 px-4">
             <div className="card rounded-2xl p-6 max-w-md w-full">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-[var(--color-danger-subtle)]">

@@ -65,6 +65,7 @@ from .timetable_viewsets import TimetableViewSet, TimetableSlotViewSet
 from .generation_views import GenerationJobViewSet
 from .workflow_views import TimetableWorkflowViewSet
 from .timetable_variant_views import TimetableVariantViewSet
+from .substitution_views import SubstitutionViewSet
 
 # ── Timetable display ─────────────────────────────────────────────────────────
 from .timetable_views import (
@@ -107,6 +108,7 @@ __all__ = [
     'TimetableViewSet', 'TimetableSlotViewSet',
     # Generation & workflow
     'GenerationJobViewSet', 'TimetableWorkflowViewSet', 'TimetableVariantViewSet',
+    'SubstitutionViewSet',
     # Timetable display
     'fastapi_callback', 'get_department_timetable', 'get_faculty_timetable', 'get_student_timetable',
     # Progress

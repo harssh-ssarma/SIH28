@@ -34,6 +34,7 @@ from .views import (
     GenerationJobViewSet,
     TimetableWorkflowViewSet,
     TimetableVariantViewSet,
+    SubstitutionViewSet,
     # Timetable display
     fastapi_callback,
     get_department_timetable,
@@ -74,6 +75,7 @@ router.register(r"timetable-slots", TimetableSlotViewSet)
 router.register(r"generation-jobs", GenerationJobViewSet, basename="generation-job")
 router.register(r"timetable/workflows", TimetableWorkflowViewSet, basename="workflow")
 router.register(r"timetable/variants", TimetableVariantViewSet, basename="variant")
+router.register(r"timetable/substitutions", SubstitutionViewSet, basename="substitution")
 router.register(r"timetable-configs", TimetableConfigurationViewSet, basename="timetable-config")
 router.register(r"conflicts", ConflictViewSet, basename="conflict")
 

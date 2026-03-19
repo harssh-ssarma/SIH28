@@ -26,6 +26,7 @@ interface VariantCardProps {
   jobStatus?: string
   isActive?: boolean
   isCompareSelected?: boolean
+  compareEnabled?: boolean
   onSelect?: (id: string, checked: boolean) => void
   onViewDetails?: (id: string) => void
   onCompare?: (id: string) => void
@@ -89,6 +90,7 @@ export function VariantCard({
   jobStatus = 'completed',
   isActive = false,
   isCompareSelected = false,
+  compareEnabled = false,
   onSelect,
   onViewDetails,
   onCompare,
@@ -132,8 +134,8 @@ export function VariantCard({
       ].join(' ')}
       onClick={() => onViewDetails?.(variant.id)}
     >
-      {/* Hover checkbox (multi-select) */}
-      {(hovered || isCompareSelected) && onSelect && (
+      {/* Multi-select checkbox: always visible to avoid accidental hover-triggered selection */}
+      {onSelect && (
         <button
           type="button"
           aria-label={isCompareSelected ? 'Deselect variant' : 'Select variant'}
@@ -207,8 +209,9 @@ export function VariantCard({
         </button>
         <button
           type="button"
-          className="btn-primary flex-1 text-xs h-8 rounded-full"
+          className="btn-primary flex-1 text-xs h-8 rounded-full disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={() => onCompare?.(variant.id)}
+          disabled={!compareEnabled}
         >
           <GitCompare size={13} className="mr-1 inline" />
           Compare
