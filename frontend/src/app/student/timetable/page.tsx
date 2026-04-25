@@ -99,16 +99,16 @@ export default function StudentTimetable() {
     try {
       setLoading(true)
       setError(null)
-      const res = await apiClient.get('/timetable/student/me/')
+      const res = await apiClient.request('/timetable/student/me/')
 
-      if (res.data.success) {
+      if (res.data && res.data.success) {
         setSchedule(res.data.slots || [])
         setStudent(res.data.student)
         try {
           sessionStorage.setItem(SCHEDULE_CACHE_KEY, JSON.stringify({ data: res.data.slots || [], ts: Date.now() }))
         } catch { /* quota exceeded */ }
       } else {
-        setError(res.data.message || 'Failed to load timetable')
+        setError(res.data?.message || 'Failed to load timetable')
       }
     } catch (error: any) {
       console.error('Failed to fetch schedule:', error)

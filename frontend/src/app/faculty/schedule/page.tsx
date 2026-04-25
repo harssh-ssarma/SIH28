@@ -27,8 +27,8 @@ export default function FacultySchedule() {
 
   const fetchSchedule = async () => {
     try {
-      const res = await apiClient.get('/timetable/faculty/me/')
-      if (res.data.success) {
+      const res = await apiClient.request('/timetable/faculty/me/')
+      if (res.data && res.data.success) {
         setSchedule(res.data.slots)
         setFaculty(res.data.faculty)
         try {

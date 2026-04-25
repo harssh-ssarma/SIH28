@@ -43,11 +43,13 @@ export default function StudentDashboard() {
 
   const loadStudentProfile = async () => {
     try {
-      const response = await apiClient.get('/student/profile/')
-      setStudentProfile(response.data)
-      try {
-        sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({ data: response.data, ts: Date.now() }))
-      } catch { /* quota exceeded */ }
+      const response = await apiClient.request('/student/profile/')
+      if (response.data) {
+        setStudentProfile(response.data)
+        try {
+          sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({ data: response.data, ts: Date.now() }))
+        } catch { /* quota exceeded */ }
+      }
     } catch (error) {
       console.error('Failed to load student profile:', error)
     }
