@@ -116,9 +116,26 @@ class ApiClient {
   }
 
   /**
-   * 🔐 Refresh JWT access token using refresh token from HttpOnly cookie
+   * Ensure CSRF token is available by making a GET request to a safe endpoint
+   * if the csrftoken cookie hasn't been set yet
    */
-  private async refreshToken(): Promise<boolean> {
+  private async ensureCsrfToken(): Promise<void> {
+    // Check if csrftoken cookie already exists
+    const hasCsrfToken = document.cookie
+      .split('; ')
+      .some(row => row.startsWith('csrftoken='))
+
+    if (!hasCsrfToken) {
+      // Make a GET request to trigger CSRF token generation
+      try {
+        await fetch(`${this.baseUrl}/auth/me/`, {
+          credentials: 'include',
+        })
+      } catch {
+        // Silently fail - CSRF token generation is best-effort
+      }
+    }
+  }
     try {
       const response = await fetch(`${this.baseUrl}/auth/refresh/`, {
         method: 'POST',
@@ -132,6 +149,8 @@ class ApiClient {
 
   // Authentication
   async login(credentials: LoginCredentials) {
+    // Ensure CSRF token is available before login
+    await this.ensureCsrfToken()
     return this.request<{ message: string; user: any }>('/auth/login/', {
       method: 'POST',
       body: JSON.stringify(credentials),
