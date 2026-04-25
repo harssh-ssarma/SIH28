@@ -20,6 +20,7 @@ interface VariantGridProps {
   jobStatus?: string
   loading?: boolean
   activeVariantId?: string | null
+  selectedVariantId?: string | null
   onViewDetails: (variantId: string) => void
   onCompare: (variantIds: [string, string]) => void
   onPickVariant?: (variantId: string) => void
@@ -79,6 +80,7 @@ export function VariantGrid({
   jobStatus = 'completed',
   loading = false,
   activeVariantId = null,
+  selectedVariantId = null,
   onViewDetails,
   onCompare,
   onPickVariant,
@@ -134,6 +136,7 @@ export function VariantGrid({
                     variant={variant}
                     jobStatus={jobStatus}
                     isActive={activeVariantId === variant.id}
+                    isApproved={selectedVariantId === variant.id && jobStatus === 'approved'}
                     isCompareSelected={selected.has(variant.id)}
                     onSelect={handleSelect}
                     onViewDetails={onViewDetails}

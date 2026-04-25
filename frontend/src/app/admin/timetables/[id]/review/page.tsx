@@ -226,12 +226,6 @@ export default function TimetableReviewPage() {
   const gridSectionRef = useRef<HTMLElement>(null)
   const [gridInView, setGridInView] = useState(false)
 
-  // Modals
-  const [showApprovalModal, setShowApprovalModal] = useState(false)
-  const [showRejectionModal, setShowRejectionModal] = useState(false)
-  const [approvalComments, setApprovalComments] = useState('')
-  const [rejectionReason, setRejectionReason] = useState('')
-
   // View state
   const [activeVariant, setActiveVariant] = useState<TimetableVariant | null>(null)
   const [activeDay, setActiveDay] = useState<number | 'all'>('all')
@@ -537,52 +531,37 @@ export default function TimetableReviewPage() {
     }
   }
 
-  const handleVariantSelect = async (variantId: string) => {
+  const handleVariantApprove = async (variantId: string) => {
     try {
       setActionLoading(true)
-      const response = await authenticatedFetch(
+      
+      // First select the variant
+      const selectResponse = await authenticatedFetch(
         `${API_BASE}/timetable/variants/${variantId}/select/`,
         { method: 'POST', credentials: 'include' }
       )
 
-      if (!response.ok) throw new Error('Failed to select variant')
+      if (!selectResponse.ok) throw new Error('Failed to select variant')
 
       setSelectedVariantId(variantId)
-      // ── Update local state only – no full reload needed ─────────────────
       setVariants(prev => prev.map(v => ({ ...v, is_selected: v.id === variantId })))
-      showSuccessToast('Variant selected successfully')
-    } catch (err) {
-      console.error('Failed to select variant:', err)
-      showErrorToast('Failed to select variant. Please try again.')
-    } finally {
-      setActionLoading(false)
-    }
-  }
 
-  const handleApprove = async () => {
-    if (!selectedVariantId) {
-      showInfoToast('Please select a variant first')
-      return
-    }
-
-    try {
-      setActionLoading(true)
-      const response = await authenticatedFetch(
+      // Then approve the workflow
+      const approveResponse = await authenticatedFetch(
         `${API_BASE}/timetable/workflows/${workflowId}/approve/`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ comments: approvalComments }),
+          body: JSON.stringify({ comments: '' }),
         }
       )
 
-      if (!response.ok) {
+      if (!approveResponse.ok) {
         throw new Error('Failed to approve timetable')
       }
 
       showSuccessToast('Timetable approved successfully!')
-      setShowApprovalModal(false)
       router.push('/admin/timetables')
     } catch (err) {
       console.error('Failed to approve:', err)
@@ -592,40 +571,7 @@ export default function TimetableReviewPage() {
     }
   }
 
-  const handleReject = async () => {
-    if (!rejectionReason.trim()) {
-      showInfoToast('Please provide a reason for rejection')
-      return
-    }
-
-    try {
-      setActionLoading(true)
-      const response = await authenticatedFetch(
-        `${API_BASE}/timetable/workflows/${workflowId}/reject/`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ comments: rejectionReason }),
-        }
-      )
-
-      if (!response.ok) {
-        throw new Error('Failed to reject timetable')
-      }
-
-      showInfoToast('Timetable rejected')
-      setShowRejectionModal(false)
-      router.push('/admin/timetables')
-    } catch (err) {
-      console.error('Failed to reject:', err)
-      showErrorToast('Failed to reject timetable. Please try again.')
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const baseScopedEntries = useMemo(() => {
+const baseScopedEntries = useMemo(() => {
     if (viewScope === 'student') return studentScopeEntries ?? []
     if (viewScope === 'faculty') return facultyScopeEntries ?? []
     if (viewScope === 'department') return departmentScopeEntries ?? (activeVariant?.timetable_entries ?? [])
@@ -840,23 +786,16 @@ export default function TimetableReviewPage() {
   )
 
   const departmentOptions = useMemo((): DepartmentOption[] => {
-    const seen = new Set<string>()
     const opts: DepartmentOption[] = []
-    ;(activeVariant?.timetable_entries ?? []).forEach(e => {
-      if (e.department_id && !seen.has(e.department_id)) {
-        seen.add(e.department_id)
-        const resolved = deptNames.get(e.department_id)
-        const name = resolved?.name ?? e.department_name ?? e.department_id
-        const code = resolved?.code ?? e.department_code ?? e.department_id
-        opts.push({
-          id:   e.department_id,
-          name,
-          code,
-        })
-      }
+    deptNames.forEach((value, id) => {
+      opts.push({
+        id,
+        name: value.name,
+        code: value.code,
+      })
     })
-    return opts
-  }, [activeVariant?.timetable_entries, deptNames])
+    return opts.sort((a, b) => a.name.localeCompare(b.name))
+  }, [deptNames])
 
   const effectiveDepartmentFilter = useMemo(
     () => (viewScope === 'department' ? departmentFilter : 'all'),
@@ -925,37 +864,10 @@ export default function TimetableReviewPage() {
         secondaryActions={
           <div className="flex flex-wrap items-center gap-2">
             <span className={statusInfo.badge}>{statusInfo.label}</span>
-            {workflow?.status === 'draft' && (
-              <>
-                <button
-                  onClick={() => setShowApprovalModal(true)}
-                  disabled={!selectedVariantId || actionLoading}
-                  className="btn-success flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <CheckCircle size={15} />
-                  Approve
-                </button>
-                <button
-                  onClick={() => setShowRejectionModal(true)}
-                  disabled={actionLoading}
-                  className="btn-danger flex items-center gap-1.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <XCircle size={15} />
-                  Reject
-                </button>
-              </>
-            )}
           </div>
         }
       />
-      {/* Subtitle: department · semester · year */}
-      {workflow && (
-        <p className="-mt-4 text-sm text-[var(--color-text-secondary)]">
-          {workflow.department_id && <span className="font-medium text-[var(--color-text-primary)]">{workflow.department_id}</span>}
-          {workflow.semester && <span> · Semester {workflow.semester}</span>}
-          {workflow.academic_year && <span> · {workflow.academic_year}</span>}
-        </p>
-      )}
+      
 
         {/* ── Variant Cards — powered by VariantGrid ── */}
         <section>
@@ -971,6 +883,7 @@ export default function TimetableReviewPage() {
             jobStatus={workflow?.status ?? 'draft'}
             loading={loadingMeta}
             activeVariantId={activeVariant?.id ?? null}
+            selectedVariantId={selectedVariantId}
             onViewDetails={(id) => {
               const v = variants.find(x => x.id === id)
               if (v) loadVariantEntries(v)
@@ -978,7 +891,7 @@ export default function TimetableReviewPage() {
             onCompare={(ids) =>
               router.push(`/admin/timetables/${workflowId}/compare?a=${ids[0]}&b=${ids[1]}`)
             }
-            onPickVariant={(id) => handleVariantSelect(id)}
+            onPickVariant={workflow?.status === 'approved' ? undefined : handleVariantApprove}
           />
         </section>
 
@@ -1023,30 +936,32 @@ export default function TimetableReviewPage() {
                   </select>
                 </label>
 
-                <div className="flex flex-wrap items-end gap-2">
-                  <label className="flex flex-col gap-1 text-xs text-[var(--color-text-secondary)]">
-                    Select Department
-                    <select
-                      value={departmentFilter === 'all' && departmentOptions.length > 0 ? departmentOptions[0].id : departmentFilter}
-                      onChange={(e) => {
-                        setViewScope('department')
-                        void applyDepartmentScope(e.target.value)
-                      }}
-                      className="input-primary h-9 w-[280px]"
-                      aria-label="Department dropdown"
-                      disabled={departmentOptions.length === 0}
-                    >
-                      {departmentOptions.map(d => (
-                        <option key={d.id} value={d.id}>{d.name} ({d.code})</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                {viewScope === 'department' && (
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="flex flex-col gap-1 text-xs text-[var(--color-text-secondary)]">
+                      Select Department
+                      <select
+                        value={departmentFilter}
+                        onChange={(e) => {
+                          setViewScope('department')
+                          void applyDepartmentScope(e.target.value)
+                        }}
+                        className="input-primary h-9 w-[280px]"
+                        aria-label="Department dropdown"
+                        disabled={departmentOptions.length === 0}
+                      >
+                        {departmentOptions.map(d => (
+                          <option key={d.id} value={d.id}>{d.name} ({d.code})</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
 
                 {viewScope === 'faculty' && (
                   <div className="flex flex-wrap items-end gap-2">
                     <label className="flex flex-col gap-1 text-xs text-[var(--color-text-secondary)]">
-                      Faculty (ID, Code, Username, or Email)
+                      Faculty ID
                       <input
                         value={facultyLookup}
                         onChange={(e) => setFacultyLookup(e.target.value)}
@@ -1057,7 +972,7 @@ export default function TimetableReviewPage() {
                           }
                         }}
                         className="input-primary h-9 w-[280px]"
-                        placeholder="e.g. FAC-001 or UUID"
+                        placeholder="e.g. bhuacc001 or username or email"
                         aria-label="Faculty lookup"
                       />
                     </label>
@@ -1083,14 +998,10 @@ export default function TimetableReviewPage() {
                   </div>
                 )}
 
-                {viewScope === 'faculty' && resolvedFacultyId && (
-                  <span className="badge badge-info">Resolved Faculty: {resolvedFacultyId}</span>
-                )}
-
                 {viewScope === 'student' && (
                   <div className="flex flex-wrap items-end gap-2">
                     <label className="flex flex-col gap-1 text-xs text-[var(--color-text-secondary)]">
-                      Student (ID, Enrollment No, Roll No, or Username)
+                      Student ID
                       <input
                         value={studentLookup}
                         onChange={(e) => setStudentLookup(e.target.value)}
@@ -1101,7 +1012,7 @@ export default function TimetableReviewPage() {
                           }
                         }}
                         className="input-primary h-9 w-[280px]"
-                        placeholder="e.g. BT23CSE001"
+                        placeholder="e.g. 21acc001 or enrollment no or username"
                         aria-label="Student lookup"
                       />
                     </label>
@@ -1125,10 +1036,6 @@ export default function TimetableReviewPage() {
                       Clear
                     </button>
                   </div>
-                )}
-
-                {viewScope === 'student' && resolvedStudentId && (
-                  <span className="badge badge-info">Resolved Student: {resolvedStudentId}</span>
                 )}
 
                 <button
@@ -1277,69 +1184,6 @@ export default function TimetableReviewPage() {
                   )}
                 </div>
               )}
-            </div>
-          </div>,
-          document.body,
-        )}
-
-        {/* ── Approval Modal ── */}
-        {showApprovalModal && typeof document !== 'undefined' && createPortal(
-          <div className="fixed top-0 left-0 w-screen h-screen bg-[#00000052] flex items-center justify-center z-[320] px-4">
-            <div className="bg-[#d3dbe5] rounded-[28px] border border-[var(--color-border)] shadow-2xl p-6 max-w-md w-full">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-[var(--color-success-subtle)]">
-                  <CheckCircle size={20} className="text-[var(--color-success-text)]" />
-                </div>
-                <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Approve Timetable</h3>
-              </div>
-              <p className="text-sm mb-4 text-[var(--color-text-secondary)]">
-                This will approve the selected variant and make it available for publishing.
-              </p>
-              <textarea
-                value={approvalComments}
-                onChange={e => setApprovalComments(e.target.value)}
-                placeholder="Optional comments for approvers…"
-                className="input-primary w-full mb-4 resize-none"
-                rows={3}
-              />
-              <div className="flex justify-end gap-3">
-                <button onClick={() => setShowApprovalModal(false)} disabled={actionLoading} className="btn-secondary text-sm">Cancel</button>
-                <button onClick={handleApprove} disabled={actionLoading} className="btn-success text-sm disabled:opacity-50">
-                  {actionLoading ? 'Approving…' : 'Approve'}
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
-
-        {/* ── Rejection Modal ── */}
-        {showRejectionModal && typeof document !== 'undefined' && createPortal(
-          <div className="fixed top-0 left-0 w-screen h-screen bg-[#00000052] flex items-center justify-center z-[320] px-4">
-            <div className="bg-[#d3dbe5] rounded-[28px] border border-[var(--color-border)] shadow-2xl p-6 max-w-md w-full">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-[var(--color-danger-subtle)]">
-                  <XCircle size={20} className="text-[var(--color-danger-text)]" />
-                </div>
-                <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Reject Timetable</h3>
-              </div>
-              <p className="text-sm mb-4 text-[var(--color-text-secondary)]">
-                Please provide a reason so the scheduling team can make improvements.
-              </p>
-              <textarea
-                value={rejectionReason}
-                onChange={e => setRejectionReason(e.target.value)}
-                placeholder="Reason for rejection (required)…"
-                className="input-primary w-full mb-4 resize-none"
-                rows={4}
-                required
-              />
-              <div className="flex justify-end gap-3">
-                <button onClick={() => setShowRejectionModal(false)} disabled={actionLoading} className="btn-secondary text-sm">Cancel</button>
-                <button onClick={handleReject} disabled={actionLoading || !rejectionReason.trim()} className="btn-danger text-sm disabled:opacity-50">
-                  {actionLoading ? 'Rejecting…' : 'Reject'}
-                </button>
-              </div>
             </div>
           </div>,
           document.body,

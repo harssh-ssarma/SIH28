@@ -46,7 +46,7 @@ class Migration(migrations.Migration):
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('job', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='substitution_requests', to='academics.generationjob')),
-                ('offering', models.ForeignKey(blank=True, db_column='offering_id', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='substitution_requests', to='academics.courseoffering')),
+                ('offering', models.ForeignKey(blank=True, db_column='offering_id', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='substitution_requests', to='academics.CourseOffering')),
                 ('organization', models.ForeignKey(db_column='org_id', on_delete=django.db.models.deletion.CASCADE, related_name='substitution_requests', to='academics.organization')),
                 ('original_faculty', models.ForeignKey(db_column='original_faculty_id', on_delete=django.db.models.deletion.CASCADE, related_name='original_substitution_requests', to='academics.faculty')),
                 ('requested_by', models.ForeignKey(blank=True, db_column='requested_by', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='substitution_requests_created', to=settings.AUTH_USER_MODEL)),

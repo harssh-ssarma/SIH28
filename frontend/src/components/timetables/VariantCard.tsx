@@ -25,6 +25,7 @@ interface VariantCardProps {
   variant: VariantSummary
   jobStatus?: string
   isActive?: boolean
+  isApproved?: boolean
   isCompareSelected?: boolean
   onSelect?: (id: string, checked: boolean) => void
   onViewDetails?: (id: string) => void
@@ -88,6 +89,7 @@ export function VariantCard({
   variant,
   jobStatus = 'completed',
   isActive = false,
+  isApproved = false,
   isCompareSelected = false,
   onSelect,
   onViewDetails,
@@ -205,14 +207,26 @@ export function VariantCard({
           <Eye size={13} className="mr-1 inline" />
           View
         </button>
-        <button
-          type="button"
-          className="btn-primary flex-1 text-xs h-8 rounded-full disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={() => onPickVariant?.(variant.id)}
-          disabled={!onPickVariant}
-        >
-          Select
-        </button>
+        {isApproved ? (
+          <div className="flex-1 flex items-center justify-center text-xs h-8 rounded-full bg-[var(--color-success-subtle)] text-[var(--color-success-text)] font-semibold">
+            <CheckCircle size={13} className="mr-1" />
+            Approved
+          </div>
+        ) : jobStatus === 'approved' ? (
+          <div className="flex-1 flex items-center justify-center text-xs h-8 rounded-full bg-[var(--color-bg-surface-2)] text-[var(--color-text-muted)] font-medium">
+            View Only
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="btn-success flex-1 text-xs h-8 rounded-full disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => onPickVariant?.(variant.id)}
+            disabled={!onPickVariant}
+          >
+            <CheckCircle size={13} className="mr-1 inline" />
+            Approve
+          </button>
+        )}
       </div>
     </div>
   )
