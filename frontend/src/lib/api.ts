@@ -136,6 +136,11 @@ class ApiClient {
       }
     }
   }
+
+  /**
+   * 🔐 Refresh JWT access token using refresh token from HttpOnly cookie
+   */
+  private async refreshToken(): Promise<boolean> {
     try {
       const response = await fetch(`${this.baseUrl}/auth/refresh/`, {
         method: 'POST',
