@@ -33,11 +33,25 @@ class ApiClient {
   }
 
   private getHeaders(): HeadersInit {
-    return {
+    const headers: HeadersInit = {
       'Content-Type': 'application/json',
       // 🔐 NO Authorization header - JWT tokens in secure HttpOnly cookies
       // Backend reads from cookies automatically (Google-like security)
-    };
+    }
+
+    // 🔐 CSRF protection: read CSRF token from csrftoken cookie and add to X-CSRFToken header
+    if (typeof document !== 'undefined') {
+      const csrfToken = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('csrftoken='))
+        ?.split('=')[1]
+
+      if (csrfToken) {
+        headers['X-CSRFToken'] = decodeURIComponent(csrfToken)
+      }
+    }
+
+    return headers
   }
 
   /**
