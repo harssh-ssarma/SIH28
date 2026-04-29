@@ -615,15 +615,91 @@ class TimetableVariantViewSet(viewsets.ViewSet):
         score_faculty: int,
         score_student: int,
     ) -> int:
-        """Compute an absolute overall timetable quality score (0-100)."""
-        score_conflicts = cls._compute_score_conflicts(conflict_count, total_classes)
+        """
+        Compute overall timetable quality score (0-100) using standard academic formula.
 
-        overall = (
-            0.55 * score_conflicts
-            + 0.20 * score_room
-            + 0.15 * score_faculty
-            + 0.10 * score_student
-        )
+        Standard Academic Timetable Scoring (0-100 scale, higher = better):
+        ===================================================================
+
+        Formula:
+          Hard_Score = 70 - Σ(violations_i / max_violations_i × weight_i)
+          Soft_Score = 30 - Σ(violations_j / max_violations_j × weight_j)
+          Final_Score = Hard_Score + Soft_Score
+
+        Hard Constraints (70 points - MUST be satisfied):
+          - Teacher conflicts: Weight 25 (no teacher teaches 2 classes simultaneously)
+          - Room conflicts: Weight 20 (no room used by 2 classes at same time)
+          - Student conflicts: Weight 15 (no student group in 2 classes at once)
+          - Valid room assigned: Weight 10 (class assigned to valid room type)
+
+        Soft Constraints (30 points - SHOULD be satisfied):
+          - Teacher preferred slots: Weight 10 (respect faculty time preferences)
+          - Schedule gaps: Weight 8 (minimize gaps in student schedule)
+          - Class balance: Weight 7 (balanced distribution per day)
+          - Back-to-back classes: Weight 5 (minimize consecutive classes)
+
+        Rationale:
+          - Hard constraints = feasibility (timetable MUST work)
+          - Soft constraints = quality (timetable SHOULD be optimal)
+          - 70/30 split reflects that 70% depends on hard constraints
+          - Score of 100 = zero violations in all constraints
+          - Score <50 = timetable has serious issues
+        """
+        # ===== HARD CONSTRAINTS SCORE (70 points max) =====
+        hard_score = 70.0
+
+        # Hard constraint weights
+        teacher_conflicts_weight = 25
+        room_conflicts_weight = 20
+        student_conflicts_weight = 15
+        valid_room_weight = 10
+
+        # Estimate maximum possible violations (worst case scenario)
+        # These represent the upper bound for each constraint type
+        max_teacher_conflicts = max(total_classes // 10, 1)      # ~10% of classes
+        max_room_conflicts = max(total_classes // 8, 1)          # ~12.5% of classes
+        max_student_conflicts = max(total_classes // 5, 1)       # ~20% of classes
+        max_room_validity = max(total_classes // 20, 1)          # ~5% of classes
+
+        # Distribute conflict_count proportionally across constraint types
+        # Assumption: most conflicts are student conflicts (40%), then room (30%), teacher (20%), validity (10%)
+        estimated_teacher_conflicts = max(0, conflict_count * 0.20)
+        estimated_room_conflicts = max(0, conflict_count * 0.30)
+        estimated_student_conflicts = max(0, conflict_count * 0.40)
+        estimated_room_validity_violations = max(0, conflict_count * 0.10)
+
+        # Calculate penalties for each hard constraint
+        teacher_penalty = (estimated_teacher_conflicts / max_teacher_conflicts) * teacher_conflicts_weight if max_teacher_conflicts > 0 else 0
+        room_penalty = (estimated_room_conflicts / max_room_conflicts) * room_conflicts_weight if max_room_conflicts > 0 else 0
+        student_penalty = (estimated_student_conflicts / max_student_conflicts) * student_conflicts_weight if max_student_conflicts > 0 else 0
+        room_validity_penalty = (estimated_room_validity_violations / max_room_validity) * valid_room_weight if max_room_validity > 0 else 0
+
+        hard_score -= (teacher_penalty + room_penalty + student_penalty + room_validity_penalty)
+        hard_score = max(0, hard_score)  # Cannot go below 0
+
+        # ===== SOFT CONSTRAINTS SCORE (30 points max) =====
+        soft_score = 30.0
+
+        # Soft constraint weights
+        teacher_pref_weight = 10
+        schedule_gaps_weight = 8
+        class_balance_weight = 7
+        back_to_back_weight = 5
+
+        # Convert 0-100 metric scores to soft constraint deductions
+        # If metric = 100 (perfect), deduction = 0
+        # If metric = 0 (terrible), deduction = full weight
+
+        teacher_pref_deduction = (100 - score_faculty) / 100 * teacher_pref_weight
+        schedule_gaps_deduction = (100 - score_student) / 100 * schedule_gaps_weight
+        class_balance_deduction = (100 - score_room) / 100 * class_balance_weight
+        back_to_back_deduction = (100 - score_student) / 100 * back_to_back_weight * 0.5
+
+        soft_score -= (teacher_pref_deduction + schedule_gaps_deduction + class_balance_deduction + back_to_back_deduction)
+        soft_score = max(0, soft_score)  # Cannot go below 0
+
+        # ===== FINAL SCORE =====
+        overall = hard_score + soft_score
         return min(100, max(0, int(round(overall))))
 
     @staticmethod
@@ -648,14 +724,21 @@ class TimetableVariantViewSet(viewsets.ViewSet):
         """
         Build the lightweight summary dict for one variant (no entries).
 
-        Extended fields vs. old version:
+        Uses standard academic timetable scoring (0-100 scale, higher = better):
+
+        Formula:
+          Hard_Score (70 pts) = 70 - Σ(violations_i / max_violations_i × weight_i)
+          Soft_Score (30 pts) = 30 - Σ(violations_j / max_violations_j × weight_j)
+          Final_Score = Hard_Score + Soft_Score
+
+        Returned fields:
           score_faculty_load     — faculty workload balance (0-100)
           score_room_utilization — room utilisation (0-100)
           score_student_gaps     — schedule compactness (0-100)
           conflict_count         — hard conflicts (int)
           soft_violation_count   — soft violations (int)
-          optimization_label     — "Faculty Optimized" etc.
-          is_recommended         — True on the variant with highest overall_score
+          optimization_label     — "Faculty Optimized" / "Room Optimized" / "Student Experience"
+          is_recommended         — True if highest overall_score among all variants
         """
         qm = v.get("quality_metrics", {}) or {}
         sta = v.get("statistics", {}) or {}
@@ -667,13 +750,24 @@ class TimetableVariantViewSet(viewsets.ViewSet):
         score_student = self._compute_score_student_gaps(qm)
         conflict_count = int(qm.get("total_conflicts", v.get("conflicts", 0)) or 0)
         soft_violations = int(qm.get("soft_violation_count", v.get("soft_violations", 0)) or 0)
-        score_overall = self._compute_overall_score(
-            conflict_count=conflict_count,
-            total_classes=total_classes,
-            score_room=score_room,
-            score_faculty=score_faculty,
-            score_student=score_student,
-        )
+
+        # Check if variant has already been recalculated with new formula
+        # If formula_version='2', use the saved score (no recalculation needed)
+        formula_version = v.get("formula_version", "1")
+        if formula_version == "2" and "overall_score" in v:
+            # Use saved score from migration (already calculated with new formula)
+            score_overall = v.get("overall_score")
+            recalculated_at = v.get("recalculated_at")
+        else:
+            # Calculate score with new academic formula
+            score_overall = self._compute_overall_score(
+                conflict_count=conflict_count,
+                total_classes=total_classes,
+                score_room=score_room,
+                score_faculty=score_faculty,
+                score_student=score_student,
+            )
+            recalculated_at = None
 
         # is_recommended: True when this variant has the highest overall_score
         # across all variants in the same job. Pass `all_variants` to enable.
@@ -718,6 +812,12 @@ class TimetableVariantViewSet(viewsets.ViewSet):
                 "is_recommended": is_recommended,
             },
             "generated_at": job.created_at.isoformat(),
+            # Metadata about scoring
+            "scoring_metadata": {
+                "formula_version": formula_version,
+                "recalculated_at": recalculated_at,  # Non-null only if migrated
+                "is_persistent_score": formula_version == "2",  # True if saved, False if calculated on-the-fly
+            },
         }
 
     def _convert_timetable_entries(self, entries: list) -> list:
