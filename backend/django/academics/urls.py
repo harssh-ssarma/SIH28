@@ -16,6 +16,8 @@ from .views import (
     dashboard_stats,
     faculty_profile_and_courses,
     student_profile_and_courses,
+    # Logs
+    get_audit_logs,
     # Core ViewSets
     UserViewSet,
     SchoolViewSet,
@@ -116,6 +118,8 @@ urlpatterns = [
     path("auth/sessions/<str:jti>/", revoke_session_view, name="session-revoke"),
     # Dashboard stats
     path("dashboard/stats/", dashboard_stats, name="dashboard-stats"),
+    # Logs
+    path("logs/audit/", get_audit_logs, name="audit-logs"),
     # PERFORMANCE: Ultra-fast endpoints
     path("fast/jobs/", fast_generation_jobs, name="fast-jobs"),
     path("fast/faculty/", fast_faculty, name="fast-faculty"),

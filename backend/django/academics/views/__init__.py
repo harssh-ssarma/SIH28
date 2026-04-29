@@ -46,6 +46,9 @@ from .dashboard_views import (
     student_profile_and_courses,
     faculty_profile_and_courses,
 )
+from .logs_views import (
+    get_audit_logs,
+)
 
 # ── Core ViewSets ─────────────────────────────────────────────────────────────
 from .user_viewset import UserViewSet
@@ -100,7 +103,7 @@ __all__ = [
     'password_reset_request_view', 'password_reset_confirm_view', 'password_change_view',
     'list_sessions_view', 'revoke_session_view',
     # Dashboard
-    'dashboard_stats', 'student_profile_and_courses', 'faculty_profile_and_courses',
+    'dashboard_stats', 'student_profile_and_courses', 'faculty_profile_and_courses', 'get_audit_logs',
     # ViewSets
     'UserViewSet', 'SchoolViewSet', 'DepartmentViewSet', 'ProgramViewSet', 'BatchViewSet',
     'CourseViewSet', 'SubjectViewSet', 'FacultyViewSet', 'StudentViewSet',
