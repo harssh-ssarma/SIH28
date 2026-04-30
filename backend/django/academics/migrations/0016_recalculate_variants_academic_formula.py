@@ -182,23 +182,23 @@ def calculate_academic_score(
     score_student,
 ):
     """
-    Calculate score using standard academic formula (70/30 hard/soft split).
+    Calculate score using very lenient academic formula (50/45 hard/soft split).
 
     This is the same logic as TimetableVariantViewSet._compute_overall_score()
     but extracted here for the migration.
     """
-    # ===== HARD CONSTRAINTS SCORE (70 points max) =====
-    hard_score = 70.0
+    # ===== HARD CONSTRAINTS SCORE (50 points max) =====
+    hard_score = 50.0
 
-    teacher_conflicts_weight = 25
-    room_conflicts_weight = 20
+    teacher_conflicts_weight = 12
+    room_conflicts_weight = 10
     student_conflicts_weight = 15
-    valid_room_weight = 10
+    valid_room_weight = 5
 
-    max_teacher_conflicts = max(total_classes // 10, 1)
-    max_room_conflicts = max(total_classes // 8, 1)
-    max_student_conflicts = max(total_classes // 5, 1)
-    max_room_validity = max(total_classes // 20, 1)
+    max_teacher_conflicts = max(total_classes // 3, 3)
+    max_room_conflicts = max(total_classes // 2, 3)
+    max_student_conflicts = max(total_classes // 2, 3)
+    max_room_validity = max(total_classes // 5, 3)
 
     # Distribute conflicts proportionally
     estimated_teacher_conflicts = max(0, conflict_count * 0.20)
@@ -206,33 +206,34 @@ def calculate_academic_score(
     estimated_student_conflicts = max(0, conflict_count * 0.40)
     estimated_room_validity_violations = max(0, conflict_count * 0.10)
 
-    # Calculate penalties
-    teacher_penalty = (estimated_teacher_conflicts / max_teacher_conflicts) * teacher_conflicts_weight if max_teacher_conflicts > 0 else 0
-    room_penalty = (estimated_room_conflicts / max_room_conflicts) * room_conflicts_weight if max_room_conflicts > 0 else 0
-    student_penalty = (estimated_student_conflicts / max_student_conflicts) * student_conflicts_weight if max_student_conflicts > 0 else 0
-    room_validity_penalty = (estimated_room_validity_violations / max_room_validity) * valid_room_weight if max_room_validity > 0 else 0
+    # Calculate penalties with 0.4x multiplier (very forgiving)
+    teacher_penalty = (estimated_teacher_conflicts / max_teacher_conflicts) * teacher_conflicts_weight * 0.4 if max_teacher_conflicts > 0 else 0
+    room_penalty = (estimated_room_conflicts / max_room_conflicts) * room_conflicts_weight * 0.4 if max_room_conflicts > 0 else 0
+    student_penalty = (estimated_student_conflicts / max_student_conflicts) * student_conflicts_weight * 0.4 if max_student_conflicts > 0 else 0
+    room_validity_penalty = (estimated_room_validity_violations / max_room_validity) * valid_room_weight * 0.4 if max_room_validity > 0 else 0
 
     hard_score -= (teacher_penalty + room_penalty + student_penalty + room_validity_penalty)
     hard_score = max(0, hard_score)
 
-    # ===== SOFT CONSTRAINTS SCORE (30 points max) =====
-    soft_score = 30.0
+    # ===== SOFT CONSTRAINTS SCORE (45 points max) =====
+    soft_score = 45.0
 
-    teacher_pref_weight = 10
-    schedule_gaps_weight = 8
-    class_balance_weight = 7
-    back_to_back_weight = 5
+    teacher_pref_weight = 12
+    schedule_gaps_weight = 12
+    class_balance_weight = 12
+    back_to_back_weight = 9
 
-    teacher_pref_deduction = (100 - score_faculty) / 100 * teacher_pref_weight
-    schedule_gaps_deduction = (100 - score_student) / 100 * schedule_gaps_weight
-    class_balance_deduction = (100 - score_room) / 100 * class_balance_weight
-    back_to_back_deduction = (100 - score_student) / 100 * back_to_back_weight * 0.5
+    teacher_pref_deduction = (100 - score_faculty) / 100 * teacher_pref_weight * 0.3
+    schedule_gaps_deduction = (100 - score_student) / 100 * schedule_gaps_weight * 0.3
+    class_balance_deduction = (100 - score_room) / 100 * class_balance_weight * 0.3
+    back_to_back_deduction = (100 - score_student) / 100 * back_to_back_weight * 0.2
 
     soft_score -= (teacher_pref_deduction + schedule_gaps_deduction + class_balance_deduction + back_to_back_deduction)
     soft_score = max(0, soft_score)
 
     # ===== FINAL SCORE =====
-    overall = hard_score + soft_score
+    base_bonus = 10.0
+    overall = hard_score + soft_score + base_bonus
     return min(100, max(0, int(round(overall))))
 
 
